@@ -1,0 +1,9 @@
+{
+  "devices.title": "Apparaten",
+  "devices.new_device": "Nieuw apparaat",
+  "devices.search_placeholder": "Apparaten zoeken...",
+  "devices.no_devices": "Nog geen apparaten geconfigureerd",
+  "devices.get_started": "Maak uw eerste ESPHome-apparaat aan om te beginnen.",
+  "devices.create_device": "Apparaat aanmaken",
+  "devices.discovered": "Gevonden apparaten"
+}

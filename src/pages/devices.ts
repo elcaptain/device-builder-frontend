@@ -7,37 +7,39 @@
  * - Importable device cards with adopt action
  * - Empty state with call to action
  */
-import { LitElement, html, css, nothing } from "lit";
-import { customElement, state } from "lit/decorators.js";
 import { consume } from "@lit/context";
 import {
+  mdiArrowUp,
+  mdiChip,
+  mdiCodeBraces,
+  mdiDownload,
+  mdiMagnify,
+  mdiPlus,
+  mdiTextBoxOutline,
+  mdiUpload,
+  mdiWifi,
+  mdiWifiOff,
+} from "@mdi/js";
+import { css, html, LitElement, nothing } from "lit";
+import { customElement, state } from "lit/decorators.js";
+import type { ESPHomeAPI } from "../api/index.js";
+import type { AdoptableDevice, ConfiguredDevice } from "../api/types.js";
+import type { LocalizeFunc } from "../common/localize.js";
+import {
+  apiContext,
   devicesContext,
   deviceStatesContext,
   importableDevicesContext,
-  apiContext,
+  localizeContext,
 } from "../context/index.js";
-import type { ConfiguredDevice, AdoptableDevice } from "../api/types.js";
-import type { ESPHomeAPI } from "../api/index.js";
 import { espHomeStyles, layoutStyles } from "../styles/shared.js";
 import { registerMdiIcons } from "../util/register-icons.js";
-import {
-  mdiMagnify,
-  mdiPlus,
-  mdiChip,
-  mdiWifi,
-  mdiWifiOff,
-  mdiCodeBraces,
-  mdiUpload,
-  mdiTextBoxOutline,
-  mdiArrowUp,
-  mdiDownload,
-} from "@mdi/js";
 
+import "@home-assistant/webawesome/dist/components/badge/badge.js";
 import "@home-assistant/webawesome/dist/components/button/button.js";
 import "@home-assistant/webawesome/dist/components/card/card.js";
-import "@home-assistant/webawesome/dist/components/badge/badge.js";
-import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "@home-assistant/webawesome/dist/components/divider/divider.js";
+import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "@home-assistant/webawesome/dist/components/input/input.js";
 import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
 
@@ -71,6 +73,10 @@ export class ESPHomePageDevices extends LitElement {
   @consume({ context: apiContext })
   @state()
   private _api!: ESPHomeAPI;
+
+  @consume({ context: localizeContext, subscribe: true })
+  @state()
+  private _localize: LocalizeFunc = (key) => key;
 
   @state()
   private _searchQuery = "";
@@ -307,7 +313,7 @@ export class ESPHomePageDevices extends LitElement {
       <div class="page-content">
         <div class="page-header">
           <h1>
-            Devices
+            ${this._localize("devices.title")}
             ${this._devices.length > 0
               ? html`<span class="device-count">(${this._devices.length})</span>`
               : nothing}
@@ -317,7 +323,7 @@ export class ESPHomePageDevices extends LitElement {
               ? html`
                   <wa-input
                     class="search-bar"
-                    placeholder="Search devices..."
+                    placeholder=${this._localize("devices.search_placeholder")}
                     size="small"
                     .value=${this._searchQuery}
                     @wa-input=${this._handleSearchInput}
@@ -328,7 +334,7 @@ export class ESPHomePageDevices extends LitElement {
               : nothing}
             <wa-button href="/wizard" variant="brand" size="small">
               <wa-icon slot="start" library="mdi" name="plus"></wa-icon>
-              New Device
+              ${this._localize("devices.new_device")}
             </wa-button>
           </div>
         </div>
@@ -347,7 +353,7 @@ export class ESPHomePageDevices extends LitElement {
         ${filteredImportable.length > 0
           ? html`
               <div class="section-header">
-                <h2 class="section-title">Discovered Devices</h2>
+                <h2 class="section-title">${this._localize("devices.discovered")}</h2>
                 <span class="section-count">(${filteredImportable.length})</span>
               </div>
               <div class="card-grid">
@@ -363,11 +369,11 @@ export class ESPHomePageDevices extends LitElement {
     return html`
       <div class="empty-state">
         <wa-icon library="mdi" name="chip"></wa-icon>
-        <h2>No devices configured yet</h2>
-        <p>Create your first ESPHome device to get started.</p>
+        <h2>${this._localize("devices.no_devices")}</h2>
+        <p>${this._localize("devices.get_started")}</p>
         <wa-button href="/wizard" variant="brand">
           <wa-icon slot="start" library="mdi" name="plus" size=""></wa-icon>
-          Create Device
+          ${this._localize("devices.create_device")}
         </wa-button>
       </div>
     `;

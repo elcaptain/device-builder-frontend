@@ -7,6 +7,7 @@
 import { createContext } from "@lit/context";
 import { ESPHomeAPI } from "../api/index.js";
 import type { ConfiguredDevice, AdoptableDevice } from "../api/types.js";
+import type { LocalizeFunc } from "../common/localize.js";
 
 /** Context for the ESPHome API client instance. */
 export const apiContext = createContext<ESPHomeAPI>(Symbol("esphome-api"));
@@ -31,3 +32,8 @@ export const versionContext = createContext<string>(Symbol("esphome-version"));
 
 /** Context for dark mode state. */
 export const darkModeContext = createContext<boolean>(Symbol("esphome-dark-mode"));
+
+/** Context for the localize function. */
+export const localizeContext = createContext<LocalizeFunc>(
+  Symbol("esphome-localize")
+);

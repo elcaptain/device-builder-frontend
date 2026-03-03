@@ -5,4 +5,5 @@ export {
   importableDevicesContext,
   versionContext,
   darkModeContext,
+  localizeContext,
 } from "./contexts.js";

@@ -1,0 +1,9 @@
+{
+  "devices.title": "Devices",
+  "devices.new_device": "New Device",
+  "devices.search_placeholder": "Search devices...",
+  "devices.no_devices": "No devices configured yet",
+  "devices.get_started": "Create your first ESPHome device to get started.",
+  "devices.create_device": "Create Device",
+  "devices.discovered": "Discovered Devices"
+}

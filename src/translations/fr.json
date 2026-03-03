@@ -1,0 +1,9 @@
+{
+  "devices.title": "Appareils",
+  "devices.new_device": "Nouvel appareil",
+  "devices.search_placeholder": "Rechercher des appareils...",
+  "devices.no_devices": "Aucun appareil configuré",
+  "devices.get_started": "Créez votre premier appareil ESPHome pour commencer.",
+  "devices.create_device": "Créer un appareil",
+  "devices.discovered": "Appareils détectés"
+}
