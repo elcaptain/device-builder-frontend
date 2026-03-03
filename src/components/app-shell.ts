@@ -22,7 +22,7 @@ import {
   darkModeContext,
   localizeContext,
 } from "../context/index.js";
-import { loadLocalize, type LocalizeFunc } from "../common/localize.js";
+import { defaultLocalize, loadLocalize, type LocalizeFunc } from "../common/localize.js";
 import { espHomeStyles } from "../styles/shared.js";
 
 // Import child components
@@ -60,7 +60,7 @@ export class ESPHomeApp extends LitElement {
 
   @provide({ context: localizeContext })
   @state()
-  private _localize: LocalizeFunc = (key) => key;
+  private _localize: LocalizeFunc = defaultLocalize;
 
   // ─── Router ──────────────────────────────────────────────
 

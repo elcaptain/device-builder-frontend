@@ -1,11 +1,12 @@
 /**
  * Localization helpers.
  *
- * - Detects the browser language and loads the matching translation file.
- * - Falls back to English when the language is not supported.
- * - Returns a LocalizeFunc that resolves a dot-separated key to a translated
- *   string, with optional {placeholder} interpolation.
+ * - Provides a synchronous `defaultLocalize` built from English so the UI
+ *   never shows raw keys on first paint.
+ * - `loadLocalize()` detects the browser language, loads the matching JSON,
+ *   and overlays it on top of the English base (per-key English fallback).
  */
+import enMessages from "../translations/en.json";
 
 export type LocalizeFunc = (
   key: string,
@@ -22,8 +23,8 @@ function detectLocale(): SupportedLocale {
     : "en";
 }
 
-async function loadMessages(
-  locale: SupportedLocale
+async function loadLocaleMessages(
+  locale: Exclude<SupportedLocale, "en">
 ): Promise<Record<string, string>> {
   switch (locale) {
     case "fr":
@@ -33,11 +34,6 @@ async function loadMessages(
       >;
     case "nl":
       return (await import("../translations/nl.json")).default as Record<
-        string,
-        string
-      >;
-    default:
-      return (await import("../translations/en.json")).default as Record<
         string,
         string
       >;
@@ -55,12 +51,26 @@ function interpolate(
   );
 }
 
+function buildLocalize(messages: Record<string, string>): LocalizeFunc {
+  return (key, values) => interpolate(messages[key] ?? key, values);
+}
+
+/** Synchronous English fallback — safe to use as an initial context value. */
+export const defaultLocalize: LocalizeFunc = buildLocalize(
+  enMessages as Record<string, string>
+);
+
+/**
+ * Loads the browser locale (with per-key English fallback) asynchronously.
+ * Replace the context value with the result once resolved.
+ */
 export async function loadLocalize(): Promise<LocalizeFunc> {
   const locale = detectLocale();
-  const messages = await loadMessages(locale);
+  if (locale === "en") return defaultLocalize;
 
-  return (key: string, values?: Record<string, string | number>): string => {
-    const template = messages[key] ?? key;
-    return interpolate(template, values);
-  };
+  const localeMessages = await loadLocaleMessages(locale);
+  return buildLocalize({
+    ...(enMessages as Record<string, string>),
+    ...localeMessages,
+  });
 }
