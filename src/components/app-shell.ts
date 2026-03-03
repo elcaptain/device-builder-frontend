@@ -157,7 +157,12 @@ export class ESPHomeApp extends LitElement {
 
   private async _init() {
     this._initDarkMode();
-    this._localize = await loadLocalize();
+    try {
+      this._localize = await loadLocalize();
+    } catch (err) {
+      console.error("Failed to load localization, falling back to default:", err);
+      this._localize = ((key: string, ..._args: unknown[]) => key) as LocalizeFunc;
+    }
     // Fetch version
     try {
       const { version } = await this._api.getVersion();
