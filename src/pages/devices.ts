@@ -332,7 +332,7 @@ export class ESPHomePageDevices extends LitElement {
                   </wa-input>
                 `
               : nothing}
-            <wa-button href="/wizard" variant="brand" size="small">
+            <wa-button href="/device/add" variant="brand" size="small">
               <wa-icon slot="start" library="mdi" name="plus"></wa-icon>
               ${this._localize("devices.new_device")}
             </wa-button>
@@ -371,7 +371,7 @@ export class ESPHomePageDevices extends LitElement {
         <wa-icon library="mdi" name="chip"></wa-icon>
         <h2>${this._localize("devices.no_devices")}</h2>
         <p>${this._localize("devices.get_started")}</p>
-        <wa-button href="/wizard" variant="brand">
+        <wa-button href="/device/add" variant="brand">
           <wa-icon slot="start" library="mdi" name="plus" size=""></wa-icon>
           ${this._localize("devices.create_device")}
         </wa-button>

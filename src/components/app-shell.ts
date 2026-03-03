@@ -70,12 +70,12 @@ export class ESPHomeApp extends LitElement {
       render: () => html`<esphome-page-devices></esphome-page-devices>`,
     },
     {
-      path: "/wizard",
+      path: "/device/add",
       enter: async () => {
-        await import("../pages/wizard.js");
+        await import("../pages/add-device.js");
         return true;
       },
-      render: () => html`<esphome-page-wizard></esphome-page-wizard>`,
+      render: () => html`<esphome-page-add-device></esphome-page-add-device>`,
     },
     {
       path: "/device/:configuration",

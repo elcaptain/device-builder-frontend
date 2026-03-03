@@ -36,7 +36,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { path: "/", label: "Devices", icon: "chip", exact: true },
-  { path: "/wizard", label: "New Device", icon: "plus" },
+  { path: "/device/add", label: "New Device", icon: "plus" },
 ];
 
 @customElement("esphome-sidebar")

@@ -66,8 +66,8 @@ const STEPS: WizardStep[] = [
   { id: "security", label: "Security", icon: "lock" },
 ];
 
-@customElement("esphome-page-wizard")
-export class ESPHomePageWizard extends LitElement {
+@customElement("esphome-page-add-device")
+export class ESPHomePageAddDevice extends LitElement {
   @consume({ context: apiContext })
   @state()
   private _api!: ESPHomeAPI;
@@ -570,6 +570,6 @@ export class ESPHomePageWizard extends LitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    "esphome-page-wizard": ESPHomePageWizard;
+    "esphome-page-add-device": ESPHomePageAddDevice;
   }
 }
