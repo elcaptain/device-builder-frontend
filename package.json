@@ -1,0 +1,39 @@
+{
+  "name": "esphome-frontend",
+  "version": "0.1.0",
+  "description": "Frontend for ESPHome Dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node build-scripts/dev-server.cjs",
+    "build": "node build-scripts/build.cjs",
+    "lint": "tsc --noEmit",
+    "format": "prettier --write \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "@home-assistant/webawesome": "3.2.1-ha.3",
+    "@lit-labs/router": "0.1.4",
+    "@lit/context": "1.1.6",
+    "@lit/reactive-element": "2.1.2",
+    "@mdi/js": "7.4.47",
+    "lit": "3.3.2",
+    "lit-html": "3.3.2",
+    "urlpattern-polyfill": "10.1.0"
+  },
+  "devDependencies": {
+    "@rspack/core": "1.7.6",
+    "@rspack/dev-server": "1.2.1",
+    "@swc/helpers": "0.5.19",
+    "@types/node": "22.15.0",
+    "prettier": "3.8.1",
+    "typescript": "5.9.3"
+  },
+  "browserslist": {
+    "modern": [
+      "last 2 Chrome versions",
+      "last 2 Firefox versions",
+      "last 2 Safari versions",
+      "last 2 Edge versions"
+    ]
+  }
+}

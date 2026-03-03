@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "lib": ["ES2021", "DOM", "DOM.Iterable"],
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "incremental": true,
+    "tsBuildInfoFile": "node_modules/.cache/typescript/.tsbuildinfo",
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "paths": {
+      "lit/static-html": ["./node_modules/lit/static-html.js"],
+      "lit/decorators": ["./node_modules/lit/decorators.js"],
+      "lit/directive": ["./node_modules/lit/directive.js"],
+      "lit/directives/until": ["./node_modules/lit/directives/until.js"],
+      "lit/directives/ref": ["./node_modules/lit/directives/ref.js"],
+      "lit/directives/class-map": ["./node_modules/lit/directives/class-map.js"],
+      "lit/directives/style-map": ["./node_modules/lit/directives/style-map.js"],
+      "lit/directives/if-defined": ["./node_modules/lit/directives/if-defined.js"],
+      "lit/directives/guard": ["./node_modules/lit/directives/guard.js"],
+      "lit/directives/cache": ["./node_modules/lit/directives/cache.js"],
+      "lit/directives/repeat": ["./node_modules/lit/directives/repeat.js"],
+      "lit/directives/live": ["./node_modules/lit/directives/live.js"],
+      "lit/directives/keyed": ["./node_modules/lit/directives/keyed.js"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}
