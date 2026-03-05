@@ -1,7 +1,7 @@
 import { consume } from "@lit/context";
-import { mdiChevronRight, mdiCog } from "@mdi/js";
-import { LitElement, css, html } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { mdiChevronDown, mdiChevronRight, mdiCog } from "@mdi/js";
+import { LitElement, css, html, nothing } from "lit";
+import { customElement, query, state } from "lit/decorators.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
@@ -12,6 +12,7 @@ import "@home-assistant/webawesome/dist/components/icon/icon.js";
 registerMdiIcons({
   cog: mdiCog,
   "chevron-right": mdiChevronRight,
+  "chevron-down": mdiChevronDown,
 });
 
 @customElement("esphome-wizard-step-method")
@@ -19,6 +20,12 @@ export class ESPHomeWizardStepMethod extends LitElement {
   @consume({ context: localizeContext, subscribe: true })
   @state()
   private _localize: LocalizeFunc = (key) => key;
+
+  @query("#file-input")
+  private _fileInput!: HTMLInputElement;
+
+  @state()
+  private _advancedOpen = false;
 
   static styles = [
     espHomeStyles,
@@ -46,6 +53,19 @@ export class ESPHomeWizardStepMethod extends LitElement {
         color: var(--wa-color-text-normal);
       }
 
+      .method-layout {
+        display: flex;
+        flex-direction: column;
+        gap: var(--wa-space-m);
+      }
+
+      .option-cards {
+        display: grid;
+        grid-template-columns: 1fr;
+        grid-auto-rows: 1fr;
+        gap: var(--wa-space-m);
+      }
+
       .option-card {
         display: flex;
         align-items: center;
@@ -57,6 +77,7 @@ export class ESPHomeWizardStepMethod extends LitElement {
         background: none;
         width: 100%;
         text-align: left;
+        box-sizing: border-box;
         transition:
           border-color var(--wa-transition-normal) var(--wa-transition-easing),
           background var(--wa-transition-normal) var(--wa-transition-easing);
@@ -68,7 +89,7 @@ export class ESPHomeWizardStepMethod extends LitElement {
       }
 
       .option-card-text h3 {
-        margin: 0 0 var(--wa-space-2xs);
+        margin: 0 0 var(--wa-space-s);
         font-size: var(--wa-font-size-m);
         font-weight: var(--wa-font-weight-bold);
         color: var(--wa-color-text-normal);
@@ -78,6 +99,7 @@ export class ESPHomeWizardStepMethod extends LitElement {
         margin: 0;
         font-size: var(--wa-font-size-s);
         color: var(--wa-color-text-quiet);
+        min-height: 2lh;
       }
 
       .option-card wa-icon {
@@ -86,11 +108,10 @@ export class ESPHomeWizardStepMethod extends LitElement {
         flex-shrink: 0;
       }
 
-      .advanced-link {
+      .advanced-toggle {
         display: inline-flex;
         align-items: center;
         gap: var(--wa-space-2xs);
-        margin-top: var(--wa-space-l);
         color: var(--esphome-primary);
         font-size: var(--wa-font-size-s);
         font-weight: var(--wa-font-weight-bold);
@@ -98,16 +119,21 @@ export class ESPHomeWizardStepMethod extends LitElement {
         text-decoration: underline;
         background: none;
         border: none;
-        padding: 0;
+        padding: var(--wa-space-s);
       }
 
-      .advanced-link:hover {
+      .advanced-toggle:hover {
         text-decoration: none;
       }
 
-      .advanced-link wa-icon {
+      .advanced-toggle wa-icon {
         font-size: var(--wa-font-size-s);
         color: var(--esphome-primary);
+        transition: transform var(--wa-transition-normal) var(--wa-transition-easing);
+      }
+
+      .advanced-toggle[aria-expanded="true"] wa-icon {
+        transform: rotate(180deg);
       }
 
       .drop-hint {
@@ -127,26 +153,96 @@ export class ESPHomeWizardStepMethod extends LitElement {
         <h2>${this._localize("wizard.how_create")}</h2>
       </div>
 
-      <button class="option-card" @click=${this._goToBoard}>
+      <div class="method-layout">
+        <div class="option-cards">
+          <button class="option-card" @click=${this._goToBoard}>
+            <div class="option-card-text">
+              <h3>${this._localize("wizard.create_new")}</h3>
+              <p>${this._localize("wizard.create_new_desc")}</p>
+            </div>
+            <wa-icon library="mdi" name="chevron-right"></wa-icon>
+          </button>
+        </div>
+
+        <button
+          class="advanced-toggle"
+          aria-expanded=${this._advancedOpen}
+          @click=${this._toggleAdvanced}
+        >
+          ${this._localize("wizard.advanced_options")}
+          <wa-icon library="mdi" name="chevron-down"></wa-icon>
+        </button>
+
+        ${this._advancedOpen
+          ? html`<div class="option-cards">${this._renderAdvancedOptions()}</div>`
+          : nothing}
+      </div>
+
+      <p class="drop-hint">${this._localize("wizard.drop_yaml")}</p>
+
+      <input
+        id="file-input"
+        type="file"
+        accept=".yml,.yaml"
+        hidden
+        @change=${this._onFileSelected}
+      />
+    `;
+  }
+
+  private _renderAdvancedOptions() {
+    return html`
+      <button class="option-card" @click=${this._importFile}>
         <div class="option-card-text">
-          <h3>${this._localize("wizard.create_new")}</h3>
-          <p>${this._localize("wizard.create_new_desc")}</p>
+          <h3>${this._localize("wizard.import_file")}</h3>
+          <p>${this._localize("wizard.import_file_desc")}</p>
         </div>
         <wa-icon library="mdi" name="chevron-right"></wa-icon>
       </button>
 
-      <button class="advanced-link" @click=${this._goToBoard}>
-        ${this._localize("wizard.advanced_options")}
+      <button class="option-card" @click=${this._emptyConfig}>
+        <div class="option-card-text">
+          <h3>${this._localize("wizard.empty_config")}</h3>
+          <p>${this._localize("wizard.empty_config_desc")}</p>
+        </div>
         <wa-icon library="mdi" name="chevron-right"></wa-icon>
       </button>
-
-      <p class="drop-hint">${this._localize("wizard.drop_yaml")}</p>
     `;
+  }
+
+  private _toggleAdvanced() {
+    this._advancedOpen = !this._advancedOpen;
   }
 
   private _goToBoard() {
     this.dispatchEvent(
       new CustomEvent("next-step", { detail: "board", bubbles: true, composed: true })
+    );
+  }
+
+  private _importFile() {
+    this._fileInput.click();
+  }
+
+  private _onFileSelected() {
+    const file = this._fileInput.files?.[0];
+    if (!file) return;
+
+    // TODO: read file contents and create a dashboard card from the imported config
+    // e.g. await importConfigFromFile(file);
+    console.log("[wizard] import config from file:", file.name);
+
+    // Reset so the same file can be re-selected if needed
+    this._fileInput.value = "";
+
+    this.dispatchEvent(
+      new CustomEvent("import-config", { detail: { file }, bubbles: true, composed: true })
+    );
+  }
+
+  private _emptyConfig() {
+    this.dispatchEvent(
+      new CustomEvent("next-step", { detail: "empty-config", bubbles: true, composed: true })
     );
   }
 }

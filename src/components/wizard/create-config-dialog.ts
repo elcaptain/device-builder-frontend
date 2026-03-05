@@ -1,21 +1,24 @@
 import { consume } from "@lit/context";
-import { mdiClose } from "@mdi/js";
-import { LitElement, css, html } from "lit";
+import { mdiArrowLeft, mdiClose } from "@mdi/js";
+import { LitElement, css, html, nothing } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import type { MockBoard } from "../../api/mock.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
 import "@home-assistant/webawesome/dist/components/dialog/dialog.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "./wizard-step-board.js";
+import "./wizard-step-empty-config.js";
 import "./wizard-step-method.js";
 import "./wizard-step-setup.js";
 
-registerMdiIcons({ close: mdiClose });
+registerMdiIcons({ close: mdiClose, "arrow-left": mdiArrowLeft });
 
-type WizardStep = "method" | "board" | "setup";
+type WizardStep = "method" | "board" | "setup" | "empty-config";
+type WizardStepDetail = WizardStep | { step: WizardStep; board?: MockBoard | null };
 
 @customElement("esphome-create-config-dialog")
 export class ESPHomeCreateConfigDialog extends LitElement {
@@ -26,6 +29,9 @@ export class ESPHomeCreateConfigDialog extends LitElement {
   @state()
   private _step: WizardStep = "method";
 
+  @state()
+  private _selectedBoard: MockBoard | null = null;
+
   @query("wa-dialog")
   private _dialog!: HTMLElement & { open: boolean };
 
@@ -34,6 +40,10 @@ export class ESPHomeCreateConfigDialog extends LitElement {
     css`
       wa-dialog {
         --width: 520px;
+      }
+
+      wa-dialog.wide {
+        --width: 680px;
       }
 
       /* ─── Header ─── */
@@ -49,6 +59,32 @@ export class ESPHomeCreateConfigDialog extends LitElement {
         color: var(--esphome-on-primary);
         font-size: var(--wa-font-size-s);
         font-weight: var(--wa-font-weight-bold);
+      }
+
+      .dialog-label {
+        display: flex;
+        align-items: center;
+        gap: var(--wa-space-xs);
+        color: var(--esphome-on-primary);
+        font-size: var(--wa-font-size-s);
+        font-weight: var(--wa-font-weight-bold);
+      }
+
+      .back-button {
+        display: inline-flex;
+        align-items: center;
+        border: none;
+        background: none;
+        padding: 2px;
+        margin-right: var(--wa-space-2xs);
+        color: var(--esphome-on-primary);
+        cursor: pointer;
+        border-radius: 4px;
+        opacity: 0.85;
+      }
+
+      .back-button:hover {
+        opacity: 1;
       }
 
       /* Strip button chrome — render as plain icon */
@@ -90,12 +126,29 @@ export class ESPHomeCreateConfigDialog extends LitElement {
         return this._localize("wizard.title_board");
       case "setup":
         return this._localize("wizard.title_setup");
+      case "empty-config":
+        return this._localize("wizard.title_empty_config");
     }
   }
 
   protected render() {
     return html`
-      <wa-dialog .label=${this._title} light-dismiss @next-step=${this._onNextStep}>
+      <wa-dialog
+        class=${this._step === "board" ? "wide" : ""}
+        light-dismiss
+        @next-step=${this._onNextStep}
+        @finish-setup=${this._onFinishSetup}
+        @create-empty-config=${this._onCreateEmptyConfig}
+        @import-config=${this._onImportConfig}
+      >
+        <span slot="label" class="dialog-label">
+          ${this._step !== "method"
+            ? html`<button class="back-button" @click=${this._onBack}>
+                <wa-icon library="mdi" name="arrow-left"></wa-icon>
+              </button>`
+            : nothing}
+          ${this._title}
+        </span>
         ${this._renderStep()}
       </wa-dialog>
     `;
@@ -108,12 +161,49 @@ export class ESPHomeCreateConfigDialog extends LitElement {
       case "board":
         return html`<esphome-wizard-step-board></esphome-wizard-step-board>`;
       case "setup":
-        return html`<esphome-wizard-step-setup></esphome-wizard-step-setup>`;
+        return html`<esphome-wizard-step-setup .board=${this._selectedBoard}></esphome-wizard-step-setup>`;
+      case "empty-config":
+        return html`<esphome-wizard-step-empty-config></esphome-wizard-step-empty-config>`;
     }
   }
 
-  private _onNextStep(e: CustomEvent<WizardStep>) {
-    this._step = e.detail;
+  private _onNextStep(e: CustomEvent<WizardStepDetail>) {
+    const detail = e.detail;
+    if (typeof detail === "string") {
+      this._step = detail;
+      return;
+    }
+
+    this._step = detail.step;
+    if (detail.board !== undefined) {
+      this._selectedBoard = detail.board;
+    }
+  }
+
+  private _onBack() {
+    switch (this._step) {
+      case "board":
+        this._step = "method";
+        break;
+      case "setup":
+        this._step = "board";
+        break;
+      case "empty-config":
+        this._step = "method";
+        break;
+    }
+  }
+
+  private _onCreateEmptyConfig() {
+    this.close();
+  }
+
+  private _onImportConfig() {
+    this.close();
+  }
+
+  private _onFinishSetup() {
+    this.close();
   }
 }
 
