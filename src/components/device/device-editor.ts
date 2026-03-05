@@ -6,6 +6,7 @@ import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import type { HighlightRange } from "../yaml-editor.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "../yaml-editor.js";
@@ -32,6 +33,9 @@ export class ESPHomeDeviceEditor extends LitElement {
 
   @property()
   deviceTitle = "";
+
+  @property({ attribute: false })
+  highlightRange: HighlightRange | null = null;
 
   static styles = [
     espHomeStyles,
@@ -216,6 +220,7 @@ export class ESPHomeDeviceEditor extends LitElement {
               <div class="editor-pane-body">
                 <esphome-yaml-editor
                   .value=${this.yaml}
+                  .highlightRange=${this.highlightRange}
                   @yaml-change=${this._onYamlChange}
                 ></esphome-yaml-editor>
               </div>

@@ -1,11 +1,39 @@
 import { consume } from "@lit/context";
 import { yaml } from "@codemirror/lang-yaml";
+import { StateEffect, StateField } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { Decoration, type DecorationSet } from "@codemirror/view";
 import { LitElement, css, html } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { basicSetup, EditorView } from "codemirror";
 import { EditorState } from "@codemirror/state";
 import { darkModeContext } from "../context/index.js";
+import type { YamlSection } from "../util/yaml-sections.js";
+
+export type HighlightRange = Pick<YamlSection, "fromLine" | "toLine">;
+
+// Module-level singletons so they survive editor rebuilds
+const setHighlight = StateEffect.define<HighlightRange | null>();
+
+const highlightField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(setHighlight)) {
+        if (!effect.value) return Decoration.none;
+        const { fromLine, toLine } = effect.value;
+        const doc = tr.state.doc;
+        const from = doc.line(Math.max(1, fromLine)).from;
+        const to = doc.line(Math.min(doc.lines, toLine)).to;
+        return Decoration.set([
+          Decoration.mark({ class: "cm-esphome-highlight" }).range(from, to),
+        ]);
+      }
+    }
+    return deco.map(tr.changes);
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
 
 @customElement("esphome-yaml-editor")
 export class ESPHomeYamlEditor extends LitElement {
@@ -14,6 +42,8 @@ export class ESPHomeYamlEditor extends LitElement {
   private _darkMode = false;
 
   @property() value = "";
+
+  @property({ attribute: false }) highlightRange: HighlightRange | null = null;
 
   @query(".cm-wrap") private _container!: HTMLDivElement;
 
@@ -48,12 +78,18 @@ export class ESPHomeYamlEditor extends LitElement {
         extensions: [
           basicSetup,
           yaml(),
+          highlightField,
           EditorView.theme({
             "&": { height: "100%" },
             ".cm-scroller": {
               overflow: "auto",
               fontFamily: '"JetBrains Mono", "Fira Code", monospace',
               fontSize: "13px",
+            },
+            ".cm-esphome-highlight": {
+              background: this._darkMode
+                ? "rgba(99, 179, 237, 0.2)"
+                : "rgba(59, 130, 246, 0.1)",
             },
           }),
           EditorView.updateListener.of((update) => {
@@ -72,6 +108,11 @@ export class ESPHomeYamlEditor extends LitElement {
       }),
       parent: this._container,
     });
+
+    // Apply any pending highlight after mount
+    if (this.highlightRange) {
+      this._view.dispatch({ effects: setHighlight.of(this.highlightRange) });
+    }
   }
 
   updated(changed: Map<string, unknown>) {
@@ -81,6 +122,7 @@ export class ESPHomeYamlEditor extends LitElement {
       this._container.innerHTML = "";
       this.value = doc;
       this._mountEditor();
+      return;
     }
 
     if (changed.has("value") && this._view) {
@@ -90,6 +132,10 @@ export class ESPHomeYamlEditor extends LitElement {
           changes: { from: 0, to: current.length, insert: this.value },
         });
       }
+    }
+
+    if (changed.has("highlightRange") && this._view) {
+      this._view.dispatch({ effects: setHighlight.of(this.highlightRange) });
     }
   }
 

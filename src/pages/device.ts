@@ -2,12 +2,13 @@ import { consume } from "@lit/context";
 import { css, html, LitElement } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { LocalizeFunc } from "../common/localize.js";
+import type { DeviceLayoutMode } from "../components/device/device-editor.js";
 import { localizeContext } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
-import type { DeviceLayoutMode } from "../components/device/device-editor.js";
+import type { HighlightRange } from "../components/yaml-editor.js";
 
-import "../components/device/device-navigator.js";
 import "../components/device/device-editor.js";
+import "../components/device/device-navigator.js";
 
 @customElement("esphome-page-device")
 export class ESPHomePageDevice extends LitElement {
@@ -25,88 +26,36 @@ export class ESPHomePageDevice extends LitElement {
   private _openSections = new Set<number>();
 
   @state()
+  private _highlightRange: HighlightRange | null = null;
+
+  @state()
   private _yaml = `esphome:
-  name: living-room-sensor
-  friendly_name: Living Room Sensor
+  name: star-bus-display
+  friendly_name: STAR Bus Display
+  platformio_options:
+    lib_deps:
+      - https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA.git
 
 esp32:
-  board: esp32-c6-devkitc-1
+  board: esp32-s3-devkitc-1
   framework:
-    type: esp-idf
-
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-  ap:
-    ssid: "Fallback Hotspot"
-    password: "fallback123"
+    type: arduino
 
 logger:
 
 api:
   encryption:
-    key: !secret api_key
+    key: "kLOwquhnuI5SrtlEDEPy9OEIc+PsyScih320WRC8Jj0="
 
 ota:
   - platform: esphome
-    password: !secret ota_password
+    password: "b55f91be82c96568dae39753d3728079"
 
-sensor:
-  - platform: dht
-    pin: GPIO4
-    model: DHT22
-    temperature:
-      name: "Room Temperature"
-      unit_of_measurement: "°C"
-      accuracy_decimals: 1
-    humidity:
-      name: "Room Humidity"
-      unit_of_measurement: "%"
-    update_interval: 30s
-
-  - platform: adc
-    pin: GPIO34
-    name: "Battery Voltage"
-    attenuation: 11db
-    filters:
-      - multiply: 2.0
-    update_interval: 60s
-
-binary_sensor:
-  - platform: gpio
-    pin:
-      number: GPIO14
-      mode: INPUT_PULLUP
-    name: "Motion Detected"
-    device_class: motion
-
-  - platform: gpio
-    pin: GPIO27
-    name: "Door Contact"
-    device_class: door
-
-light:
-  - platform: neopixelbus
-    type: GRB
-    variant: WS2812
-    pin: GPIO16
-    num_leds: 8
-    name: "Status LEDs"
-    effects:
-      - pulse:
-          name: "Slow Pulse"
-          transition_length: 1s
-          update_interval: 2s
-
-switch:
-  - platform: gpio
-    pin: GPIO26
-    name: "Relay"
-    restore_mode: RESTORE_DEFAULT_OFF
-
-time:
-  - platform: homeassistant
-    id: ha_time
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "STAR-Bus-Display"
 `;
 
   static styles = [
@@ -148,14 +97,17 @@ time:
           @section-toggle=${this._onSectionToggle}
           @layout-change=${this._onLayoutChange}
           @yaml-change=${this._onYamlChange}
+          @yaml-highlight=${this._onYamlHighlight}
         >
           <esphome-device-navigator
             .openSections=${this._openSections}
+            .yaml=${this._yaml}
           ></esphome-device-navigator>
           <esphome-device-editor
             .yaml=${this._yaml}
             .layout=${this._layout}
             .deviceTitle=${deviceTitle}
+            .highlightRange=${this._highlightRange}
           ></esphome-device-editor>
         </div>
       </div>
@@ -178,6 +130,10 @@ time:
 
   private _onYamlChange(e: CustomEvent<{ value: string }>) {
     this._yaml = e.detail.value;
+  }
+
+  private _onYamlHighlight(e: CustomEvent<HighlightRange | null>) {
+    this._highlightRange = e.detail;
   }
 }
 
