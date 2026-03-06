@@ -80,6 +80,9 @@
     "layout_components_only": "Alleen componenten weergeven",
     "layout_split": "Gesplitste weergave",
     "layout_yaml_only": "Alleen YAML-editor weergeven",
-    "yaml_editor": "YAML-editor"
+    "yaml_editor": "YAML-editor",
+    "add_config": "Basisconfiguratie toevoegen",
+    "add_component": "Component toevoegen",
+    "add_automation": "Automatisering toevoegen"
   }
 }

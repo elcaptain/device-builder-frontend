@@ -80,6 +80,9 @@
     "layout_components_only": "Show components only",
     "layout_split": "Split view",
     "layout_yaml_only": "Show YAML editor only",
-    "yaml_editor": "YAML editor"
+    "yaml_editor": "YAML editor",
+    "add_config": "Add configuration",
+    "add_component": "Add component",
+    "add_automation": "Add automation"
   }
 }

@@ -132,7 +132,7 @@ const createRspackConfig = ({ isProdBuild = false } = {}) => ({
     },
     port: 5173,
     hot: true,
-    historyApiFallback: true,
+    historyApiFallback: { disableDotRule: true },
     proxy: [
       {
         context: [

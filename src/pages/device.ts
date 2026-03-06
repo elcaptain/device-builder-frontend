@@ -3,9 +3,9 @@ import { css, html, LitElement } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import type { DeviceLayoutMode } from "../components/device/device-editor.js";
+import type { HighlightRange } from "../components/yaml-editor.js";
 import { localizeContext } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
-import type { HighlightRange } from "../components/yaml-editor.js";
 
 import "../components/device/device-editor.js";
 import "../components/device/device-navigator.js";
@@ -56,6 +56,19 @@ wifi:
   password: !secret wifi_password
   ap:
     ssid: "STAR-Bus-Display"
+
+switch:
+  - platform: gpio
+    pin: GPIOXX
+    name: "Living Room Dehumidifier"
+
+binary_sensor:
+  - platform: gpio
+    pin: GPIOXX
+    name: "Living Room Dehumidifier Toggle Button"
+    on_press:
+      then:
+        - switch.toggle: dehumidifier1
 `;
 
   static styles = [
@@ -73,7 +86,7 @@ wifi:
 
       .layout-grid {
         display: grid;
-        grid-template-columns: minmax(220px, 1fr) minmax(0, 5fr);
+        grid-template-columns: minmax(230px, 1fr) minmax(0, 5fr);
         gap: var(--wa-space-l);
         height: calc(100vh - var(--esphome-header-height) - 2 * var(--wa-space-l));
       }

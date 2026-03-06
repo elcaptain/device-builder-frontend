@@ -1,15 +1,19 @@
 import { consume } from "@lit/context";
-import { mdiChevronDown, mdiChevronRight, mdiChevronUp } from "@mdi/js";
+import {
+  mdiArrowDecisionOutline,
+  mdiChevronDown,
+  mdiChevronRight,
+  mdiChevronUp,
+  mdiCog,
+  mdiMemory,
+} from "@mdi/js";
 import { css, html, LitElement, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
-import {
-  parseYamlTopLevelSections,
-  type YamlSection,
-} from "../../util/yaml-sections.js";
+import { categorizeSections, parseYamlAutomations, parseYamlTopLevelSections } from "../../util/yaml-sections.js";
 import type { HighlightRange } from "../yaml-editor.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
@@ -18,6 +22,9 @@ registerMdiIcons({
   "chevron-down": mdiChevronDown,
   "chevron-up": mdiChevronUp,
   "chevron-right": mdiChevronRight,
+  cog: mdiCog,
+  "arrow-decision-outline": mdiArrowDecisionOutline,
+  memory: mdiMemory,
 });
 
 @customElement("esphome-device-navigator")
@@ -137,7 +144,9 @@ export class ESPHomeDeviceNavigator extends LitElement {
         justify-content: space-between;
         cursor: pointer;
         user-select: none;
-        transition: background 0.1s, border-color 0.1s;
+        transition:
+          background 0.1s,
+          border-color 0.1s;
       }
 
       .nav-item:hover,
@@ -161,27 +170,91 @@ export class ESPHomeDeviceNavigator extends LitElement {
         font-size: var(--wa-font-size-xl);
         color: var(--esphome-primary);
       }
+
+      .action-item {
+        padding: 0 var(--wa-space-2xs);
+        border-radius: var(--wa-border-radius-m);
+        display: flex;
+        align-items: center;
+        background: var(--esphome-primary);
+        color: var(--esphome-on-primary);
+        justify-content: space-between;
+        cursor: pointer;
+        user-select: none;
+        transition:
+          background 0.1s,
+          border-color 0.1s;
+      }
+
+      .action-item:hover,
+      .action-item--hovered {
+        opacity: 0.9;
+      }
+
+      .action-item p {
+        margin: var(--wa-space-xs) 0;
+        font-size: var(--wa-font-size-s);
+        font-weight: var(--wa-font-weight-bold);
+      }
+
+      .action-item wa-icon {
+        font-size: var(--wa-font-size-l);
+      }
+
+      .action-item div {
+        display: flex;
+        flex-direction: wrap;
+        align-items: center;
+        gap: var(--wa-space-2xs);
+      }
     `,
   ];
 
   protected render() {
-    const yamlSections = parseYamlTopLevelSections(this.yaml);
+    const { core, components, automations: topLevelAutomations } = categorizeSections(
+      parseYamlTopLevelSections(this.yaml)
+    );
+    const automations = [
+      ...topLevelAutomations,
+      ...parseYamlAutomations(this.yaml),
+    ].sort((a, b) => a.fromLine - b.fromLine);
 
     const sections = [
       {
         label: this._localize("device.section_core"),
         desc: this._localize("device.section_core_desc"),
-        items: yamlSections,
+        items: core,
+        action: {
+          label: this._localize("device.add_config"),
+          icon: "cog",
+          onClick: () => {
+            console.log("config action clicked");
+          },
+        },
       },
       {
         label: this._localize("device.section_components"),
         desc: this._localize("device.section_components_desc"),
-        items: [] as YamlSection[],
+        items: components,
+        action: {
+          label: this._localize("device.add_component"),
+          icon: "memory",
+          onClick: () => {
+            console.log("component action clicked");
+          },
+        },
       },
       {
         label: this._localize("device.section_automations"),
         desc: this._localize("device.section_automations_desc"),
-        items: [] as YamlSection[],
+        items: automations,
+        action: {
+          label: this._localize("device.add_automation"),
+          icon: "arrow-decision-outline",
+          onClick: () => {
+            console.log("automation action clicked");
+          },
+        },
       },
     ];
 
@@ -193,7 +266,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
         <div class="card-body">
           <p class="italic">${this._localize("device.navigator_desc")}</p>
           <div class="separator"></div>
-          ${sections.map(({ label, desc, items }, i) => {
+          ${sections.map(({ label, desc, items, action }, i) => {
             const open = this.openSections.has(i);
             return html`
               <div class="nav-content" @click=${() => this._toggleSection(i)}>
@@ -221,20 +294,25 @@ export class ESPHomeDeviceNavigator extends LitElement {
                                   @mouseenter=${() =>
                                     this._onItemHover(key, fromLine, toLine)}
                                   @mouseleave=${() => this._onItemLeave()}
-                                  @click=${() =>
-                                    this._onItemClick(key, fromLine, toLine)}
+                                  @click=${() => this._onItemClick(key, fromLine, toLine)}
                                 >
                                   <p>${key}</p>
-                                  <wa-icon
-                                    library="mdi"
-                                    name="chevron-right"
-                                  ></wa-icon>
+                                  <wa-icon library="mdi" name="chevron-right"></wa-icon>
                                 </div>
                               `
                             )}
                           </div>
                         `
                       : nothing}
+                    <div class="nav-items">
+                      <div class="action-item">
+                        <div>
+                          <wa-icon library="mdi" name=${action.icon}></wa-icon>
+                          <p>${action.label}</p>
+                        </div>
+                        <wa-icon library="mdi" name="plus-circle-outline"></wa-icon>
+                      </div>
+                    </div>
                   `
                 : nothing}
               <div class="separator"></div>
@@ -270,9 +348,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
       this._selectedKey = null;
       this._selectedRange = null;
       // Emit hovered range if still hovering (mouse didn't leave)
-      this._emitHighlight(
-        this._hoveredKey === key ? { fromLine, toLine } : null
-      );
+      this._emitHighlight(this._hoveredKey === key ? { fromLine, toLine } : null);
     } else {
       this._selectedKey = key;
       this._selectedRange = { fromLine, toLine };

@@ -354,7 +354,7 @@ export class ESPHomePageDashboard extends LitElement {
             <wa-icon slot="start" library="mdi" name="refresh"></wa-icon>
             ${this._localize("dashboard.update")}
           </wa-button>
-          <wa-button size="small" variant="light" pill>
+          <wa-button size="small" variant="light" pill @click=${() => this._editDevice(device)}>
             <wa-icon slot="start" library="mdi" name="pencil"></wa-icon>
             ${this._localize("dashboard.edit")}
           </wa-button>
@@ -380,6 +380,11 @@ export class ESPHomePageDashboard extends LitElement {
         </wa-button>
       </div>
     `;
+  }
+
+  private _editDevice(device: MockDevice) {
+    window.history.pushState({}, "", `/device/${device.configuration}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
   }
 
   private _openCreateDialog() {
