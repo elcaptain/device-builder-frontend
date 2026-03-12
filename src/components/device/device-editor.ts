@@ -1,19 +1,26 @@
 import { consume } from "@lit/context";
-import { mdiDockLeft, mdiDockRight, mdiViewSplitHorizontal } from "@mdi/js";
+import { mdiContentSave, mdiDockLeft, mdiDockRight, mdiViewSplitHorizontal } from "@mdi/js";
 import { css, html, LitElement, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
-import type { MockBoard } from "../../api/mock.js";
+import type { BoardCatalogEntry } from "../../api/types.js";
 import type { HighlightRange } from "../yaml-editor.js";
+import {
+  categorizeSections,
+  parseYamlAutomations,
+  parseYamlTopLevelSections,
+} from "../../util/yaml-sections.js";
 
+import "@home-assistant/webawesome/dist/components/button/button.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "../yaml-editor.js";
 import "./device-board-info.js";
 
 registerMdiIcons({
+  "content-save": mdiContentSave,
   "layout-left": mdiDockLeft,
   "layout-right": mdiDockRight,
   "layout-split": mdiViewSplitHorizontal,
@@ -37,13 +44,16 @@ export class ESPHomeDeviceEditor extends LitElement {
   deviceTitle = "";
 
   @property({ attribute: false })
-  board: MockBoard | null = null;
+  board: BoardCatalogEntry | null = null;
 
   @property({ type: Boolean })
   justCreated = false;
 
   @property({ attribute: false })
   highlightRange: HighlightRange | null = null;
+
+  @property()
+  configuration = "";
 
   static styles = [
     espHomeStyles,
@@ -81,6 +91,36 @@ export class ESPHomeDeviceEditor extends LitElement {
         margin: 0;
         font-size: var(--wa-font-size-s);
         font-weight: var(--wa-font-weight-bold);
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--wa-space-xs);
+        margin-right: var(--wa-space-s);
+      }
+
+      .save-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        border: none;
+        background: color-mix(in srgb, var(--esphome-on-primary), transparent 80%);
+        color: var(--esphome-on-primary);
+        padding: 4px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: var(--wa-font-size-xs);
+        font-weight: var(--wa-font-weight-bold);
+        font-family: inherit;
+      }
+
+      .save-button:hover {
+        background: color-mix(in srgb, var(--esphome-on-primary), transparent 70%);
+      }
+
+      .save-button wa-icon {
+        font-size: 16px;
       }
 
       .layout-toggle {
@@ -179,13 +219,33 @@ export class ESPHomeDeviceEditor extends LitElement {
           ? "editor-layout--left"
           : "editor-layout--right";
 
+    const { components } = categorizeSections(parseYamlTopLevelSections(this.yaml));
+    const automations = parseYamlAutomations(this.yaml);
+    const hasComponents = components.length > 0;
+    const hasAutomations = automations.length > 0;
+
+    const title = !hasComponents
+      ? this._localize("device.editor_title_no_components", { name: this.deviceTitle })
+      : !hasAutomations
+        ? this._localize("device.editor_title_no_automations", { name: this.deviceTitle })
+        : this._localize("device.editor_title_ready", { name: this.deviceTitle });
+
     return html`
       <section class="card">
         <header class="card-header">
           <div class="editor-header-main">
-            <h2 class="editor-header-title">
-              ${this._localize("device.editor_title", { name: this.deviceTitle })}
-            </h2>
+            <h2 class="editor-header-title">${title}</h2>
+          </div>
+          <div class="header-actions">
+            <button
+              type="button"
+              class="save-button"
+              @click=${this._onSave}
+              title=${this._localize("device.save_yaml")}
+            >
+              <wa-icon library="mdi" name="content-save"></wa-icon>
+              ${this._localize("device.save")}
+            </button>
           </div>
           <div class="layout-toggle" aria-label="Editor layout">
             <button
@@ -221,6 +281,7 @@ export class ESPHomeDeviceEditor extends LitElement {
                 .board=${this.board}
                 .yaml=${this.yaml}
                 .justCreated=${this.justCreated}
+                .configuration=${this.configuration}
               ></esphome-device-board-info>
             </div>
             ${this.layout === "both" ? html`<div class="pane-divider"></div>` : nothing}
@@ -237,6 +298,15 @@ export class ESPHomeDeviceEditor extends LitElement {
         </div>
       </section>
     `;
+  }
+
+  private _onSave() {
+    this.dispatchEvent(
+      new CustomEvent("save-yaml", {
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   private _setLayout(layout: DeviceLayoutMode) {

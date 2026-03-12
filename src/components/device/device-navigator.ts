@@ -6,6 +6,7 @@ import {
   mdiChevronUp,
   mdiCog,
   mdiMemory,
+  mdiPlusCircleOutline,
 } from "@mdi/js";
 import { css, html, LitElement, nothing } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
@@ -35,6 +36,7 @@ registerMdiIcons({
   cog: mdiCog,
   "arrow-decision-outline": mdiArrowDecisionOutline,
   memory: mdiMemory,
+  "plus-circle-outline": mdiPlusCircleOutline,
 });
 
 @customElement("esphome-device-navigator")
@@ -51,6 +53,9 @@ export class ESPHomeDeviceNavigator extends LitElement {
 
   @property()
   boardName = "";
+
+  @property()
+  configuration = "";
 
   @query("esphome-add-config-dialog")
   private _addConfigDialog!: ESPHomeAddConfigDialog;
@@ -279,12 +284,15 @@ export class ESPHomeDeviceNavigator extends LitElement {
       <section class="card">
         <esphome-add-config-dialog
           .boardName=${this.boardName}
+          .configuration=${this.configuration}
         ></esphome-add-config-dialog>
         <esphome-add-component-dialog
           .boardName=${this.boardName}
+          .configuration=${this.configuration}
         ></esphome-add-component-dialog>
         <esphome-add-automation-dialog
           .boardName=${this.boardName}
+          .configuration=${this.configuration}
         ></esphome-add-automation-dialog>
         <header class="card-header">
           <h2 class="card-title">${this._localize("device.navigator_title")}</h2>

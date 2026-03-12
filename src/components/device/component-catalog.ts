@@ -2,13 +2,10 @@ import { consume } from "@lit/context";
 import { mdiArrowCollapseAll, mdiArrowExpandAll, mdiMemory, mdiOpenInNew, mdiPlus } from "@mdi/js";
 import { css, html, LitElement } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import {
-  MOCK_COMPONENTS,
-  type ComponentCategory,
-  type MockComponent,
-} from "../../api/mock.js";
+import type { ComponentField, ComponentCatalogResponse } from "../../api/types.js";
+import type { ESPHomeAPI } from "../../api/index.js";
 import type { LocalizeFunc } from "../../common/localize.js";
-import { localizeContext } from "../../context/index.js";
+import { localizeContext, apiContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
@@ -24,21 +21,36 @@ registerMdiIcons({
   plus: mdiPlus,
 });
 
-type CategoryFilter = "all" | ComponentCategory;
+/** A flattened component+platform item for display in the catalog. */
+export interface FlatComponent {
+  key: string;
+  componentId: string;
+  platformId: string;
+  name: string;
+  description: string;
+  category: string;
+  docsUrl: string;
+  fields: ComponentField[];
+}
 
-const CATEGORIES: { id: CategoryFilter; labelKey: string }[] = [
-  { id: "all", labelKey: "device.component_category_all" },
-  { id: "sensor", labelKey: "device.component_category_sensor" },
-  { id: "binary_sensor", labelKey: "device.component_category_binary_sensor" },
-  { id: "switch", labelKey: "device.component_category_switch" },
-  { id: "light", labelKey: "device.component_category_light" },
-  { id: "button", labelKey: "device.component_category_button" },
-  { id: "fan", labelKey: "device.component_category_fan" },
-  { id: "climate", labelKey: "device.component_category_climate" },
-  { id: "display", labelKey: "device.component_category_display" },
-  { id: "cover", labelKey: "device.component_category_cover" },
-  { id: "number", labelKey: "device.component_category_number" },
-];
+function flattenCatalog(catalog: ComponentCatalogResponse): FlatComponent[] {
+  const items: FlatComponent[] = [];
+  for (const comp of catalog.components) {
+    for (const plat of comp.platforms) {
+      items.push({
+        key: `${comp.id}_${plat.id}`,
+        componentId: comp.id,
+        platformId: plat.id,
+        name: comp.platforms.length > 1 ? `${comp.name} – ${plat.name}` : comp.name,
+        description: plat.description || comp.description,
+        category: comp.id,
+        docsUrl: comp.docs_url,
+        fields: plat.fields,
+      });
+    }
+  }
+  return items;
+}
 
 @customElement("esphome-component-catalog")
 export class ESPHomeComponentCatalog extends LitElement {
@@ -46,14 +58,39 @@ export class ESPHomeComponentCatalog extends LitElement {
   @state()
   private _localize: LocalizeFunc = (key) => key;
 
+  @consume({ context: apiContext })
+  private _api!: ESPHomeAPI;
+
+  @state()
+  private _components: FlatComponent[] = [];
+
+  @state()
+  private _loading = true;
+
   @state()
   private _search = "";
 
   @state()
-  private _category: CategoryFilter = "all";
+  private _category = "all";
 
   @state()
   private _expandedId: string | null = null;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this._loadCatalog();
+  }
+
+  private async _loadCatalog() {
+    try {
+      const catalog = await this._api.getComponentCatalog();
+      this._components = flattenCatalog(catalog);
+    } catch (e) {
+      console.error("Failed to load component catalog:", e);
+    } finally {
+      this._loading = false;
+    }
+  }
 
   static styles = [
     espHomeStyles,
@@ -63,8 +100,6 @@ export class ESPHomeComponentCatalog extends LitElement {
         height: 480px;
         gap: 0;
       }
-
-      /* ─── Sidebar ─── */
 
       .sidebar {
         width: 160px;
@@ -140,8 +175,6 @@ export class ESPHomeComponentCatalog extends LitElement {
         color: var(--esphome-on-primary);
       }
 
-      /* ─── Main area ─── */
-
       .main {
         flex: 1;
         min-width: 0;
@@ -157,8 +190,6 @@ export class ESPHomeComponentCatalog extends LitElement {
         flex-shrink: 0;
       }
 
-      /* ─── Grid ─── */
-
       .grid-scroll {
         flex: 1;
         overflow-y: auto;
@@ -171,8 +202,6 @@ export class ESPHomeComponentCatalog extends LitElement {
         gap: var(--wa-space-s);
         align-content: start;
       }
-
-      /* ─── Component card ─── */
 
       .component-card {
         border-radius: var(--wa-border-radius-l);
@@ -218,28 +247,22 @@ export class ESPHomeComponentCatalog extends LitElement {
         gap: var(--wa-space-s);
       }
 
-      .component-image {
+      .component-image--placeholder {
         width: 48px;
         height: 36px;
-        object-fit: contain;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         border-radius: var(--wa-border-radius-s);
         background: var(--wa-color-surface-subtle);
         flex-shrink: 0;
-        padding: 3px;
-        box-sizing: border-box;
+        color: var(--esphome-primary);
+        font-size: 24px;
       }
 
       .component-card-header-text {
         flex: 1;
         min-width: 0;
-      }
-
-      .component-image--placeholder {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--esphome-primary);
-        font-size: 24px;
       }
 
       .component-title {
@@ -262,12 +285,6 @@ export class ESPHomeComponentCatalog extends LitElement {
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
-      }
-
-      .tags {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--wa-space-2xs);
       }
 
       .card-footer {
@@ -312,18 +329,31 @@ export class ESPHomeComponentCatalog extends LitElement {
         padding: var(--wa-space-xl);
         grid-column: 1 / -1;
       }
+
+      .loading {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--wa-color-text-quiet);
+        font-size: var(--wa-font-size-s);
+      }
     `,
   ];
 
   protected render() {
+    if (this._loading) {
+      return html`<div class="loading">${this._localize("device.loading_components")}</div>`;
+    }
+
+    const categories = this._buildCategories();
     const filtered = this._filterComponents();
-    const counts = this._categoryCounts();
 
     return html`
       <div class="sidebar">
         <p class="sidebar-label">${this._localize("device.component_categories")}</p>
-        ${CATEGORIES.map(
-          ({ id, labelKey }) => html`
+        ${categories.map(
+          ({ id, label, count }) => html`
             <button
               class="category-btn ${this._category === id ? "category-btn--active" : ""}"
               type="button"
@@ -332,8 +362,8 @@ export class ESPHomeComponentCatalog extends LitElement {
               }}
             >
               <span class="category-btn-inner">
-                <span>${this._localize(labelKey)}</span>
-                <span class="category-count">${counts[id]}</span>
+                <span>${label}</span>
+                <span class="category-count">${count}</span>
               </span>
             </button>
           `
@@ -349,7 +379,7 @@ export class ESPHomeComponentCatalog extends LitElement {
         <div class="grid-scroll">
           <div class="components-grid">
             ${filtered.length
-              ? filtered.map((c) => this._renderCard(c, c.id === this._expandedId))
+              ? filtered.map((c) => this._renderCard(c, c.key === this._expandedId))
               : html`<p class="empty">${this._localize("device.no_components_found")}</p>`}
           </div>
         </div>
@@ -357,19 +387,30 @@ export class ESPHomeComponentCatalog extends LitElement {
     `;
   }
 
-  private _renderCard(component: MockComponent, expanded: boolean) {
+  private _buildCategories() {
+    const allCount = this._components.length;
+    const byCat = new Map<string, number>();
+    for (const c of this._components) {
+      byCat.set(c.category, (byCat.get(c.category) ?? 0) + 1);
+    }
+    const cats = [{ id: "all", label: this._localize("device.component_category_all"), count: allCount }];
+    for (const [id, count] of byCat) {
+      cats.push({
+        id,
+        label: this._localize(`device.component_category_${id}`),
+        count,
+      });
+    }
+    return cats;
+  }
+
+  private _renderCard(component: FlatComponent, expanded: boolean) {
     return html`
       <article class="component-card ${expanded ? "component-card--expanded" : ""}">
         <div class="component-card-header">
-          ${component.imageUrl
-            ? html`<img
-                class="component-image"
-                src=${component.imageUrl}
-                alt=${component.name}
-              />`
-            : html`<div class="component-image component-image--placeholder">
-                <wa-icon library="mdi" name="memory"></wa-icon>
-              </div>`}
+          <div class="component-image--placeholder">
+            <wa-icon library="mdi" name="memory"></wa-icon>
+          </div>
           <div class="component-card-header-text">
             <h3 class="component-title">${component.name}</h3>
           </div>
@@ -389,16 +430,6 @@ export class ESPHomeComponentCatalog extends LitElement {
         <p class="component-description ${expanded ? "" : "component-description--clamp"}">
           ${component.description}
         </p>
-        <div class="tags">
-          ${component.tags.map(
-            (tag) => html`<wa-badge
-              variant="brand"
-              pill
-              style="font-size: var(--wa-font-size-xs);"
-              >${tag}</wa-badge
-            >`
-          )}
-        </div>
         <div class="card-footer">
           <a class="more-info" href=${component.docsUrl} target="_blank" rel="noreferrer">
             ${this._localize("device.more_info")}
@@ -413,18 +444,8 @@ export class ESPHomeComponentCatalog extends LitElement {
     `;
   }
 
-  private _categoryCounts(): Record<CategoryFilter, number> {
-    const counts = { all: MOCK_COMPONENTS.length } as Record<CategoryFilter, number>;
-    for (const { id } of CATEGORIES) {
-      if (id !== "all") {
-        counts[id] = MOCK_COMPONENTS.filter((c) => c.category === id).length;
-      }
-    }
-    return counts;
-  }
-
-  private _filterComponents(): MockComponent[] {
-    let result = MOCK_COMPONENTS;
+  private _filterComponents(): FlatComponent[] {
+    let result = this._components;
     if (this._category !== "all") {
       result = result.filter((c) => c.category === this._category);
     }
@@ -434,21 +455,21 @@ export class ESPHomeComponentCatalog extends LitElement {
         (c) =>
           c.name.toLowerCase().includes(q) ||
           c.description.toLowerCase().includes(q) ||
-          c.tags.some((t) => t.toLowerCase().includes(q))
+          c.category.toLowerCase().includes(q)
       );
     }
     return result;
   }
 
-  private _onToggleExpand(component: MockComponent) {
-    this._expandedId = this._expandedId === component.id ? null : component.id;
+  private _onToggleExpand(component: FlatComponent) {
+    this._expandedId = this._expandedId === component.key ? null : component.key;
   }
 
   private _onSearchInput(ev: Event) {
     this._search = (ev.target as HTMLInputElement).value;
   }
 
-  private _onAdd(component: MockComponent) {
+  private _onAdd(component: FlatComponent) {
     this.dispatchEvent(
       new CustomEvent("add-component", {
         detail: { component },

@@ -11,6 +11,13 @@ import type {
   SerialPort,
   DownloadItem,
   Board,
+  BoardCatalogResponse,
+  ComponentCatalogResponse,
+  AutomationCatalogResponse,
+  ConfigCatalogResponse,
+  AddComponentResponse,
+  AddConfigSectionResponse,
+  AddAutomationResponse,
   WizardRequest,
   ImportRequest,
   WsSpawnMessage,
@@ -56,7 +63,11 @@ export class ESPHomeAPI {
       throw new Error(`API request failed: ${resp.status} ${resp.statusText}`);
     }
 
-    return resp.json() as Promise<T>;
+    const contentType = resp.headers.get("content-type") ?? "";
+    if (!contentType.includes("json") && resp.status === 204) return undefined as T;
+    const text = await resp.text();
+    if (!text) return undefined as T;
+    return JSON.parse(text) as T;
   }
 
   /** Get all configured and importable devices. */
@@ -130,6 +141,54 @@ export class ESPHomeAPI {
   /** Get boards for a platform. */
   async getBoards(platform: string): Promise<Board[]> {
     return this._request("GET", `boards/${platform}`);
+  }
+
+  /** Get the full board catalog. */
+  async getBoardCatalog(): Promise<BoardCatalogResponse> {
+    return this._request("GET", "boards/catalog");
+  }
+
+  /** Get the component catalog. */
+  async getComponentCatalog(): Promise<ComponentCatalogResponse> {
+    return this._request("GET", "components/catalog");
+  }
+
+  /** Get the automation catalog. */
+  async getAutomationCatalog(): Promise<AutomationCatalogResponse> {
+    return this._request("GET", "automations/catalog");
+  }
+
+  /** Get the config section catalog. */
+  async getConfigCatalog(): Promise<ConfigCatalogResponse> {
+    return this._request("GET", "config/catalog");
+  }
+
+  /** Add a component to a device config. */
+  async addComponent(
+    configuration: string,
+    data: { component: string; platform: string; fields: Record<string, unknown> }
+  ): Promise<AddComponentResponse> {
+    return this._request("POST", `devices/${configuration}/components`, { body: data });
+  }
+
+  /** Add a config section to a device config. */
+  async addConfigSection(
+    configuration: string,
+    data: { section: string; fields: Record<string, unknown> }
+  ): Promise<AddConfigSectionResponse> {
+    return this._request("POST", `devices/${configuration}/config-sections`, { body: data });
+  }
+
+  /** Add an automation to a device config. */
+  async addAutomation(
+    configuration: string,
+    data: {
+      target_component_name: string;
+      trigger: string;
+      actions: Array<{ action: string; fields: Record<string, unknown> }>;
+    }
+  ): Promise<AddAutomationResponse> {
+    return this._request("POST", `devices/${configuration}/automations`, { body: data });
   }
 
   /** Get secret key names. */

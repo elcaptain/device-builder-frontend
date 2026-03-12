@@ -1,24 +1,36 @@
+import toast from "sonner-js";
 import { consume } from "@lit/context";
 import {
   mdiClipboardTextSearchOutline,
+  mdiDelete,
   mdiDotsVertical,
   mdiFormatListBulleted,
-  mdiLanDisconnect,
   mdiPencil,
   mdiPlus,
   mdiPlusCircleOutline,
   mdiRefresh,
   mdiWeb,
+  mdiWifi,
+  mdiWifiOff,
 } from "@mdi/js";
 import { LitElement, css, html } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
-import { MOCK_DEVICES, type MockDevice } from "../api/mock.js";
+import type { ConfiguredDevice, AdoptableDevice } from "../api/types.js";
+import type { ESPHomeAPI } from "../api/index.js";
 import type { LocalizeFunc } from "../common/localize.js";
-import { localizeContext } from "../context/index.js";
+import {
+  localizeContext,
+  devicesContext,
+  importableDevicesContext,
+  deviceStatesContext,
+  apiContext,
+} from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
 import { registerMdiIcons } from "../util/register-icons.js";
 
 import "@home-assistant/webawesome/dist/components/button/button.js";
+import "@home-assistant/webawesome/dist/components/dropdown/dropdown.js";
+import "@home-assistant/webawesome/dist/components/dropdown-item/dropdown-item.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "../components/wizard/create-config-dialog.js";
 import type { ESPHomeCreateConfigDialog } from "../components/wizard/create-config-dialog.js";
@@ -31,8 +43,10 @@ registerMdiIcons({
   pencil: mdiPencil,
   "format-list-bulleted": mdiFormatListBulleted,
   "dots-vertical": mdiDotsVertical,
-  "lan-disconnect": mdiLanDisconnect,
+  "wifi": mdiWifi,
+  "wifi-off": mdiWifiOff,
   web: mdiWeb,
+  delete: mdiDelete,
 });
 
 @customElement("esphome-page-dashboard")
@@ -40,6 +54,21 @@ export class ESPHomePageDashboard extends LitElement {
   @consume({ context: localizeContext, subscribe: true })
   @state()
   private _localize: LocalizeFunc = (key) => key;
+
+  @consume({ context: devicesContext, subscribe: true })
+  @state()
+  private _devices: ConfiguredDevice[] = [];
+
+  @consume({ context: importableDevicesContext, subscribe: true })
+  @state()
+  private _importableDevices: AdoptableDevice[] = [];
+
+  @consume({ context: deviceStatesContext, subscribe: true })
+  @state()
+  private _deviceStates: Record<string, boolean> = {};
+
+  @consume({ context: apiContext })
+  private _api!: ESPHomeAPI;
 
   @state()
   private _showDiscovered = false;
@@ -57,12 +86,8 @@ export class ESPHomePageDashboard extends LitElement {
       /* ─── Discovered Banner ─── */
 
       @keyframes banner-slide-in {
-        from {
-          transform: translateY(-100%);
-        }
-        to {
-          transform: translateY(0);
-        }
+        from { transform: translateY(-100%); }
+        to { transform: translateY(0); }
       }
 
       .discovered-banner-wrap {
@@ -100,18 +125,13 @@ export class ESPHomePageDashboard extends LitElement {
         opacity: 0.85;
       }
 
-      .discovered-banner a:hover {
-        opacity: 1;
-      }
-
+      .discovered-banner a:hover { opacity: 1; }
       .discovered-banner span {
         font-weight: var(--wa-font-weight-bold);
         font-size: var(--wa-font-size-xs);
       }
 
-      .discovered-banner-empty {
-        margin-right: var(--wa-space-4xl);
-      }
+      .discovered-banner-empty { margin-right: var(--wa-space-4xl); }
 
       /* ─── Card Grid ─── */
 
@@ -125,53 +145,72 @@ export class ESPHomePageDashboard extends LitElement {
       /* ─── Add New Device Card ─── */
 
       .add-device-card {
-        border: var(--wa-border-width-m) dashed var(--esphome-primary);
+        border: 2px dashed color-mix(in srgb, var(--esphome-primary), transparent 50%);
         border-radius: var(--wa-border-radius-l);
         padding: var(--wa-space-xl) var(--wa-space-l);
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: var(--wa-space-l);
-        background: color-mix(in srgb, var(--esphome-primary), transparent 95%);
-        min-height: 160px;
+        gap: var(--wa-space-m);
+        background: color-mix(in srgb, var(--esphome-primary), transparent 96%);
+        min-height: 200px;
+        cursor: pointer;
+        transition: border-color 0.15s, background 0.15s, transform 0.15s;
       }
 
-      .add-device-header {
+      .add-device-card:hover {
+        border-color: var(--esphome-primary);
+        background: color-mix(in srgb, var(--esphome-primary), transparent 92%);
+        transform: translateY(-2px);
+      }
+
+      .add-device-icon-wrap {
+        width: 52px;
+        height: 52px;
+        border-radius: 50%;
+        background: var(--esphome-primary);
         display: flex;
         align-items: center;
-        gap: var(--wa-space-xs);
-        font-size: var(--wa-font-size-m);
-        font-weight: var(--wa-font-weight-bold);
-        color: var(--wa-color-text-normal);
+        justify-content: center;
+        box-shadow: 0 4px 14px color-mix(in srgb, var(--esphome-primary), transparent 50%);
+        transition: box-shadow 0.15s, transform 0.15s;
       }
 
-      .add-device-header wa-icon {
-        font-size: var(--wa-font-size-l);
+      .add-device-card:hover .add-device-icon-wrap {
+        box-shadow: 0 6px 20px color-mix(in srgb, var(--esphome-primary), transparent 35%);
+        transform: scale(1.06);
+      }
+
+      .add-device-icon-wrap wa-icon {
+        font-size: 26px;
+        color: var(--esphome-on-primary);
+      }
+
+      .add-device-label {
+        font-size: var(--wa-font-size-m);
+        font-weight: var(--wa-font-weight-bold);
         color: var(--esphome-primary);
       }
 
-      .add-device-card .create-btn {
-        min-width: 200px;
+      .add-device-hint {
+        font-size: var(--wa-font-size-xs);
+        color: var(--wa-color-text-quiet);
+        text-align: center;
       }
 
       .esphome-web-link {
         display: flex;
         align-items: center;
-        gap: var(--wa-space-xs);
-        font-size: var(--wa-font-size-s);
-        color: var(--esphome-primary);
+        gap: var(--wa-space-2xs);
+        font-size: var(--wa-font-size-xs);
+        color: var(--wa-color-text-quiet);
         text-decoration: none;
-        cursor: pointer;
+        margin-top: var(--wa-space-2xs);
       }
 
-      .esphome-web-link wa-icon {
-        font-size: var(--wa-font-size-m);
-      }
-
-      .esphome-web-link:hover {
-        text-decoration: underline;
-      }
+      .esphome-web-link wa-icon { font-size: 14px; }
+      .esphome-web-link:hover { color: var(--esphome-primary); }
 
       /* ─── Device Card ─── */
 
@@ -179,44 +218,29 @@ export class ESPHomePageDashboard extends LitElement {
         border-radius: var(--wa-border-radius-l);
         border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
         background: var(--wa-color-surface-raised);
-        overflow: hidden;
-        transition:
-          box-shadow var(--wa-transition-normal) var(--wa-transition-easing),
-          transform var(--wa-transition-normal) var(--wa-transition-easing);
+        overflow: visible;
+        display: flex;
+        flex-direction: column;
+        transition: box-shadow 0.15s, transform 0.15s;
       }
 
       .device-card:hover {
         box-shadow: var(--wa-shadow-m);
-        transform: translateY(-1px);
+        transform: translateY(-2px);
       }
 
-      .device-card-body {
-        padding: var(--wa-space-l) var(--wa-space-m) var(--wa-space-m);
-        position: relative;
-      }
-
-      .device-status {
-        position: absolute;
-        top: var(--wa-space-m);
-        right: 14px;
+      .device-card-header {
+        padding: var(--wa-space-m) var(--wa-space-m) var(--wa-space-s);
+        border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
         display: flex;
-        align-items: center;
-        gap: var(--wa-space-2xs);
-        font-size: var(--wa-font-size-2xs);
-        font-weight: var(--wa-font-weight-bold);
-        letter-spacing: 0.01em;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--wa-space-xs);
       }
 
-      .device-status.offline {
-        color: var(--esphome-error);
-      }
-
-      .device-status.online {
-        color: var(--esphome-success);
-      }
-
-      .device-status wa-icon {
-        font-size: var(--wa-font-size-s);
+      .device-card-header-left {
+        flex: 1;
+        min-width: 0;
       }
 
       .device-name {
@@ -224,69 +248,168 @@ export class ESPHomePageDashboard extends LitElement {
         font-size: var(--wa-font-size-m);
         font-weight: var(--wa-font-weight-bold);
         color: var(--wa-color-text-normal);
-        padding-right: 80px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .device-config {
         margin: 0;
         font-size: var(--wa-font-size-xs);
         color: var(--wa-color-text-quiet);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
+
+      .device-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: var(--wa-font-size-2xs);
+        font-weight: var(--wa-font-weight-bold);
+        letter-spacing: 0.02em;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
+
+      .device-status.offline {
+        background: color-mix(in srgb, var(--esphome-error), transparent 85%);
+        color: var(--esphome-error);
+      }
+
+      .device-status.online {
+        background: color-mix(in srgb, var(--esphome-success), transparent 85%);
+        color: var(--esphome-success);
+      }
+
+      .device-status wa-icon { font-size: 13px; }
+
+      /* ─── Action buttons ─── */
 
       .device-actions {
         display: flex;
         align-items: center;
-        gap: var(--wa-space-xs);
-        padding: 10px 14px;
-        border-top: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+        gap: var(--wa-space-2xs);
+        padding: var(--wa-space-s) var(--wa-space-m);
+        flex-wrap: wrap;
       }
 
-      .device-actions .spacer {
-        flex: 1;
+      .device-actions .spacer { flex: 1; }
+
+      .action-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 12px;
+        border-radius: var(--wa-border-radius-m);
+        font-size: var(--wa-font-size-xs);
+        font-weight: var(--wa-font-weight-bold);
+        font-family: inherit;
+        cursor: pointer;
+        border: var(--wa-border-width-s) solid transparent;
+        transition: background 0.12s, border-color 0.12s;
+        white-space: nowrap;
       }
+
+      .action-btn wa-icon { font-size: 15px; }
+
+      .action-btn--primary {
+        background: var(--esphome-primary);
+        color: var(--esphome-on-primary);
+      }
+
+      .action-btn--primary:hover {
+        background: color-mix(in srgb, var(--esphome-primary), black 10%);
+      }
+
+      .action-btn--ghost {
+        background: transparent;
+        color: var(--wa-color-text-normal);
+        border-color: var(--wa-color-surface-border);
+      }
+
+      .action-btn--ghost:hover {
+        background: var(--wa-color-surface-lowered);
+        border-color: var(--wa-color-text-quiet);
+      }
+
+      /* ─── Menu (three-dot) button ─── */
 
       .menu-btn {
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: var(--wa-space-2xs);
-        border-radius: var(--wa-border-radius-circle);
-        color: var(--wa-color-text-quiet);
-        display: flex;
+        display: inline-flex;
         align-items: center;
         justify-content: center;
-        transition: background var(--wa-transition-normal) var(--wa-transition-easing);
+        width: 32px;
+        height: 32px;
+        border-radius: var(--wa-border-radius-m);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+        background: transparent;
+        color: var(--wa-color-text-quiet);
+        cursor: pointer;
+        transition: background 0.12s, color 0.12s;
+        flex-shrink: 0;
       }
 
       .menu-btn:hover {
         background: var(--wa-color-surface-lowered);
+        color: var(--wa-color-text-normal);
       }
 
-      .menu-btn wa-icon {
-        font-size: var(--wa-font-size-l);
-      }
+      .menu-btn wa-icon { font-size: 18px; }
 
       /* ─── FAB ─── */
 
       .fab-container {
         position: fixed;
-        bottom: var(--wa-space-l);
-        right: var(--wa-space-l);
+        bottom: var(--wa-space-xl);
+        right: var(--wa-space-xl);
         z-index: 10;
       }
 
-      .fab-container wa-button::part(base) {
-        box-shadow: var(--wa-shadow-l);
+      .fab-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--wa-space-xs);
+        padding: 12px 22px;
+        border-radius: 999px;
+        border: none;
+        background: linear-gradient(135deg, var(--esphome-primary) 0%, color-mix(in srgb, var(--esphome-primary), #7c3aed 40%) 100%);
+        color: var(--esphome-on-primary);
+        font-size: var(--wa-font-size-s);
+        font-weight: var(--wa-font-weight-bold);
+        font-family: inherit;
+        cursor: pointer;
+        box-shadow:
+          0 4px 14px color-mix(in srgb, var(--esphome-primary), transparent 40%),
+          0 2px 4px rgba(0,0,0,0.12);
+        transition: transform 0.15s, box-shadow 0.15s;
+        letter-spacing: 0.01em;
       }
+
+      .fab-btn:hover {
+        transform: translateY(-2px) scale(1.02);
+        box-shadow:
+          0 8px 24px color-mix(in srgb, var(--esphome-primary), transparent 30%),
+          0 4px 8px rgba(0,0,0,0.14);
+      }
+
+      .fab-btn:active {
+        transform: translateY(0) scale(0.98);
+      }
+
+      .fab-btn wa-icon { font-size: 18px; }
     `,
   ];
 
   protected render() {
     return html`
-      ${this._renderDiscoveredBanner()}
+      ${this._importableDevices.length > 0 ? this._renderDiscoveredBanner() : ""}
       <div class="devices-grid">
-        ${MOCK_DEVICES.length === 0 ? this._renderAddDeviceCard() : ""}
-        ${MOCK_DEVICES.map((device) => this._renderDeviceCard(device))}
+        ${this._devices.length === 0 ? this._renderAddDeviceCard() : ""}
+        ${this._devices.map((device) => this._renderDeviceCard(device))}
       </div>
       ${this._renderFab()}
       <esphome-create-config-dialog></esphome-create-config-dialog>
@@ -300,9 +423,9 @@ export class ESPHomePageDashboard extends LitElement {
           <div class="discovered-banner-empty"></div>
           <div style="justify-content: center; display: flex; align-items: center">
             <wa-icon library="mdi" name="clipboard-text-search-outline"></wa-icon>
-            <span>${this._localize("dashboard.discovered_count", { count: 1 })}</span>
+            <span>${this._localize("dashboard.discovered_count", { count: this._importableDevices.length })}</span>
           </div>
-          <a @click=${this._toggleDiscovered}> ${this._localize("dashboard.show")} </a>
+          <a @click=${this._toggleDiscovered}>${this._localize("dashboard.show")}</a>
         </div>
       </div>
     `;
@@ -310,24 +433,18 @@ export class ESPHomePageDashboard extends LitElement {
 
   private _renderAddDeviceCard() {
     return html`
-      <div class="add-device-card">
-        <div class="add-device-header">
-          <wa-icon library="mdi" name="plus-circle-outline"></wa-icon>
-          ${this._localize("dashboard.add_new_device")}
+      <div class="add-device-card" @click=${this._openCreateDialog}>
+        <div class="add-device-icon-wrap">
+          <wa-icon library="mdi" name="plus"></wa-icon>
         </div>
-        <wa-button
-          class="create-btn"
-          variant="primary"
-          pill
-          @click=${this._openCreateDialog}
-        >
-          ${this._localize("dashboard.create_device")}
-        </wa-button>
+        <span class="add-device-label">${this._localize("dashboard.add_new_device")}</span>
+        <span class="add-device-hint">${this._localize("dashboard.add_new_device_hint")}</span>
         <a
           class="esphome-web-link"
           href="https://web.esphome.io"
           target="_blank"
           rel="noopener"
+          @click=${(e: Event) => e.stopPropagation()}
         >
           <wa-icon library="mdi" name="web"></wa-icon>
           ${this._localize("dashboard.esphome_web")}
@@ -336,36 +453,48 @@ export class ESPHomePageDashboard extends LitElement {
     `;
   }
 
-  private _renderDeviceCard(device: MockDevice) {
+  private _renderDeviceCard(device: ConfiguredDevice) {
+    const online = this._deviceStates[device.configuration] ?? false;
+    const displayName = device.friendly_name || device.name;
+
     return html`
       <div class="device-card">
-        <div class="device-card-body">
-          <div class="device-status ${device.online ? "online" : "offline"}">
-            <wa-icon library="mdi" name="lan-disconnect"></wa-icon>
-            ${device.online
-              ? this._localize("dashboard.online")
-              : this._localize("dashboard.offline")}
+        <div class="device-card-header">
+          <div class="device-card-header-left">
+            <h3 class="device-name">${displayName}</h3>
+            <p class="device-config">${device.configuration}</p>
           </div>
-          <h3 class="device-name">${device.name}</h3>
-          <p class="device-config">${device.configuration}</p>
+          <div class="device-status ${online ? "online" : "offline"}">
+            <wa-icon library="mdi" name=${online ? "wifi" : "wifi-off"}></wa-icon>
+            ${online ? this._localize("dashboard.online") : this._localize("dashboard.offline")}
+          </div>
         </div>
         <div class="device-actions">
-          <wa-button size="small" variant="primary" pill>
-            <wa-icon slot="start" library="mdi" name="refresh"></wa-icon>
-            ${this._localize("dashboard.update")}
-          </wa-button>
-          <wa-button size="small" variant="light" pill @click=${() => this._editDevice(device)}>
-            <wa-icon slot="start" library="mdi" name="pencil"></wa-icon>
+          <button class="action-btn action-btn--primary" @click=${() => this._editDevice(device)}>
+            <wa-icon library="mdi" name="pencil"></wa-icon>
             ${this._localize("dashboard.edit")}
-          </wa-button>
-          <wa-button size="small" variant="light" pill>
-            <wa-icon slot="start" library="mdi" name="format-list-bulleted"></wa-icon>
-            ${this._localize("dashboard.logs")}
-          </wa-button>
-          <div class="spacer"></div>
-          <button class="menu-btn">
-            <wa-icon library="mdi" name="dots-vertical"></wa-icon>
           </button>
+          <button class="action-btn action-btn--ghost">
+            <wa-icon library="mdi" name="refresh"></wa-icon>
+            ${this._localize("dashboard.update")}
+          </button>
+          <button class="action-btn action-btn--ghost">
+            <wa-icon library="mdi" name="format-list-bulleted"></wa-icon>
+            ${this._localize("dashboard.logs")}
+          </button>
+          <div class="spacer"></div>
+          <wa-dropdown placement="bottom-end">
+            <button slot="trigger" class="menu-btn" aria-label="More options">
+              <wa-icon library="mdi" name="dots-vertical"></wa-icon>
+            </button>
+            <wa-dropdown-item
+              .variant=${"danger"}
+              @click=${() => this._deleteDevice(device)}
+            >
+              <wa-icon slot="icon" library="mdi" name="delete"></wa-icon>
+              ${this._localize("dashboard.delete")}
+            </wa-dropdown-item>
+          </wa-dropdown>
         </div>
       </div>
     `;
@@ -374,17 +503,40 @@ export class ESPHomePageDashboard extends LitElement {
   private _renderFab() {
     return html`
       <div class="fab-container">
-        <wa-button variant="primary" pill @click=${this._openCreateDialog}>
-          <wa-icon slot="start" library="mdi" name="plus"></wa-icon>
+        <button class="fab-btn" @click=${this._openCreateDialog}>
+          <wa-icon library="mdi" name="plus"></wa-icon>
           ${this._localize("dashboard.create_device")}
-        </wa-button>
+        </button>
       </div>
     `;
   }
 
-  private _editDevice(device: MockDevice) {
+  private _editDevice(device: ConfiguredDevice) {
     window.history.pushState({}, "", `/device/${device.configuration}`);
     window.dispatchEvent(new PopStateEvent("popstate"));
+  }
+
+  private async _deleteDevice(device: ConfiguredDevice) {
+    const name = device.friendly_name || device.name;
+    try {
+      await this._api.deleteDevice(device.configuration);
+      toast.success(`"${name}" deleted`, {
+        richColors: true,
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            try {
+              await this._api.undoDeleteDevice(device.configuration);
+              toast.success(`"${name}" restored`, { richColors: true });
+            } catch {
+              toast.error(`Failed to restore "${name}"`, { richColors: true });
+            }
+          },
+        },
+      });
+    } catch {
+      toast.error(`Failed to delete "${name}"`, { richColors: true });
+    }
   }
 
   private _openCreateDialog() {

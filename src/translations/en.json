@@ -5,13 +5,15 @@
     "discovered_count": "Discovered {count} device",
     "show": "Show",
     "add_new_device": "Add new device",
+    "add_new_device_hint": "Create a new ESPHome configuration",
     "esphome_web": "ESPHome web",
     "update": "Update",
     "edit": "Edit",
     "logs": "Logs",
     "create_device": "Create device",
     "offline": "Offline",
-    "online": "Online"
+    "online": "Online",
+    "delete": "Delete"
   },
   "wizard": {
     "title_create": "Create configuration",
@@ -77,6 +79,9 @@
     "section_components_desc": "You can add components after finishing your core configuration e.g. sensors.",
     "section_automations_desc": "You can set up automations once the core config and at least one component is added.",
     "editor_title": "Choose components for your {name}",
+    "editor_title_no_components": "Choose components for your {name}",
+    "editor_title_no_automations": "Add automations for your {name}",
+    "editor_title_ready": "Editing {name}",
     "layout_components_only": "Show components only",
     "layout_split": "Split view",
     "layout_yaml_only": "Show YAML editor only",
@@ -106,6 +111,17 @@
     "component_category_number": "Numbers",
     "search_components_placeholder": "Search components…",
     "no_components_found": "No components found",
-    "add_component_action": "Add"
+    "add_component_action": "Add",
+    "save": "Save",
+    "save_yaml": "Save YAML",
+    "loading_config_catalog": "Loading configuration catalog…",
+    "loading_automation_catalog": "Loading automation catalog…",
+    "automation_target": "Target",
+    "automation_target_name": "Target component name",
+    "automation_target_placeholder": "e.g. my_sensor",
+    "automation_trigger": "Trigger",
+    "automation_trigger_label": "When",
+    "automation_action": "Action",
+    "automation_action_label": "Then do"
   }
 }

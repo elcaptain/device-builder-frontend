@@ -8,10 +8,10 @@ import {
 } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import type { MockBoard } from "../../api/mock.js";
-import { MOCK_BOARDS } from "../../api/mock.js";
+import type { BoardCatalogEntry } from "../../api/types.js";
+import type { ESPHomeAPI } from "../../api/index.js";
 import type { LocalizeFunc } from "../../common/localize.js";
-import { localizeContext } from "../../context/index.js";
+import { localizeContext, apiContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
@@ -27,19 +27,42 @@ registerMdiIcons({
   plus: mdiPlus,
 });
 
-const STARTER_KIT_ID = MOCK_BOARDS[0]?.id ?? "";
-
 @customElement("esphome-wizard-step-board")
 export class ESPHomeWizardStepBoard extends LitElement {
   @consume({ context: localizeContext, subscribe: true })
   @state()
   private _localize: LocalizeFunc = (key) => key;
 
+  @consume({ context: apiContext })
+  private _api!: ESPHomeAPI;
+
+  @state()
+  private _boards: BoardCatalogEntry[] = [];
+
+  @state()
+  private _loading = true;
+
   @state()
   private _search = "";
 
   @state()
   private _expandedBoardId: string | null = null;
+
+  connectedCallback() {
+    super.connectedCallback();
+    this._loadBoards();
+  }
+
+  private async _loadBoards() {
+    try {
+      const { boards } = await this._api.getBoardCatalog();
+      this._boards = boards;
+    } catch (e) {
+      console.error("Failed to load board catalog:", e);
+    } finally {
+      this._loading = false;
+    }
+  }
 
   static styles = [
     espHomeStyles,
@@ -50,13 +73,9 @@ export class ESPHomeWizardStepBoard extends LitElement {
         gap: var(--wa-space-m);
       }
 
-      /* ─── Search ─── */
-
       wa-input {
         width: 100%;
       }
-
-      /* ─── Helper links ─── */
 
       .helper-row {
         display: flex;
@@ -83,8 +102,6 @@ export class ESPHomeWizardStepBoard extends LitElement {
       .helper-link--bold {
         font-weight: var(--wa-font-weight-bold);
       }
-
-      /* ─── Featured card ─── */
 
       .featured-card {
         display: flex;
@@ -133,8 +150,6 @@ export class ESPHomeWizardStepBoard extends LitElement {
         margin-top: var(--wa-space-xs);
       }
 
-      /* ─── Boards grid ─── */
-
       .section-label {
         font-size: var(--wa-font-size-xs);
         font-weight: var(--wa-font-weight-bold);
@@ -156,12 +171,9 @@ export class ESPHomeWizardStepBoard extends LitElement {
         gap: var(--wa-space-s);
       }
 
-      /* ─── Board card ─── */
-
       .board-card {
         position: relative;
         border-radius: var(--wa-border-radius-l);
-        border: var(--wa-border-width-m) solid var(--wa-color-surface-lowered);
         background: var(--wa-color-surface-default);
         padding: var(--wa-space-m);
         box-sizing: border-box;
@@ -228,10 +240,6 @@ export class ESPHomeWizardStepBoard extends LitElement {
         transition: transform var(--wa-transition-normal) var(--wa-transition-easing);
       }
 
-      .expand-button[aria-pressed="true"] wa-icon {
-        transform: rotate(180deg);
-      }
-
       .board-description {
         margin: 0;
         font-size: var(--wa-font-size-xs);
@@ -246,15 +254,11 @@ export class ESPHomeWizardStepBoard extends LitElement {
         overflow: hidden;
       }
 
-      /* ─── Tags ─── */
-
       .tags {
         display: flex;
         flex-wrap: wrap;
         gap: var(--wa-space-2xs);
       }
-
-      /* ─── Card footer / actions ─── */
 
       .card-footer {
         display: flex;
@@ -290,13 +294,24 @@ export class ESPHomeWizardStepBoard extends LitElement {
         color: var(--esphome-primary);
         cursor: pointer;
       }
+
+      .loading {
+        color: var(--wa-color-text-quiet);
+        font-size: var(--wa-font-size-s);
+        text-align: center;
+        padding: var(--wa-space-xl);
+      }
     `,
   ];
 
   protected render() {
+    if (this._loading) {
+      return html`<p class="loading">${this._localize("wizard.loading_boards")}</p>`;
+    }
+
     const allBoards = this._filterBoards(this._search);
-    const featured = allBoards.find((b) => b.id === STARTER_KIT_ID);
-    const regular = allBoards.filter((b) => b.id !== STARTER_KIT_ID);
+    const featured = allBoards.find((b) => b.tags.includes("starter-kit"));
+    const regular = allBoards.filter((b) => !b.tags.includes("starter-kit"));
 
     return html`
       <wa-input
@@ -315,8 +330,12 @@ export class ESPHomeWizardStepBoard extends LitElement {
         </button>
       </div>
 
-      <p class="section-label">${this._localize("wizard.starter_kit")}</p>
-      ${featured ? this._renderFeatured(featured) : nothing}
+      ${featured
+        ? html`
+            <p class="section-label">${this._localize("wizard.starter_kit")}</p>
+            ${this._renderFeatured(featured)}
+          `
+        : nothing}
       ${regular.length
         ? html`
             <p class="section-label">${this._localize("wizard.other_boards")}</p>
@@ -332,7 +351,7 @@ export class ESPHomeWizardStepBoard extends LitElement {
     `;
   }
 
-  private _renderFeatured(board: MockBoard) {
+  private _renderFeatured(board: BoardCatalogEntry) {
     return html`
       <div class="featured-card">
         <img class="featured-image" src="/assets/board/apollo.svg" alt=${board.name} />
@@ -351,7 +370,7 @@ export class ESPHomeWizardStepBoard extends LitElement {
             )}
           </div>
           <div class="featured-footer">
-            <a class="more-info" href=${board.docsUrl} target="_blank" rel="noreferrer">
+            <a class="more-info" href=${board.docs_url} target="_blank" rel="noreferrer">
               ${this._localize("wizard.more_info")}
               <wa-icon library="mdi" name="open-in-new"></wa-icon>
             </a>
@@ -365,7 +384,7 @@ export class ESPHomeWizardStepBoard extends LitElement {
     `;
   }
 
-  private _renderBoardCard(board: MockBoard, expanded: boolean) {
+  private _renderBoardCard(board: BoardCatalogEntry, expanded: boolean) {
     return html`
       <article class="board-card ${expanded ? "board-card--expanded" : ""}">
         <div class="board-card-header">
@@ -404,7 +423,7 @@ export class ESPHomeWizardStepBoard extends LitElement {
         </div>
 
         <div class="card-footer">
-          <a class="more-info" href=${board.docsUrl} target="_blank" rel="noreferrer">
+          <a class="more-info" href=${board.docs_url} target="_blank" rel="noreferrer">
             ${this._localize("wizard.more_info")}
             <wa-icon library="mdi" name="open-in-new"></wa-icon>
           </a>
@@ -417,10 +436,10 @@ export class ESPHomeWizardStepBoard extends LitElement {
     `;
   }
 
-  private _filterBoards(search: string): MockBoard[] {
-    if (!search.trim()) return [...MOCK_BOARDS];
+  private _filterBoards(search: string): BoardCatalogEntry[] {
+    if (!search.trim()) return [...this._boards];
     const q = search.toLowerCase();
-    return MOCK_BOARDS.filter(
+    return this._boards.filter(
       (b) =>
         b.name.toLowerCase().includes(q) ||
         b.description.toLowerCase().includes(q) ||
@@ -432,13 +451,11 @@ export class ESPHomeWizardStepBoard extends LitElement {
     this._search = (ev.target as HTMLInputElement).value;
   }
 
-  private _onToggleExpand(board: MockBoard) {
+  private _onToggleExpand(board: BoardCatalogEntry) {
     this._expandedBoardId = this._expandedBoardId === board.id ? null : board.id;
   }
 
-  private _onAdd(board: MockBoard) {
-    console.log("[wizard] add board:", board.id);
-
+  private _onAdd(board: BoardCatalogEntry) {
     this.dispatchEvent(
       new CustomEvent("next-step", {
         detail: { step: "setup", board },

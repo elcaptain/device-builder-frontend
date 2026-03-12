@@ -1,11 +1,12 @@
 import { consume } from "@lit/context";
 import { css, html, LitElement } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { MOCK_BOARDS, MOCK_DEVICES, type MockBoard } from "../api/mock.js";
+import type { BoardCatalogEntry, ConfiguredDevice } from "../api/types.js";
+import type { ESPHomeAPI } from "../api/index.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import type { DeviceLayoutMode } from "../components/device/device-editor.js";
 import type { HighlightRange } from "../components/yaml-editor.js";
-import { localizeContext } from "../context/index.js";
+import { localizeContext, devicesContext, apiContext } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
 
 import "../components/device/device-editor.js";
@@ -16,6 +17,13 @@ export class ESPHomePageDevice extends LitElement {
   @consume({ context: localizeContext, subscribe: true })
   @state()
   private _localize: LocalizeFunc = (key) => key;
+
+  @consume({ context: devicesContext, subscribe: true })
+  @state()
+  private _devices: ConfiguredDevice[] = [];
+
+  @consume({ context: apiContext })
+  private _api!: ESPHomeAPI;
 
   @property()
   id = "";
@@ -29,56 +37,64 @@ export class ESPHomePageDevice extends LitElement {
   @state()
   private _openSections = new Set<number>();
 
-  private get _board(): MockBoard | null {
-    const device = MOCK_DEVICES.find((d) => d.configuration === this.id);
-    return device ? (MOCK_BOARDS.find((b) => b.id === device.boardId) ?? null) : null;
+  private get _device(): ConfiguredDevice | null {
+    return this._devices.find((d) => d.configuration === this.id) ?? null;
+  }
+
+  @state()
+  private _boards: BoardCatalogEntry[] = [];
+
+  private get _board(): BoardCatalogEntry | null {
+    // Prefer explicit board_id from metadata
+    const boardId = this._device?.board_id;
+    if (boardId) return this._boards.find((b) => b.id === boardId) ?? null;
+    // Fallback: extract `board:` value from the YAML and match by hardware board ID
+    const match = this._yaml.match(/^\s{2}board:\s*(\S+)/m);
+    if (match) return this._boards.find((b) => b.board === match[1]) ?? null;
+    return null;
   }
 
   @state()
   private _highlightRange: HighlightRange | null = null;
 
   @state()
-  private _yaml = `esphome:
-  name: star-bus-display
-  friendly_name: STAR Bus Display
-  platformio_options:
-    lib_deps:
-      - https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA.git
+  private _yaml = "";
 
-esp32:
-  board: esp32-s3-devkitc-1
-  framework:
-    type: arduino
+  async connectedCallback() {
+    super.connectedCallback();
+    this._loadBoardCatalog();
+  }
 
-logger:
+  updated(changedProperties: Map<string, unknown>) {
+    if (changedProperties.has("id") && this.id) {
+      this._loadYaml();
+    }
+  }
 
-api:
-  encryption:
-    key: "kLOwquhnuI5SrtlEDEPy9OEIc+PsyScih320WRC8Jj0="
+  private async _loadBoardCatalog() {
+    try {
+      const catalog = await this._api.getBoardCatalog();
+      this._boards = catalog.boards;
+    } catch (e) {
+      console.error("Failed to load board catalog:", e);
+    }
+  }
 
-ota:
-  - platform: esphome
-    password: "b55f91be82c96568dae39753d3728079"
+  private async _loadYaml() {
+    try {
+      this._yaml = await this._api.getEdit(this.id);
+    } catch (e) {
+      console.error("Failed to load YAML:", e);
+    }
+  }
 
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
-  ap:
-    ssid: "STAR-Bus-Display"
-
-switch:
-  - platform: gpio
-    pin: GPIOXX
-    name: "Living Room Dehumidifier"
-
-binary_sensor:
-  - platform: gpio
-    pin: GPIOXX
-    name: "Living Room Dehumidifier Toggle Button"
-    on_press:
-      then:
-        - switch.toggle: dehumidifier1
-`;
+  private async _saveYaml() {
+    try {
+      await this._api.saveEdit(this.id, this._yaml);
+    } catch (e) {
+      console.error("Failed to save YAML:", e);
+    }
+  }
 
   static styles = [
     espHomeStyles,
@@ -110,7 +126,8 @@ binary_sensor:
   ];
 
   protected render() {
-    const deviceTitle = this.id || this._localize("dashboard.create_device");
+    const deviceTitle =
+      this._device?.friendly_name || this._device?.name || this.id || this._localize("dashboard.create_device");
 
     return html`
       <div class="page">
@@ -120,11 +137,14 @@ binary_sensor:
           @layout-change=${this._onLayoutChange}
           @yaml-change=${this._onYamlChange}
           @yaml-highlight=${this._onYamlHighlight}
+          @yaml-updated=${this._onYamlUpdated}
+          @save-yaml=${this._saveYaml}
         >
           <esphome-device-navigator
             .openSections=${this._openSections}
             .yaml=${this._yaml}
             .boardName=${this._board?.name ?? ""}
+            .configuration=${this.id}
           ></esphome-device-navigator>
           <esphome-device-editor
             .yaml=${this._yaml}
@@ -133,6 +153,7 @@ binary_sensor:
             .board=${this._board}
             .justCreated=${this.justCreated}
             .highlightRange=${this._highlightRange}
+            .configuration=${this.id}
           ></esphome-device-editor>
         </div>
       </div>
@@ -159,6 +180,10 @@ binary_sensor:
 
   private _onYamlHighlight(e: CustomEvent<HighlightRange | null>) {
     this._highlightRange = e.detail;
+  }
+
+  private _onYamlUpdated(e: CustomEvent<{ yaml: string }>) {
+    this._yaml = e.detail.yaml;
   }
 }
 

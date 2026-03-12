@@ -6,6 +6,7 @@
  * - Connects to the /events WebSocket for real-time updates
  * - Auto-detects dark mode from system preference
  */
+import toast from "sonner-js";
 import { Router } from "@lit-labs/router";
 import { provide } from "@lit/context";
 import { css, html, LitElement } from "lit";
@@ -117,6 +118,7 @@ export class ESPHomeApp extends LitElement {
   }
 
   private async _init() {
+    toast.config({ toastOptions: { position: "bottom-right", richColors: true, duration: 4000 } });
     this._initDarkMode();
     try {
       this._localize = await loadLocalize();

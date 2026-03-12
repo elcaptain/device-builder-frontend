@@ -1,7 +1,7 @@
 import { consume } from "@lit/context";
 import { LitElement, css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import type { MockBoard } from "../../api/mock.js";
+import type { BoardCatalogEntry } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
@@ -13,7 +13,7 @@ export class ESPHomeWizardStepSetup extends LitElement {
   private _localize: LocalizeFunc = (key) => key;
 
   @property({ attribute: false })
-  public board: MockBoard | null = null;
+  public board: BoardCatalogEntry | null = null;
 
   @state()
   private _stage: "name" | "wifi" = "name";

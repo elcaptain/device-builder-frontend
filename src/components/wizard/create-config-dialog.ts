@@ -2,10 +2,11 @@ import { consume } from "@lit/context";
 import { mdiArrowLeft, mdiClose } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
+import type { BoardCatalogEntry } from "../../api/types.js";
+import type { ESPHomeAPI } from "../../api/index.js";
 import type { LocalizeFunc } from "../../common/localize.js";
-import { localizeContext } from "../../context/index.js";
+import { localizeContext, apiContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
-import type { MockBoard } from "../../api/mock.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
 import "@home-assistant/webawesome/dist/components/dialog/dialog.js";
@@ -18,7 +19,7 @@ import "./wizard-step-setup.js";
 registerMdiIcons({ close: mdiClose, "arrow-left": mdiArrowLeft });
 
 type WizardStep = "method" | "board" | "setup" | "empty-config";
-type WizardStepDetail = WizardStep | { step: WizardStep; board?: MockBoard | null };
+type WizardStepDetail = WizardStep | { step: WizardStep; board?: BoardCatalogEntry | null };
 
 @customElement("esphome-create-config-dialog")
 export class ESPHomeCreateConfigDialog extends LitElement {
@@ -26,11 +27,17 @@ export class ESPHomeCreateConfigDialog extends LitElement {
   @state()
   private _localize: LocalizeFunc = (key) => key;
 
+  @consume({ context: apiContext })
+  private _api!: ESPHomeAPI;
+
   @state()
   private _step: WizardStep = "method";
 
   @state()
-  private _selectedBoard: MockBoard | null = null;
+  private _selectedBoard: BoardCatalogEntry | null = null;
+
+  @state()
+  private _submitting = false;
 
   @query("wa-dialog")
   private _dialog!: HTMLElement & { open: boolean };
@@ -45,8 +52,6 @@ export class ESPHomeCreateConfigDialog extends LitElement {
       wa-dialog.wide {
         --width: 680px;
       }
-
-      /* ─── Header ─── */
 
       wa-dialog::part(header) {
         background: var(--esphome-primary);
@@ -87,7 +92,6 @@ export class ESPHomeCreateConfigDialog extends LitElement {
         opacity: 1;
       }
 
-      /* Strip button chrome — render as plain icon */
       wa-dialog::part(close-button__base) {
         background: transparent;
         border: none;
@@ -106,11 +110,18 @@ export class ESPHomeCreateConfigDialog extends LitElement {
       wa-dialog::part(footer) {
         display: none;
       }
+
+      .error {
+        color: var(--esphome-error);
+        font-size: var(--wa-font-size-s);
+        margin-top: var(--wa-space-s);
+      }
     `,
   ];
 
   public open() {
     this._step = "method";
+    this._submitting = false;
     this._dialog.open = true;
   }
 
@@ -194,28 +205,98 @@ export class ESPHomeCreateConfigDialog extends LitElement {
     }
   }
 
-  private _onCreateEmptyConfig() {
-    // TODO: call BE to create empty config, get back device_id
-    // const { id } = await api.createEmptyConfig(...);
-    this.close();
-    // TODO: replace "new-device-id" with the actual id returned by the BE
-    window.location.href = "/device/new-device-id";
+  private async _onCreateEmptyConfig(e: CustomEvent<{ name: string }>) {
+    if (this._submitting) return;
+    const { name } = e.detail;
+    const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    this._submitting = true;
+    try {
+      const { configuration } = await this._api.createWizard({
+        name: slug,
+        platform: "",
+        board: "",
+        ssid: "",
+        psk: "",
+        password: "",
+        type: "empty",
+      });
+      this.close();
+      window.history.pushState({}, "", `/device/${configuration}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    } catch (err) {
+      console.error("Failed to create empty config:", err);
+    } finally {
+      this._submitting = false;
+    }
   }
 
-  private _onImportConfig() {
-    // TODO: call BE to import config from file, get back device_id
-    // const { id } = await api.importConfig(...);
-    this.close();
-    // TODO: replace "new-device-id" with the actual id returned by the BE
-    window.location.href = "/device/new-device-id";
+  private async _onImportConfig(e: CustomEvent<{ file: File }>) {
+    if (this._submitting) return;
+    const { file } = e.detail;
+    const name = file.name.replace(/\.(yaml|yml)$/i, "");
+    const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+
+    let fileContent: string;
+    try {
+      fileContent = await file.text();
+    } catch {
+      console.error("Failed to read file");
+      return;
+    }
+
+    this._submitting = true;
+    try {
+      const { configuration } = await this._api.createWizard({
+        name: slug,
+        platform: "",
+        board: "",
+        ssid: "",
+        psk: "",
+        password: "",
+        type: "upload",
+        file_content: fileContent,
+      });
+      this.close();
+      window.history.pushState({}, "", `/device/${configuration}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    } catch (err) {
+      console.error("Failed to import config:", err);
+    } finally {
+      this._submitting = false;
+    }
   }
 
-  private _onFinishSetup() {
-    // TODO: call BE to create device from wizard setup, get back device_id
-    // const { id } = await api.createDevice(...);
-    this.close();
-    // TODO: replace "new-device-id" with the actual id returned by the BE
-    window.location.href = "/device/new-device-id";
+  private async _onFinishSetup(
+    e: CustomEvent<{
+      board: BoardCatalogEntry | null;
+      name: string;
+      wifiSsid: string;
+      wifiPassword: string;
+    }>
+  ) {
+    if (this._submitting) return;
+    const { board, name, wifiSsid, wifiPassword } = e.detail;
+    const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    this._submitting = true;
+    try {
+      const { configuration } = await this._api.createWizard({
+        name: slug,
+        platform: board?.platform ?? "",
+        board: board?.board ?? "",
+        ssid: wifiSsid,
+        psk: wifiPassword,
+        password: "",
+        type: "basic",
+        board_id: board?.id,
+      });
+      this.close();
+      window.history.pushState({}, "", `/device/${configuration}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    } catch (err) {
+      console.error("Failed to create device:", err);
+    } finally {
+      this._submitting = false;
+    }
   }
 }
 

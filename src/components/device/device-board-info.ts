@@ -7,7 +7,7 @@ import {
 } from "@mdi/js";
 import { css, html, LitElement, nothing } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
-import type { MockBoard } from "../../api/mock.js";
+import type { BoardCatalogEntry } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
@@ -39,13 +39,16 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
   private _localize: LocalizeFunc = (key) => key;
 
   @property({ attribute: false })
-  board: MockBoard | null = null;
+  board: BoardCatalogEntry | null = null;
 
   @property()
   yaml = "";
 
   @property({ type: Boolean })
   justCreated = false;
+
+  @property()
+  configuration = "";
 
   @query("esphome-add-component-dialog")
   private _addComponentDialog!: ESPHomeAddComponentDialog;
@@ -201,7 +204,7 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
             )}
             <a
               class="board-info-link"
-              href=${this.board.docsUrl}
+              href=${this.board.docs_url}
               target="_blank"
               rel="noreferrer"
               >${this._localize("device.more_info")}
@@ -211,7 +214,7 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
           <p class="board-description">${this.board.description}</p>
         </div>
         <div class="board-image">
-          <img src="/assets/board/apollo.svg" alt="${this.board.name}" />
+          <img src=${this._boardImageUrl(this.board.id)} alt="${this.board.name}" />
         </div>
       </div>
 
@@ -252,11 +255,18 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
 
       <esphome-add-component-dialog
         .boardName=${this.board.name}
+        .configuration=${this.configuration}
       ></esphome-add-component-dialog>
       <esphome-add-automation-dialog
         .boardName=${this.board.name}
+        .configuration=${this.configuration}
       ></esphome-add-automation-dialog>
     `;
+  }
+
+  private _boardImageUrl(boardId: string): string {
+    if (boardId.startsWith("apollo")) return "/assets/board/apollo.svg";
+    return "/assets/board/default.svg";
   }
 }
 

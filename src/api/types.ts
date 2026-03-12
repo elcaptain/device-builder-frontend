@@ -16,6 +16,7 @@ export interface ConfiguredDevice {
   current_version: string;
   deployed_version: string;
   loaded_integrations: string[];
+  board_id?: string;
 }
 
 /** An adoptable/importable ESPHome device. */
@@ -60,6 +61,112 @@ export interface Board {
   board: string;
 }
 
+/** A board entry in the board catalog */
+export interface BoardCatalogEntry {
+  id: string;
+  name: string;
+  description: string;
+  platform: string;
+  board: string;
+  tags: string[];
+  docs_url: string;
+  image_url: string | null;
+  contents?: string[] | null;
+}
+
+/** Response from GET /boards/catalog */
+export interface BoardCatalogResponse {
+  boards: BoardCatalogEntry[];
+}
+
+/** A field definition for a component, config section, or automation */
+export interface ComponentField {
+  key: string;
+  label: string;
+  type: "string" | "number" | "boolean" | "select" | "pin";
+  required: boolean;
+  default?: string | number | boolean | null;
+  options?: string[] | null;
+}
+
+/** A platform variant of a component type */
+export interface ComponentPlatform {
+  id: string;
+  name: string;
+  description: string;
+  yaml_template: string;
+  fields: ComponentField[];
+}
+
+/** A component type in the component catalog */
+export interface ComponentType {
+  id: string;
+  name: string;
+  description: string;
+  docs_url: string;
+  icon: string;
+  platforms: ComponentPlatform[];
+}
+
+/** Response from GET /components/catalog */
+export interface ComponentCatalogResponse {
+  components: ComponentType[];
+}
+
+/** An automation trigger */
+export interface AutomationTrigger {
+  id: string;
+  name: string;
+  description: string;
+  applicable_to: string[];
+  fields: ComponentField[];
+}
+
+/** An automation action */
+export interface AutomationAction {
+  id: string;
+  name: string;
+  description: string;
+  fields: ComponentField[];
+}
+
+/** Response from GET /automations/catalog */
+export interface AutomationCatalogResponse {
+  triggers: AutomationTrigger[];
+  actions: AutomationAction[];
+}
+
+/** A config section template */
+export interface ConfigSection {
+  id: string;
+  name: string;
+  description: string;
+  docs_url: string;
+  icon: string;
+  yaml_template: string;
+  fields: ComponentField[];
+}
+
+/** Response from GET /config/catalog */
+export interface ConfigCatalogResponse {
+  sections: ConfigSection[];
+}
+
+/** Response from POST /devices/{config}/components */
+export interface AddComponentResponse {
+  yaml: string;
+}
+
+/** Response from POST /devices/{config}/config-sections */
+export interface AddConfigSectionResponse {
+  yaml: string;
+}
+
+/** Response from POST /devices/{config}/automations */
+export interface AddAutomationResponse {
+  yaml: string;
+}
+
 /** Wizard request body for POST /wizard */
 export interface WizardRequest {
   name: string;
@@ -70,6 +177,7 @@ export interface WizardRequest {
   password: string;
   type: "basic" | "upload" | "empty";
   file_content?: string;
+  board_id?: string;
 }
 
 /** Import request body for POST /import */
