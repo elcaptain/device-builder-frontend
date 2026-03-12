@@ -1,19 +1,18 @@
 import { consume } from "@lit/context";
-import { mdiArrowCollapseRight, mdiWeatherNight, mdiWeatherSunny } from "@mdi/js";
+import { mdiArrowCollapseRight } from "@mdi/js";
 import { LitElement, css, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { darkModeContext, localizeContext } from "../../context/index.js";
-import type { LocalizeFunc } from "../../common/localize.js";
-import { espHomeStyles } from "../../styles/shared.js";
-import { registerMdiIcons } from "../../util/register-icons.js";
+import type { LocalizeFunc } from "../common/localize.js";
+import { localizeContext } from "../context/index.js";
+import { espHomeStyles } from "../styles/shared.js";
+import { registerMdiIcons } from "../util/register-icons.js";
 
 import "@home-assistant/webawesome/dist/components/button/button.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
+import "./esphome-header-actions.js";
 
 registerMdiIcons({
   "arrow-collapse-right": mdiArrowCollapseRight,
-  "weather-sunny": mdiWeatherSunny,
-  "weather-night": mdiWeatherNight,
 });
 
 @customElement("esphome-layout")
@@ -22,10 +21,6 @@ export class ESPHomeLayout extends LitElement {
   @state()
   private _localize: LocalizeFunc = (key) => key;
 
-  @consume({ context: darkModeContext, subscribe: true })
-  @state()
-  private _darkMode = false;
-
   static styles = [
     espHomeStyles,
     css`
@@ -33,8 +28,6 @@ export class ESPHomeLayout extends LitElement {
         display: block;
         min-height: 100%;
       }
-
-      /* ─── Header ─── */
 
       .app-header {
         display: flex;
@@ -99,25 +92,6 @@ export class ESPHomeLayout extends LitElement {
       .header-spacer {
         flex: 1;
       }
-
-      .dark-mode-toggle {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border: none;
-        background: none;
-        color: var(--esphome-on-primary);
-        cursor: pointer;
-        padding: var(--wa-space-xs);
-        border-radius: var(--wa-border-radius-m);
-        opacity: 0.85;
-        font-size: 22px;
-      }
-
-      .dark-mode-toggle:hover {
-        opacity: 1;
-        background: color-mix(in srgb, var(--esphome-on-primary), transparent 85%);
-      }
     `,
   ];
 
@@ -139,22 +113,10 @@ export class ESPHomeLayout extends LitElement {
           <p>${this._localize("dashboard.subtitle")}</p>
         </div>
         <div class="header-spacer"></div>
-        <button
-          class="dark-mode-toggle"
-          @click=${this._toggleDarkMode}
-          title=${this._darkMode ? "Switch to light mode" : "Switch to dark mode"}
-        >
-          <wa-icon library="mdi" name=${this._darkMode ? "weather-sunny" : "weather-night"}></wa-icon>
-        </button>
+        <esphome-header-actions></esphome-header-actions>
       </div>
       <slot></slot>
     `;
-  }
-
-  private _toggleDarkMode() {
-    this.dispatchEvent(
-      new CustomEvent("toggle-dark-mode", { bubbles: true, composed: true })
-    );
   }
 }
 

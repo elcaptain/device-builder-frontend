@@ -220,6 +220,11 @@ export class ESPHomeAPI {
     });
   }
 
+  /** Trigger OTA update for all online devices. */
+  async updateAll(): Promise<{ queued: number }> {
+    return this._request("POST", "update-all");
+  }
+
   /** Ignore/unignore a discovered device. */
   async ignoreDevice(name: string, ignore: boolean): Promise<unknown> {
     return this._request("POST", "ignore-device", {

@@ -12,7 +12,16 @@
     "logs": "Journaux",
     "create_device": "Créer un appareil",
     "offline": "Hors ligne",
-    "online": "En ligne"
+    "online": "En ligne",
+    "delete": "Supprimer",
+    "add_new_device_hint": "Créer une nouvelle configuration ESPHome",
+    "search_placeholder": "Rechercher des appareils…",
+    "device_singular": "appareil",
+    "device_plural": "appareils",
+    "search_of": "sur {total}",
+    "no_results_title": "Aucun appareil trouvé",
+    "no_results_desc": "Aucun appareil ne correspond à \"{query}\". Essayez un autre nom ou fichier de configuration.",
+    "no_results_clear": "Effacer la recherche"
   },
   "wizard": {
     "title_create": "Créer une configuration",
@@ -106,6 +115,43 @@
     "component_category_number": "Nombres",
     "search_components_placeholder": "Rechercher des composants…",
     "no_components_found": "Aucun composant trouvé",
-    "add_component_action": "Ajouter"
+    "add_component_action": "Ajouter",
+    "save": "Enregistrer",
+    "save_yaml": "Enregistrer le YAML",
+    "loading_config_catalog": "Chargement du catalogue de configuration…",
+    "loading_automation_catalog": "Chargement du catalogue d'automatisations…",
+    "automation_target": "Cible",
+    "automation_target_name": "Nom du composant cible",
+    "automation_target_placeholder": "ex. mon_capteur",
+    "automation_trigger": "Déclencheur",
+    "automation_trigger_label": "Quand",
+    "automation_action": "Action",
+    "automation_action_label": "Alors faire",
+    "editor_title_no_components": "Choisissez des composants pour votre {name}",
+    "editor_title_no_automations": "Ajoutez des automatisations pour votre {name}",
+    "editor_title_ready": "Édition de {name}",
+    "more_info": "Plus d'infos"
+  },
+  "layout": {
+    "secrets": "Secrets",
+    "update_all": "Tout mettre à jour",
+    "update_all_title": "Mettre à jour tous les appareils",
+    "update_all_desc": "Cela déclenchera une mise à jour OTA pour tous les appareils actuellement en ligne. Êtes-vous sûr ?",
+    "update_all_confirm": "Tout mettre à jour",
+    "update_all_started": "{count} mise(s) à jour démarrée(s)",
+    "update_all_none": "Aucun appareil en ligne à mettre à jour",
+    "update_all_error": "Échec du démarrage des mises à jour",
+    "updating": "Mise à jour…",
+    "cancel": "Annuler",
+    "light_mode": "Passer en mode clair",
+    "dark_mode": "Passer en mode sombre"
+  },
+  "secrets": {
+    "title": "Secrets",
+    "desc": "Gérez les valeurs sensibles référencées dans vos configurations d'appareils avec !secret",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "saved": "Secrets enregistrés",
+    "save_error": "Échec de l'enregistrement des secrets"
   }
 }

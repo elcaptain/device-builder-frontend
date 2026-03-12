@@ -6,11 +6,11 @@
  * - Connects to the /events WebSocket for real-time updates
  * - Auto-detects dark mode from system preference
  */
-import toast from "sonner-js";
 import { Router } from "@lit-labs/router";
 import { provide } from "@lit/context";
 import { css, html, LitElement } from "lit";
 import { customElement, state } from "lit/decorators.js";
+import toast from "sonner-js";
 import { ESPHomeAPI } from "../api/index.js";
 import type { AdoptableDevice, ConfiguredDevice, DashboardEvent } from "../api/types.js";
 import { defaultLocalize, loadLocalize, type LocalizeFunc } from "../common/localize.js";
@@ -27,7 +27,7 @@ import { espHomeStyles } from "../styles/shared.js";
 
 // Import child components
 import "../pages/dashboard.js";
-import "./wizard/esphome-layout.js";
+import "./esphome-layout.js";
 
 @customElement("esphome-app")
 export class ESPHomeApp extends LitElement {
@@ -66,6 +66,14 @@ export class ESPHomeApp extends LitElement {
     {
       path: "/",
       render: () => html`<esphome-page-dashboard></esphome-page-dashboard>`,
+    },
+    {
+      path: "/secrets",
+      enter: async () => {
+        await import("../pages/secrets.js");
+        return true;
+      },
+      render: () => html`<esphome-page-secrets></esphome-page-secrets>`,
     },
     {
       path: "/device/:id",
@@ -118,7 +126,9 @@ export class ESPHomeApp extends LitElement {
   }
 
   private async _init() {
-    toast.config({ toastOptions: { position: "bottom-right", richColors: true, duration: 4000 } });
+    toast.config({
+      toastOptions: { position: "bottom-right", richColors: true, duration: 4000 },
+    });
     this._initDarkMode();
     try {
       this._localize = await loadLocalize();

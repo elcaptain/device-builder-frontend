@@ -13,7 +13,14 @@
     "create_device": "Create device",
     "offline": "Offline",
     "online": "Online",
-    "delete": "Delete"
+    "delete": "Delete",
+    "search_placeholder": "Search devices…",
+    "device_singular": "device",
+    "device_plural": "devices",
+    "search_of": "of {total}",
+    "no_results_title": "No devices found",
+    "no_results_desc": "No devices match \"{query}\". Try a different name or configuration file.",
+    "no_results_clear": "Clear search"
   },
   "wizard": {
     "title_create": "Create configuration",
@@ -123,5 +130,27 @@
     "automation_trigger_label": "When",
     "automation_action": "Action",
     "automation_action_label": "Then do"
+  },
+  "layout": {
+    "secrets": "Secrets",
+    "update_all": "Update All",
+    "update_all_title": "Update all devices",
+    "update_all_desc": "This will trigger an OTA update for all currently online devices. Are you sure?",
+    "update_all_confirm": "Update All",
+    "update_all_started": "{count} device update(s) started",
+    "update_all_none": "No online devices to update",
+    "update_all_error": "Failed to start updates",
+    "updating": "Updating…",
+    "cancel": "Cancel",
+    "light_mode": "Switch to light mode",
+    "dark_mode": "Switch to dark mode"
+  },
+  "secrets": {
+    "title": "Secrets",
+    "desc": "Manage sensitive values referenced in your device configurations with !secret",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Secrets saved",
+    "save_error": "Failed to save secrets"
   }
 }

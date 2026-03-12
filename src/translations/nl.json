@@ -12,7 +12,16 @@
     "logs": "Logboek",
     "create_device": "Apparaat aanmaken",
     "offline": "Offline",
-    "online": "Online"
+    "online": "Online",
+    "delete": "Verwijderen",
+    "add_new_device_hint": "Maak een nieuwe ESPHome-configuratie aan",
+    "search_placeholder": "Apparaten zoeken…",
+    "device_singular": "apparaat",
+    "device_plural": "apparaten",
+    "search_of": "van {total}",
+    "no_results_title": "Geen apparaten gevonden",
+    "no_results_desc": "Geen apparaten komen overeen met \"{query}\". Probeer een andere naam of configuratiebestand.",
+    "no_results_clear": "Zoekopdracht wissen"
   },
   "wizard": {
     "title_create": "Configuratie aanmaken",
@@ -106,6 +115,43 @@
     "component_category_number": "Getallen",
     "search_components_placeholder": "Componenten zoeken…",
     "no_components_found": "Geen componenten gevonden",
-    "add_component_action": "Toevoegen"
+    "add_component_action": "Toevoegen",
+    "save": "Opslaan",
+    "save_yaml": "YAML opslaan",
+    "loading_config_catalog": "Configuratiecatalogus laden…",
+    "loading_automation_catalog": "Automatiseringscatalogus laden…",
+    "automation_target": "Doel",
+    "automation_target_name": "Naam van het doelcomponent",
+    "automation_target_placeholder": "bijv. mijn_sensor",
+    "automation_trigger": "Trigger",
+    "automation_trigger_label": "Wanneer",
+    "automation_action": "Actie",
+    "automation_action_label": "Dan doen",
+    "editor_title_no_components": "Kies componenten voor uw {name}",
+    "editor_title_no_automations": "Voeg automatiseringen toe voor uw {name}",
+    "editor_title_ready": "{name} bewerken",
+    "more_info": "Meer info"
+  },
+  "layout": {
+    "secrets": "Geheimen",
+    "update_all": "Alles bijwerken",
+    "update_all_title": "Alle apparaten bijwerken",
+    "update_all_desc": "Dit zal een OTA-update starten voor alle momenteel online apparaten. Weet u het zeker?",
+    "update_all_confirm": "Alles bijwerken",
+    "update_all_started": "{count} apparaat-update(s) gestart",
+    "update_all_none": "Geen online apparaten om bij te werken",
+    "update_all_error": "Starten van updates mislukt",
+    "updating": "Bijwerken…",
+    "cancel": "Annuleren",
+    "light_mode": "Overschakelen naar lichte modus",
+    "dark_mode": "Overschakelen naar donkere modus"
+  },
+  "secrets": {
+    "title": "Geheimen",
+    "desc": "Beheer gevoelige waarden waarnaar in uw apparaatconfiguraties wordt verwezen met !secret",
+    "save": "Opslaan",
+    "saving": "Opslaan…",
+    "saved": "Geheimen opgeslagen",
+    "save_error": "Opslaan van geheimen mislukt"
   }
 }

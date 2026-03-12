@@ -5,6 +5,7 @@ import {
   mdiDelete,
   mdiDotsVertical,
   mdiFormatListBulleted,
+  mdiMagnify,
   mdiPencil,
   mdiPlus,
   mdiPlusCircleOutline,
@@ -37,13 +38,14 @@ import type { ESPHomeCreateConfigDialog } from "../components/wizard/create-conf
 
 registerMdiIcons({
   "clipboard-text-search-outline": mdiClipboardTextSearchOutline,
+  magnify: mdiMagnify,
   plus: mdiPlus,
   "plus-circle-outline": mdiPlusCircleOutline,
   refresh: mdiRefresh,
   pencil: mdiPencil,
   "format-list-bulleted": mdiFormatListBulleted,
   "dots-vertical": mdiDotsVertical,
-  "wifi": mdiWifi,
+  wifi: mdiWifi,
   "wifi-off": mdiWifiOff,
   web: mdiWeb,
   delete: mdiDelete,
@@ -72,6 +74,9 @@ export class ESPHomePageDashboard extends LitElement {
 
   @state()
   private _showDiscovered = false;
+
+  @state()
+  private _search = "";
 
   @query("esphome-create-config-dialog")
   private _createDialog!: ESPHomeCreateConfigDialog;
@@ -140,6 +145,117 @@ export class ESPHomePageDashboard extends LitElement {
         grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
         gap: var(--wa-space-l);
         padding: var(--wa-space-l);
+      }
+
+      /* ─── Search toolbar ─── */
+
+      .toolbar {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: var(--wa-space-l) var(--wa-space-l) 0;
+      }
+
+      .search-wrap {
+        position: relative;
+        max-width: 380px;
+      }
+
+      .search-icon {
+        position: absolute;
+        left: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 18px;
+        color: var(--wa-color-text-quiet);
+        pointer-events: none;
+        display: flex;
+        align-items: center;
+      }
+
+      .search-input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 9px 14px 9px 38px;
+        font-size: var(--wa-font-size-s);
+        font-family: inherit;
+        color: var(--wa-color-text-normal);
+        background: var(--wa-color-surface-raised);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+        border-radius: var(--wa-border-radius-l);
+        outline: none;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+
+      .search-input::placeholder {
+        color: var(--wa-color-text-quiet);
+      }
+
+      .search-input:focus {
+        border-color: var(--esphome-primary);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--esphome-primary), transparent 80%);
+      }
+
+      .device-count {
+        font-size: var(--wa-font-size-xs);
+        color: var(--wa-color-text-quiet);
+        padding-left: 2px;
+      }
+
+      .device-count strong {
+        color: var(--wa-color-text-normal);
+        font-weight: var(--wa-font-weight-bold);
+      }
+
+      /* ─── Empty search state ─── */
+
+      .empty-search {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--wa-space-s);
+        padding: var(--wa-space-4xl) var(--wa-space-l);
+        text-align: center;
+      }
+
+      .empty-search-icon {
+        font-size: 48px;
+        color: color-mix(in srgb, var(--esphome-primary), transparent 60%);
+        line-height: 1;
+      }
+
+      .empty-search-title {
+        margin: 0;
+        font-size: var(--wa-font-size-m);
+        font-weight: var(--wa-font-weight-bold);
+        color: var(--wa-color-text-normal);
+      }
+
+      .empty-search-desc {
+        margin: 0;
+        font-size: var(--wa-font-size-s);
+        color: var(--wa-color-text-quiet);
+        max-width: 320px;
+      }
+
+      .empty-search-clear {
+        margin-top: var(--wa-space-xs);
+        background: none;
+        border: var(--wa-border-width-s) solid var(--esphome-primary);
+        color: var(--esphome-primary);
+        padding: 6px 16px;
+        border-radius: var(--wa-border-radius-m);
+        font-size: var(--wa-font-size-s);
+        font-family: inherit;
+        font-weight: var(--wa-font-weight-bold);
+        cursor: pointer;
+        transition: background 0.12s;
+      }
+
+      .empty-search-clear:hover {
+        background: color-mix(in srgb, var(--esphome-primary), transparent 90%);
       }
 
       /* ─── Add New Device Card ─── */
@@ -405,14 +521,69 @@ export class ESPHomePageDashboard extends LitElement {
   ];
 
   protected render() {
+    const q = this._search.trim().toLowerCase();
+    const filtered = q
+      ? this._devices.filter(
+          (d) =>
+            (d.friendly_name || d.name).toLowerCase().includes(q) ||
+            d.configuration.toLowerCase().includes(q)
+        )
+      : this._devices;
+    const total = this._devices.length;
+
     return html`
       ${this._importableDevices.length > 0 ? this._renderDiscoveredBanner() : ""}
+      ${total > 0 ? this._renderToolbar(filtered.length, total) : ""}
       <div class="devices-grid">
         ${this._devices.length === 0 ? this._renderAddDeviceCard() : ""}
-        ${this._devices.map((device) => this._renderDeviceCard(device))}
+        ${filtered.length === 0 && q ? this._renderEmptySearch() : ""}
+        ${filtered.map((device) => this._renderDeviceCard(device))}
       </div>
       ${this._renderFab()}
       <esphome-create-config-dialog></esphome-create-config-dialog>
+    `;
+  }
+
+  private _renderToolbar(matchCount: number, total: number) {
+    const q = this._search.trim();
+    const unit = matchCount === 1
+      ? this._localize("dashboard.device_singular")
+      : this._localize("dashboard.device_plural");
+    const suffix = q
+      ? " " + this._localize("dashboard.search_of", { total })
+      : "";
+
+    return html`
+      <div class="toolbar">
+        <div class="search-wrap">
+          <span class="search-icon">
+            <wa-icon library="mdi" name="magnify"></wa-icon>
+          </span>
+          <input
+            class="search-input"
+            type="search"
+            placeholder=${this._localize("dashboard.search_placeholder")}
+            .value=${this._search}
+            @input=${(e: Event) => { this._search = (e.target as HTMLInputElement).value; }}
+          />
+        </div>
+        <span class="device-count"><strong>${matchCount}</strong> ${unit}${suffix}</span>
+      </div>
+    `;
+  }
+
+  private _renderEmptySearch() {
+    return html`
+      <div class="empty-search">
+        <wa-icon class="empty-search-icon" library="mdi" name="magnify"></wa-icon>
+        <h3 class="empty-search-title">${this._localize("dashboard.no_results_title")}</h3>
+        <p class="empty-search-desc">
+          ${this._localize("dashboard.no_results_desc", { query: this._search.trim() })}
+        </p>
+        <button class="empty-search-clear" @click=${() => { this._search = ""; }}>
+          ${this._localize("dashboard.no_results_clear")}
+        </button>
+      </div>
     `;
   }
 
