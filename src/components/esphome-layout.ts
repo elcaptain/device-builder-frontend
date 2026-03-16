@@ -73,6 +73,10 @@ export class ESPHomeLayout extends LitElement {
         justify-content: center;
         flex-shrink: 0;
         text-decoration: none;
+        background: none;
+        border: none;
+        padding: 0;
+        cursor: pointer;
       }
 
       .header-text h1 {
@@ -95,6 +99,11 @@ export class ESPHomeLayout extends LitElement {
     `,
   ];
 
+  private _goHome() {
+    window.history.pushState({}, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }
+
   protected render() {
     return html`
       <div class="app-header">
@@ -104,9 +113,9 @@ export class ESPHomeLayout extends LitElement {
             <img src="/assets/logo/ha.svg" alt="Home Assistant" />
           </wa-button>
           <div class="header-separator"></div>
-          <a class="header-logo" href="/">
+          <button class="header-logo" @click=${this._goHome}>
             <img src="/assets/logo/esphome.svg" alt="ESPHome" />
-          </a>
+          </button>
         </div>
         <div class="header-text">
           <h1>${this._localize("dashboard.title")}</h1>

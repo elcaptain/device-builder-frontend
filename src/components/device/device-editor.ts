@@ -65,7 +65,7 @@ export class ESPHomeDeviceEditor extends LitElement {
       .card {
         background: var(--wa-color-surface-default);
         border-radius: var(--wa-border-radius-l);
-        border: var(--wa-border-width-s) solid var(--wa-color-surface-lowered);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
         box-shadow: var(--wa-elevation-02);
         display: flex;
         flex-direction: column;
@@ -199,7 +199,7 @@ export class ESPHomeDeviceEditor extends LitElement {
       }
 
       .pane-divider {
-        background: var(--wa-color-surface-lowered);
+        background: var(--wa-color-surface-border);
         width: 1px;
         align-self: stretch;
       }

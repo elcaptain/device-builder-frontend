@@ -87,7 +87,7 @@ export class ESPHomeWizardStepSetup extends LitElement {
 
       .divider {
         border: none;
-        border-top: 1px solid var(--wa-color-surface-lowered);
+        border-top: 1px solid var(--wa-color-surface-border);
         margin: 0;
       }
 

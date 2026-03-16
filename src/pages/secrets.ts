@@ -98,7 +98,7 @@ export class ESPHomePageSecrets extends LitElement {
         flex: 1;
         background: var(--wa-color-surface-default);
         border-radius: var(--wa-border-radius-l);
-        border: var(--wa-border-width-s) solid var(--wa-color-surface-lowered);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
         box-shadow: var(--wa-elevation-02);
         display: flex;
         flex-direction: column;
@@ -128,7 +128,8 @@ export class ESPHomePageSecrets extends LitElement {
             <p>${this._localize("secrets.desc")}</p>
           </div>
           <wa-button
-            variant="primary"
+            size="small"
+            variant="brand"
             ?disabled=${this._saving || !this._loaded}
             @click=${this._save}
           >

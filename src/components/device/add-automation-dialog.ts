@@ -136,7 +136,7 @@ export class ESPHomeAddAutomationDialog extends LitElement {
         font-family: inherit;
         color: var(--wa-color-text-normal);
         background: var(--wa-color-surface-default);
-        border: var(--wa-border-width-m) solid var(--esphome-primary-light);
+        border: var(--wa-border-width-m) solid var(--wa-color-surface-border);
         border-radius: var(--wa-border-radius-m);
         box-sizing: border-box;
         outline: none;

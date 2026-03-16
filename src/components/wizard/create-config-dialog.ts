@@ -39,6 +39,9 @@ export class ESPHomeCreateConfigDialog extends LitElement {
   @state()
   private _submitting = false;
 
+  @state()
+  private _importError = "";
+
   @query("wa-dialog")
   private _dialog!: HTMLElement & { open: boolean };
 
@@ -122,6 +125,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
   public open() {
     this._step = "method";
     this._submitting = false;
+    this._importError = "";
     this._dialog.open = true;
   }
 
@@ -161,6 +165,9 @@ export class ESPHomeCreateConfigDialog extends LitElement {
           ${this._title}
         </span>
         ${this._renderStep()}
+        ${this._importError
+          ? html`<p class="error">${this._importError}</p>`
+          : nothing}
       </wa-dialog>
     `;
   }
@@ -236,11 +243,13 @@ export class ESPHomeCreateConfigDialog extends LitElement {
     const name = file.name.replace(/\.(yaml|yml)$/i, "");
     const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
 
+    this._importError = "";
+
     let fileContent: string;
     try {
       fileContent = await file.text();
     } catch {
-      console.error("Failed to read file");
+      this._importError = "Failed to read the file.";
       return;
     }
 
@@ -260,7 +269,10 @@ export class ESPHomeCreateConfigDialog extends LitElement {
       window.history.pushState({}, "", `/device/${configuration}`);
       window.dispatchEvent(new PopStateEvent("popstate"));
     } catch (err) {
-      console.error("Failed to import config:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      this._importError = msg.includes("409")
+        ? `A device named "${slug}" already exists.`
+        : "Failed to import the config file. Please try again.";
     } finally {
       this._submitting = false;
     }

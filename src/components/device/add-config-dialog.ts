@@ -126,7 +126,7 @@ export class ESPHomeAddConfigDialog extends LitElement {
         flex-direction: column;
         gap: var(--wa-space-2xs);
         padding: var(--wa-space-m);
-        border: var(--wa-border-width-s) solid var(--wa-color-surface-lowered);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
         border-radius: var(--wa-border-radius-l);
         cursor: pointer;
         background: none;
@@ -190,7 +190,7 @@ export class ESPHomeAddConfigDialog extends LitElement {
         font-family: inherit;
         color: var(--wa-color-text-normal);
         background: var(--wa-color-surface-default);
-        border: var(--wa-border-width-m) solid var(--esphome-primary-light);
+        border: var(--wa-border-width-m) solid var(--wa-color-surface-border);
         border-radius: var(--wa-border-radius-m);
         box-sizing: border-box;
         outline: none;
@@ -217,7 +217,7 @@ export class ESPHomeAddConfigDialog extends LitElement {
 
       .btn-secondary {
         background: none;
-        border-color: var(--esphome-primary-light);
+        border-color: var(--wa-color-surface-border);
         color: var(--wa-color-text-normal);
       }
 

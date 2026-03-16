@@ -37,3 +37,8 @@ export const darkModeContext = createContext<boolean>(Symbol("esphome-dark-mode"
 export const localizeContext = createContext<LocalizeFunc>(
   Symbol("esphome-localize")
 );
+
+/** Context for whether the initial device list has been loaded. */
+export const devicesLoadedContext = createContext<boolean>(
+  Symbol("esphome-devices-loaded")
+);

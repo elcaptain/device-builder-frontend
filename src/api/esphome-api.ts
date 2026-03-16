@@ -19,6 +19,7 @@ import type {
   AddConfigSectionResponse,
   AddAutomationResponse,
   WizardRequest,
+  WizardResponse,
   ImportRequest,
   WsSpawnMessage,
   WsEvent,
@@ -197,7 +198,7 @@ export class ESPHomeAPI {
   }
 
   /** Create a new device via the wizard. */
-  async createWizard(data: WizardRequest): Promise<unknown> {
+  async createWizard(data: WizardRequest): Promise<WizardResponse> {
     return this._request("POST", "wizard", { body: data });
   }
 
@@ -213,12 +214,6 @@ export class ESPHomeAPI {
     });
   }
 
-  /** Undo delete (unarchive) a device. */
-  async undoDeleteDevice(configuration: string): Promise<unknown> {
-    return this._request("POST", "undo-delete", {
-      params: { configuration },
-    });
-  }
 
   /** Trigger OTA update for all online devices. */
   async updateAll(): Promise<{ queued: number }> {

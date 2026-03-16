@@ -180,6 +180,11 @@ export interface WizardRequest {
   board_id?: string;
 }
 
+/** Response from POST /wizard */
+export interface WizardResponse {
+  configuration: string;
+}
+
 /** Import request body for POST /import */
 export interface ImportRequest {
   name: string;

@@ -108,7 +108,7 @@ export class ESPHomeWizardStepBoard extends LitElement {
         gap: var(--wa-space-l);
         padding: var(--wa-space-m);
         border-radius: var(--wa-border-radius-l);
-        border: var(--wa-border-width-m) solid var(--wa-color-surface-lowered);
+        border: var(--wa-border-width-m) solid var(--wa-color-surface-border);
       }
 
       .featured-image {
@@ -181,11 +181,11 @@ export class ESPHomeWizardStepBoard extends LitElement {
         flex-direction: column;
         gap: var(--wa-space-s);
         transition: border-color var(--wa-transition-normal) var(--wa-transition-easing);
-        border: var(--wa-border-width-s) solid var(--wa-color-surface-lowered);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
       }
 
       .board-card:hover {
-        border-color: var(--esphome-primary-light);
+        border-color: var(--esphome-primary);
       }
 
       .board-card--expanded {

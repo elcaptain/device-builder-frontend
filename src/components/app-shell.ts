@@ -18,6 +18,7 @@ import {
   apiContext,
   darkModeContext,
   devicesContext,
+  devicesLoadedContext,
   deviceStatesContext,
   importableDevicesContext,
   localizeContext,
@@ -47,6 +48,10 @@ export class ESPHomeApp extends LitElement {
   @provide({ context: importableDevicesContext })
   @state()
   private _importableDevices: AdoptableDevice[] = [];
+
+  @provide({ context: devicesLoadedContext })
+  @state()
+  private _devicesLoaded = false;
 
   @provide({ context: versionContext })
   @state()
@@ -170,6 +175,7 @@ export class ESPHomeApp extends LitElement {
       case "initial_state":
         this._devices = [...event.data.devices];
         this._deviceStates = { ...event.data.ping };
+        this._devicesLoaded = true;
         break;
 
       case "entry_state_changed":

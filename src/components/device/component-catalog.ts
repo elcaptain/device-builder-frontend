@@ -108,7 +108,7 @@ export class ESPHomeComponentCatalog extends LitElement {
         flex-direction: column;
         gap: var(--wa-space-2xs);
         padding-right: var(--wa-space-m);
-        border-right: 1px solid var(--wa-color-surface-lowered);
+        border-right: 1px solid var(--wa-color-surface-border);
         overflow-y: auto;
       }
 
@@ -138,12 +138,12 @@ export class ESPHomeComponentCatalog extends LitElement {
       }
 
       .category-btn:hover {
-        background: var(--esphome-primary-light);
+        background: color-mix(in srgb, var(--esphome-primary), transparent 88%);
         color: var(--esphome-primary);
       }
 
       .category-btn--active {
-        background: var(--esphome-primary-light);
+        background: color-mix(in srgb, var(--esphome-primary), transparent 88%);
         color: var(--esphome-primary);
       }
 
@@ -164,7 +164,7 @@ export class ESPHomeComponentCatalog extends LitElement {
         border-radius: 9px;
         font-size: var(--wa-font-size-xs);
         font-weight: var(--wa-font-weight-bold);
-        background: var(--wa-color-surface-lowered);
+        background: var(--wa-color-surface-raised);
         color: var(--wa-color-text-subtle);
         flex-shrink: 0;
         box-sizing: border-box;
@@ -205,7 +205,7 @@ export class ESPHomeComponentCatalog extends LitElement {
 
       .component-card {
         border-radius: var(--wa-border-radius-l);
-        border: var(--wa-border-width-s) solid var(--wa-color-surface-lowered);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
         background: var(--wa-color-surface-default);
         padding: var(--wa-space-m);
         box-sizing: border-box;
@@ -216,7 +216,7 @@ export class ESPHomeComponentCatalog extends LitElement {
       }
 
       .component-card:hover {
-        border-color: var(--esphome-primary-light);
+        border-color: var(--esphome-primary);
       }
 
       .component-card--expanded {

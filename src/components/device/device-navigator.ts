@@ -85,7 +85,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
       .card {
         background: var(--wa-color-surface-default);
         border-radius: var(--wa-border-radius-l);
-        border: var(--wa-border-width-s) solid var(--wa-color-surface-lowered);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
         box-shadow: var(--wa-elevation-02);
         display: flex;
         flex-direction: column;
@@ -125,7 +125,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
 
       .separator {
         height: 1px;
-        background: var(--wa-color-surface-lowered);
+        background: var(--wa-color-surface-border);
         margin: var(--wa-space-2xs) 0;
         flex-shrink: 0;
       }
@@ -164,7 +164,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
 
       .nav-item {
         padding: 0 var(--wa-space-2xs);
-        border: var(--wa-border-width-s) solid var(--wa-color-surface-lowered);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
         border-radius: var(--wa-border-radius-m);
         display: flex;
         align-items: center;
@@ -178,12 +178,12 @@ export class ESPHomeDeviceNavigator extends LitElement {
 
       .nav-item:hover,
       .nav-item--hovered {
-        background: var(--esphome-primary-light);
+        background: color-mix(in srgb, var(--esphome-primary), transparent 88%);
         border-color: var(--esphome-primary);
       }
 
       .nav-item--selected {
-        background: var(--esphome-primary-light);
+        background: color-mix(in srgb, var(--esphome-primary), transparent 88%);
         border-color: var(--esphome-primary);
       }
 
