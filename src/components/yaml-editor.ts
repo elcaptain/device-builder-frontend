@@ -45,6 +45,8 @@ export class ESPHomeYamlEditor extends LitElement {
 
   @property({ attribute: false }) highlightRange: HighlightRange | null = null;
 
+  @property({ type: Boolean }) scrollToHighlight = false;
+
   @query(".cm-wrap") private _container!: HTMLDivElement;
 
   private _view: EditorView | null = null;
@@ -136,6 +138,11 @@ export class ESPHomeYamlEditor extends LitElement {
 
     if (changed.has("highlightRange") && this._view) {
       this._view.dispatch({ effects: setHighlight.of(this.highlightRange) });
+      if (this.highlightRange && this.scrollToHighlight) {
+        const line = Math.max(1, this.highlightRange.fromLine);
+        const pos = this._view.state.doc.line(Math.min(line, this._view.state.doc.lines)).from;
+        this._view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "start", yMargin: 50 }) });
+      }
     }
   }
 

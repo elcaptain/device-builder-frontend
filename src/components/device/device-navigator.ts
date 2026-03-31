@@ -66,14 +66,17 @@ export class ESPHomeDeviceNavigator extends LitElement {
   @query("esphome-add-automation-dialog")
   private _addAutomationDialog!: ESPHomeAddAutomationDialog;
 
+  @property({ attribute: false })
+  selectedKey: string | null = null;
+
   @state()
-  private _selectedKey: string | null = null;
+  private _selectedLine: number | null = null;
 
   @state()
   private _selectedRange: HighlightRange | null = null;
 
   @state()
-  private _hoveredKey: string | null = null;
+  private _hoveredLine: number | null = null;
 
   static styles = [
     espHomeStyles,
@@ -237,6 +240,26 @@ export class ESPHomeDeviceNavigator extends LitElement {
     `,
   ];
 
+  protected willUpdate(changedProperties: Map<string, unknown>) {
+    // Sync _selectedLine from selectedKey when set externally (e.g. URL restore)
+    if (
+      (changedProperties.has("selectedKey") || changedProperties.has("yaml")) &&
+      this.selectedKey &&
+      this._selectedLine === null &&
+      this.yaml
+    ) {
+      const allSections = [
+        ...parseYamlTopLevelSections(this.yaml),
+        ...parseYamlAutomations(this.yaml),
+      ];
+      const match = allSections.find((s) => s.key === this.selectedKey);
+      if (match) {
+        this._selectedLine = match.fromLine;
+        this._selectedRange = { fromLine: match.fromLine, toLine: match.toLine };
+      }
+    }
+  }
+
   protected render() {
     const {
       core,
@@ -320,13 +343,13 @@ export class ESPHomeDeviceNavigator extends LitElement {
                             ${items.map(
                               ({ key, fromLine, toLine }) => html`
                                 <div
-                                  class="nav-item ${this._selectedKey === key
+                                  class="nav-item ${this._selectedLine === fromLine
                                     ? "nav-item--selected"
-                                    : ""} ${this._hoveredKey === key
+                                    : ""} ${this._hoveredLine === fromLine
                                     ? "nav-item--hovered"
                                     : ""}"
                                   @mouseenter=${() =>
-                                    this._onItemHover(key, fromLine, toLine)}
+                                    this._onItemHover(fromLine, fromLine, toLine)}
                                   @mouseleave=${() => this._onItemLeave()}
                                   @click=${() => this._onItemClick(key, fromLine, toLine)}
                                 >
@@ -367,33 +390,46 @@ export class ESPHomeDeviceNavigator extends LitElement {
     );
   }
 
-  private _onItemHover(key: string, fromLine: number, toLine: number) {
-    this._hoveredKey = key;
-    this._emitHighlight({ fromLine, toLine });
+  private _onItemHover(line: number, fromLine: number, toLine: number) {
+    this._hoveredLine = line;
+    this._emitHighlight({ fromLine, toLine }, false);
   }
 
   private _onItemLeave() {
-    this._hoveredKey = null;
-    this._emitHighlight(this._selectedRange);
+    this._hoveredLine = null;
+    this._emitHighlight(this._selectedRange, false);
   }
 
   private _onItemClick(key: string, fromLine: number, toLine: number) {
-    if (this._selectedKey === key) {
-      this._selectedKey = null;
+    if (this._selectedLine === fromLine) {
+      this.selectedKey = null;
+      this._selectedLine = null;
       this._selectedRange = null;
-      // Emit hovered range if still hovering (mouse didn't leave)
-      this._emitHighlight(this._hoveredKey === key ? { fromLine, toLine } : null);
+      this._emitHighlight(this._hoveredLine === fromLine ? { fromLine, toLine } : null, false);
+      this._emitSectionSelect(null);
     } else {
-      this._selectedKey = key;
+      this.selectedKey = key;
+      this._selectedLine = fromLine;
       this._selectedRange = { fromLine, toLine };
-      this._emitHighlight({ fromLine, toLine });
+      this._emitHighlight({ fromLine, toLine }, true);
+      this._emitSectionSelect(key);
     }
   }
 
-  private _emitHighlight(range: HighlightRange | null) {
+  private _emitHighlight(range: HighlightRange | null, scroll: boolean) {
     this.dispatchEvent(
       new CustomEvent("yaml-highlight", {
-        detail: range,
+        detail: { range, scroll },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  private _emitSectionSelect(sectionKey: string | null) {
+    this.dispatchEvent(
+      new CustomEvent("section-select", {
+        detail: { sectionKey },
         bubbles: true,
         composed: true,
       })

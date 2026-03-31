@@ -162,6 +162,57 @@ export interface AddConfigSectionResponse {
   yaml: string;
 }
 
+/** A value option for select-type config entries */
+export interface ConfigValueOption {
+  label: string;
+  value: string;
+}
+
+/** A rich configuration entry for visual editing of YAML sections */
+export interface ConfigEntry {
+  key: string;
+  type: ConfigEntryType;
+  label: string;
+  default_value: number | string | boolean | null;
+  required: boolean;
+  options?: ConfigValueOption[] | null;
+  range?: number[] | null;
+  description?: string | null;
+  help_link?: string | null;
+  multi_value?: boolean;
+  hidden?: boolean;
+  value?: number | string | boolean | string[] | null;
+}
+
+export enum ConfigEntryType {
+  BOOLEAN = "boolean",
+  STRING = "string",
+  SECURE_STRING = "secure_string",
+  INTEGER = "integer",
+  FLOAT = "float",
+  LABEL = "label",
+  DIVIDER = "divider",
+  SELECT = "select",
+  ICON = "icon",
+  ALERT = "alert",
+}
+
+/** Response from GET /devices/{config}/section-config */
+export interface SectionConfigResponse {
+  section_key: string;
+  section_type: "core" | "component" | "automation";
+  title: string;
+  description: string;
+  docs_url: string;
+  icon: string;
+  entries: ConfigEntry[];
+}
+
+/** Response from POST /devices/{config}/section-config */
+export interface UpdateSectionConfigResponse {
+  yaml: string;
+}
+
 /** Response from POST /devices/{config}/automations */
 export interface AddAutomationResponse {
   yaml: string;
@@ -192,6 +243,11 @@ export interface ImportRequest {
   package_import_url: string;
   friendly_name?: string;
   encryption?: string;
+}
+
+/** User preferences (persisted on backend) */
+export interface UserPreferences {
+  editor_layout?: "both" | "left" | "right";
 }
 
 /** WebSocket command message */

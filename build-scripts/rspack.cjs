@@ -158,6 +158,7 @@ const createRspackConfig = ({ isProdBuild = false } = {}) => ({
           "/components",
           "/automations",
           "/config",
+          "/preferences",
         ],
         target: "http://localhost:6052",
         changeOrigin: true,

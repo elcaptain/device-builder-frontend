@@ -24,6 +24,7 @@ import "@home-assistant/webawesome/dist/components/badge/badge.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "./add-automation-dialog.js";
 import "./add-component-dialog.js";
+import "./device-section-config.js";
 
 registerMdiIcons({
   "open-in-new": mdiOpenInNew,
@@ -49,6 +50,9 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
 
   @property()
   configuration = "";
+
+  @property({ attribute: false })
+  selectedSection: string | null = null;
 
   @query("esphome-add-component-dialog")
   private _addComponentDialog!: ESPHomeAddComponentDialog;
@@ -220,38 +224,59 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
 
       <div class="board-separator"></div>
 
-      ${showAddComponent
+      ${this.selectedSection
         ? html`
-            <div class="step-section">
-              <h4 class="step-title">${this._localize("device.step_add_component")}</h4>
-              <p class="step-desc">${this._localize("device.step_add_component_desc")}</p>
-              <div class="action-item" @click=${() => this._addComponentDialog.open()}>
-                <div>
-                  <wa-icon library="mdi" name="memory"></wa-icon>
-                  <p>${this._localize("device.add_component")}</p>
-                </div>
-                <wa-icon library="mdi" name="plus-circle-outline"></wa-icon>
-              </div>
-            </div>
+            <esphome-device-section-config
+              .configuration=${this.configuration}
+              .sectionKey=${this.selectedSection}
+            ></esphome-device-section-config>
           `
-        : nothing}
-      ${showAddAutomations
-        ? html`
-            <div class="step-section">
-              <h4 class="step-title">${this._localize("device.step_add_automations")}</h4>
-              <p class="step-desc">
-                ${this._localize("device.step_add_automations_desc")}
-              </p>
-              <div class="action-item" @click=${() => this._addAutomationDialog.open()}>
-                <div>
-                  <wa-icon library="mdi" name="arrow-decision-outline"></wa-icon>
-                  <p>${this._localize("device.add_automation")}</p>
-                </div>
-                <wa-icon library="mdi" name="plus-circle-outline"></wa-icon>
-              </div>
-            </div>
-          `
-        : nothing}
+        : html`
+            ${showAddComponent
+              ? html`
+                  <div class="step-section">
+                    <h4 class="step-title">
+                      ${this._localize("device.step_add_component")}
+                    </h4>
+                    <p class="step-desc">
+                      ${this._localize("device.step_add_component_desc")}
+                    </p>
+                    <div
+                      class="action-item"
+                      @click=${() => this._addComponentDialog.open()}
+                    >
+                      <div>
+                        <wa-icon library="mdi" name="memory"></wa-icon>
+                        <p>${this._localize("device.add_component")}</p>
+                      </div>
+                      <wa-icon library="mdi" name="plus-circle-outline"></wa-icon>
+                    </div>
+                  </div>
+                `
+              : nothing}
+            ${showAddAutomations
+              ? html`
+                  <div class="step-section">
+                    <h4 class="step-title">
+                      ${this._localize("device.step_add_automations")}
+                    </h4>
+                    <p class="step-desc">
+                      ${this._localize("device.step_add_automations_desc")}
+                    </p>
+                    <div
+                      class="action-item"
+                      @click=${() => this._addAutomationDialog.open()}
+                    >
+                      <div>
+                        <wa-icon library="mdi" name="arrow-decision-outline"></wa-icon>
+                        <p>${this._localize("device.add_automation")}</p>
+                      </div>
+                      <wa-icon library="mdi" name="plus-circle-outline"></wa-icon>
+                    </div>
+                  </div>
+                `
+              : nothing}
+          `}
 
       <esphome-add-component-dialog
         .boardName=${this.board.name}

@@ -18,6 +18,9 @@ import type {
   AddComponentResponse,
   AddConfigSectionResponse,
   AddAutomationResponse,
+  SectionConfigResponse,
+  UpdateSectionConfigResponse,
+  UserPreferences,
   WizardRequest,
   WizardResponse,
   ImportRequest,
@@ -190,6 +193,34 @@ export class ESPHomeAPI {
     }
   ): Promise<AddAutomationResponse> {
     return this._request("POST", `devices/${configuration}/automations`, { body: data });
+  }
+
+  /** Get config entries for a YAML section with current values. */
+  async getSectionConfig(
+    configuration: string,
+    sectionKey: string
+  ): Promise<SectionConfigResponse> {
+    return this._request("GET", `devices/${configuration}/section-config`, {
+      params: { key: sectionKey },
+    });
+  }
+
+  /** Update config values for a YAML section. */
+  async updateSectionConfig(
+    configuration: string,
+    data: { section_key: string; values: Record<string, unknown> }
+  ): Promise<UpdateSectionConfigResponse> {
+    return this._request("POST", `devices/${configuration}/section-config`, { body: data });
+  }
+
+  /** Get user preferences. */
+  async getPreferences(): Promise<UserPreferences> {
+    return this._request("GET", "preferences");
+  }
+
+  /** Update user preferences (partial merge). */
+  async updatePreferences(prefs: UserPreferences): Promise<UserPreferences> {
+    return this._request("PUT", "preferences", { body: prefs });
   }
 
   /** Get secret key names. */

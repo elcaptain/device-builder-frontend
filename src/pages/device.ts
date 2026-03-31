@@ -35,7 +35,7 @@ export class ESPHomePageDevice extends LitElement {
   private _layout: DeviceLayoutMode = "both";
 
   @state()
-  private _openSections = new Set<number>();
+  private _openSections = new Set<number>(this._readUrlSections());
 
   private get _device(): ConfiguredDevice | null {
     return this._devices.find((d) => d.configuration === this.id) ?? null;
@@ -58,16 +58,34 @@ export class ESPHomePageDevice extends LitElement {
   private _highlightRange: HighlightRange | null = null;
 
   @state()
+  private _scrollToHighlight = false;
+
+  @state()
+  private _selectedSection: string | null = this._readUrlParam("section", null);
+
+  @state()
   private _yaml = "";
 
   async connectedCallback() {
     super.connectedCallback();
     this._loadBoardCatalog();
+    this._loadPreferences();
   }
 
   updated(changedProperties: Map<string, unknown>) {
     if (changedProperties.has("id") && this.id) {
       this._loadYaml();
+    }
+  }
+
+  private async _loadPreferences() {
+    try {
+      const prefs = await this._api.getPreferences();
+      if (prefs.editor_layout) {
+        this._layout = prefs.editor_layout;
+      }
+    } catch (e) {
+      // Preferences not critical — use default
     }
   }
 
@@ -138,6 +156,7 @@ export class ESPHomePageDevice extends LitElement {
           @yaml-change=${this._onYamlChange}
           @yaml-highlight=${this._onYamlHighlight}
           @yaml-updated=${this._onYamlUpdated}
+          @section-select=${this._onSectionSelect}
           @save-yaml=${this._saveYaml}
         >
           <esphome-device-navigator
@@ -145,6 +164,7 @@ export class ESPHomePageDevice extends LitElement {
             .yaml=${this._yaml}
             .boardName=${this._board?.name ?? ""}
             .configuration=${this.id}
+            .selectedKey=${this._selectedSection}
           ></esphome-device-navigator>
           <esphome-device-editor
             .yaml=${this._yaml}
@@ -153,7 +173,9 @@ export class ESPHomePageDevice extends LitElement {
             .board=${this._board}
             .justCreated=${this.justCreated}
             .highlightRange=${this._highlightRange}
+            .scrollToHighlight=${this._scrollToHighlight}
             .configuration=${this.id}
+            .selectedSection=${this._selectedSection}
           ></esphome-device-editor>
         </div>
       </div>
@@ -168,22 +190,67 @@ export class ESPHomePageDevice extends LitElement {
       next.add(e.detail.index);
     }
     this._openSections = next;
+    this._updateUrl();
   }
 
   private _onLayoutChange(e: CustomEvent<DeviceLayoutMode>) {
     this._layout = e.detail;
+    this._api.updatePreferences({ editor_layout: e.detail }).catch(() => {});
   }
 
   private _onYamlChange(e: CustomEvent<{ value: string }>) {
     this._yaml = e.detail.value;
   }
 
-  private _onYamlHighlight(e: CustomEvent<HighlightRange | null>) {
-    this._highlightRange = e.detail;
+  private _onYamlHighlight(e: CustomEvent<{ range: HighlightRange | null; scroll: boolean }>) {
+    this._highlightRange = e.detail.range;
+    this._scrollToHighlight = e.detail.scroll;
   }
 
   private _onYamlUpdated(e: CustomEvent<{ yaml: string }>) {
     this._yaml = e.detail.yaml;
+  }
+
+  private _onSectionSelect(e: CustomEvent<{ sectionKey: string | null }>) {
+    this._selectedSection = e.detail.sectionKey;
+    this._updateUrl();
+  }
+
+  // ─── URL State Persistence ─────────────────────────────────
+
+  private _readUrlParam(key: string, fallback: string): string;
+  private _readUrlParam(key: string, fallback: null): string | null;
+  private _readUrlParam(key: string, fallback: string | null): string | null {
+    const params = new URLSearchParams(window.location.search);
+    return params.get(key) ?? fallback;
+  }
+
+  private _readUrlSections(): number[] {
+    const raw = new URLSearchParams(window.location.search).get("open");
+    if (!raw) return [];
+    return raw.split(",").map(Number).filter((n) => !Number.isNaN(n));
+  }
+
+  private _updateUrl() {
+    const params = new URLSearchParams(window.location.search);
+
+    // Selected section
+    if (this._selectedSection) {
+      params.set("section", this._selectedSection);
+    } else {
+      params.delete("section");
+    }
+
+    // Open navigator sections
+    if (this._openSections.size > 0) {
+      params.set("open", [...this._openSections].join(","));
+    } else {
+      params.delete("open");
+    }
+
+    const qs = params.toString();
+    const newUrl = `${window.location.pathname}${qs ? `?${qs}` : ""}`;
+    window.history.replaceState(null, "", newUrl);
   }
 }
 

@@ -52,8 +52,14 @@ export class ESPHomeDeviceEditor extends LitElement {
   @property({ attribute: false })
   highlightRange: HighlightRange | null = null;
 
+  @property({ type: Boolean })
+  scrollToHighlight = false;
+
   @property()
   configuration = "";
+
+  @property({ attribute: false })
+  selectedSection: string | null = null;
 
   static styles = [
     espHomeStyles,
@@ -185,6 +191,10 @@ export class ESPHomeDeviceEditor extends LitElement {
         overflow: hidden;
       }
 
+      .editor-pane--left {
+        overflow-y: auto;
+      }
+
       .editor-pane-title {
         margin: 0;
         font-size: var(--wa-font-size-s);
@@ -282,6 +292,7 @@ export class ESPHomeDeviceEditor extends LitElement {
                 .yaml=${this.yaml}
                 .justCreated=${this.justCreated}
                 .configuration=${this.configuration}
+                .selectedSection=${this.selectedSection}
               ></esphome-device-board-info>
             </div>
             ${this.layout === "both" ? html`<div class="pane-divider"></div>` : nothing}
@@ -290,6 +301,7 @@ export class ESPHomeDeviceEditor extends LitElement {
                 <esphome-yaml-editor
                   .value=${this.yaml}
                   .highlightRange=${this.highlightRange}
+                  .scrollToHighlight=${this.scrollToHighlight}
                   @yaml-change=${this._onYamlChange}
                 ></esphome-yaml-editor>
               </div>
