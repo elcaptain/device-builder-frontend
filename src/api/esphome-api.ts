@@ -114,6 +114,7 @@ export class ESPHomeAPI {
     let data: Record<string, unknown>;
     try {
       data = JSON.parse(event.data);
+      console.debug("[RECEIVED]", data);
     } catch {
       console.error("Invalid JSON from WebSocket");
       return;
@@ -258,6 +259,7 @@ export class ESPHomeAPI {
           reject(error);
         },
       });
+      console.debug("[SENDING]", msg);
       this._ws!.send(JSON.stringify(msg));
     });
   }
@@ -405,20 +407,12 @@ export class ESPHomeAPI {
 
   /** Upload firmware to a device. */
   upload(configuration: string, port: string, callbacks: StreamCallbacks): string {
-    return this.sendStreamCommand(
-      "devices/upload",
-      { configuration, port },
-      callbacks
-    );
+    return this.sendStreamCommand("devices/upload", { configuration, port }, callbacks);
   }
 
   /** Stream logs from a device. */
   logs(configuration: string, port: string, callbacks: StreamCallbacks): string {
-    return this.sendStreamCommand(
-      "devices/logs",
-      { configuration, port },
-      callbacks
-    );
+    return this.sendStreamCommand("devices/logs", { configuration, port }, callbacks);
   }
 
   /** Validate a device configuration. */
@@ -466,10 +460,7 @@ export class ESPHomeAPI {
     offset?: number;
     limit?: number;
   }): Promise<PagedComponentsResponse> {
-    return this.sendCommand<PagedComponentsResponse>(
-      "components/get_components",
-      args
-    );
+    return this.sendCommand<PagedComponentsResponse>("components/get_components", args);
   }
 
   // ─── Config Commands ──────────────────────────────────────
@@ -512,4 +503,3 @@ export class ESPHomeAPI {
     return this.sendCommand("ping");
   }
 }
-
