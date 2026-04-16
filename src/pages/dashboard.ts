@@ -32,7 +32,7 @@ import {
   extractApiKey,
   streamSerialToDialog,
 } from "./dashboard-actions.js";
-import { detectChip, disconnect, flashFirmware, resetAndDisconnect } from "../util/web-serial.js";
+import { detectChip, disconnect } from "../util/web-serial.js";
 import { cardSkeletonTemplate, tableSkeletonTemplate } from "./dashboard-skeletons.js";
 import { dashboardStyles } from "./dashboard-styles.js";
 
@@ -47,6 +47,8 @@ import "../components/dashboard/table-row-menu.js";
 import "../components/device-card.js";
 import "../components/logs-dialog.js";
 import type { ESPHomeLogsDialog } from "../components/logs-dialog.js";
+import "../components/firmware-install-dialog.js";
+import type { ESPHomeFirmwareInstallDialog } from "../components/firmware-install-dialog.js";
 import "../components/install-method-dialog.js";
 import "../components/logs-method-dialog.js";
 import "../components/rename-device-dialog.js";
@@ -166,6 +168,7 @@ export class ESPHomePageDashboard extends LitElement {
   @query("esphome-create-config-dialog") private _createDialog!: ESPHomeCreateConfigDialog;
   @query("esphome-rename-device-dialog") private _renameDialog!: ESPHomeRenameDeviceDialog;
   @query("esphome-command-dialog") private _commandDialog!: ESPHomeCommandDialog;
+  @query("esphome-firmware-install-dialog") private _firmwareDialog!: ESPHomeFirmwareInstallDialog;
   @query("esphome-logs-dialog") private _logsDialog!: ESPHomeLogsDialog;
 
   /** Device currently targeted by rename/api-key actions. */
@@ -281,7 +284,7 @@ export class ESPHomePageDashboard extends LitElement {
               ?selected=${this._selectedDevices.has(device.configuration)}
               @edit-device=${() => editDevice(device)}
               @install-device=${() => this._openInstallMethod(device)}
-              @update-device=${() => this._openCommand(device, "install")}
+              @update-device=${() => this._firmwareDialog.installOta(device)}
               @card-click=${() => { this._drawerDevice = device; this._drawerOpen = true; }}
               @card-context-menu=${(e: CustomEvent) => { this._cardContextDevice = device; this._cardContextPosition = e.detail; }}
               @toggle-select=${() => this._toggleDevice(device.configuration)}
@@ -311,7 +314,7 @@ export class ESPHomePageDashboard extends LitElement {
         @select-all=${() => { this._selectedDevices = new Set(this._devices.map((d) => d.configuration)); }}
         @deselect-all=${() => { this._selectedDevices = new Set(); }}
         @edit-device=${(e: CustomEvent<ConfiguredDevice>) => editDevice(e.detail)}
-        @update-device=${(e: CustomEvent<ConfiguredDevice>) => this._openCommand(e.detail, "install")}
+        @update-device=${(e: CustomEvent<ConfiguredDevice>) => this._firmwareDialog.installOta(e.detail)}
         @open-logs=${(e: CustomEvent<ConfiguredDevice>) => this._openLogs(e.detail)}
         @validate-device=${(e: CustomEvent<ConfiguredDevice>) => this._openCommand(e.detail, "validate")}
         @install-device=${(e: CustomEvent<ConfiguredDevice>) => this._openInstallMethod(e.detail)}
@@ -349,7 +352,7 @@ export class ESPHomePageDashboard extends LitElement {
         .device=${this._drawerDevice}
         @drawer-close=${() => { this._drawerOpen = false; }}
         @edit-device=${(e: CustomEvent) => { this._drawerOpen = false; editDevice(e.detail); }}
-        @update-device=${(e: CustomEvent) => { this._drawerOpen = false; this._openCommand(e.detail, "install"); }}
+        @update-device=${(e: CustomEvent) => { this._drawerOpen = false; this._firmwareDialog.installOta(e.detail); }}
         @open-logs=${(e: CustomEvent) => { this._drawerOpen = false; this._openLogs(e.detail); }}
       ></esphome-device-drawer>
     `;
@@ -362,7 +365,7 @@ export class ESPHomePageDashboard extends LitElement {
         .position=${this._cardContextPosition}
         @menu-close=${() => { this._cardContextDevice = null; this._cardContextPosition = null; }}
         @edit-device=${(e: CustomEvent<ConfiguredDevice>) => editDevice(e.detail)}
-        @update-device=${(e: CustomEvent<ConfiguredDevice>) => this._openCommand(e.detail, "install")}
+        @update-device=${(e: CustomEvent<ConfiguredDevice>) => this._firmwareDialog.installOta(e.detail)}
         @open-logs=${(e: CustomEvent<ConfiguredDevice>) => this._openLogs(e.detail)}
         @validate-device=${(e: CustomEvent<ConfiguredDevice>) => this._openCommand(e.detail, "validate")}
         @install-device=${(e: CustomEvent<ConfiguredDevice>) => this._openInstallMethod(e.detail)}
@@ -418,9 +421,8 @@ export class ESPHomePageDashboard extends LitElement {
       ></esphome-rename-device-dialog>
       <esphome-api-key-dialog></esphome-api-key-dialog>
       <esphome-create-config-dialog></esphome-create-config-dialog>
-      <esphome-command-dialog
-        @command-success=${this._onWebSerialCompileSuccess}
-      ></esphome-command-dialog>
+      <esphome-command-dialog></esphome-command-dialog>
+      <esphome-firmware-install-dialog></esphome-firmware-install-dialog>
       <esphome-logs-dialog></esphome-logs-dialog>
       <esphome-logs-method-dialog
         ?open=${this._logsMethodOpen}
@@ -540,10 +542,10 @@ export class ESPHomePageDashboard extends LitElement {
     }
   }
 
-  private _openCommand(device: ConfiguredDevice, type: CommandType, port?: string) {
+  private _openCommand(device: ConfiguredDevice, type: CommandType) {
     this._commandDialog.configuration = device.configuration;
     this._commandDialog.name = device.friendly_name || device.name;
-    this._commandDialog.open(type, port);
+    this._commandDialog.open(type);
   }
 
   private _openInstallMethod(device: ConfiguredDevice) {
@@ -558,74 +560,12 @@ export class ESPHomePageDashboard extends LitElement {
 
     const { method, port } = e.detail;
     if (method === "ota") {
-      this._openCommand(device, "install");
+      this._firmwareDialog.installOta(device);
     } else if (method === "server-serial") {
-      this._openCommand(device, "install", port);
+      this._firmwareDialog.installServerSerial(device, port!);
     } else if (method === "web-serial") {
-      this._webSerialInstall(device);
+      this._firmwareDialog.installWebSerial(device);
     }
-  }
-
-  /** Pending Web Serial device — set before compile, consumed on command-success. */
-  private _webSerialDevice: ConfiguredDevice | null = null;
-
-  private async _webSerialInstall(device: ConfiguredDevice) {
-    // Store the device so _onWebSerialCompileSuccess can pick it up
-    this._webSerialDevice = device;
-    // Open compile in the command dialog so the user sees progress
-    this._openCommand(device, "compile");
-  }
-
-  private async _onWebSerialCompileSuccess() {
-    const device = this._webSerialDevice;
-    if (!device) return;
-    this._webSerialDevice = null;
-
-    const name = device.friendly_name || device.name;
-
-    // 1. Download the compiled binary
-    const progressToast = toast.loading(this._localize("serial.getting_firmware"), { richColors: true });
-    let firmwareBytes: Uint8Array;
-    try {
-      const binaries = await this._api.firmwareGetBinaries(device.configuration);
-      if (binaries.length === 0) {
-        toast.error(this._localize("serial.no_firmware"), { id: progressToast, richColors: true });
-        return;
-      }
-      const result = await this._api.firmwareDownload(device.configuration, binaries[0].file);
-      firmwareBytes = Uint8Array.from(atob(result.data), (c) => c.charCodeAt(0));
-    } catch {
-      toast.error(this._localize("dashboard.download_firmware_failed", { name }), { id: progressToast, richColors: true });
-      return;
-    }
-
-    // 2. Connect to the device via Web Serial
-    let detected;
-    try {
-      toast.loading(this._localize("serial.detecting"), { id: progressToast, richColors: true });
-      detected = await detectChip();
-    } catch {
-      toast.dismiss(progressToast);
-      return; // User cancelled port selection
-    }
-
-    // 3. Flash the firmware
-    try {
-      toast.loading(this._localize("serial.flashing"), { id: progressToast, richColors: true });
-      await flashFirmware(detected.loader, firmwareBytes, 0x10000);
-    } catch {
-      toast.error(this._localize("dashboard.update_upload_failed"), { id: progressToast, richColors: true });
-      try { await disconnect(detected.transport); } catch { /* ignore */ }
-      return;
-    }
-
-    // 4. Reset and disconnect
-    try {
-      toast.loading(this._localize("serial.resetting"), { id: progressToast, richColors: true });
-      await resetAndDisconnect(detected.loader, detected.transport);
-    } catch { /* ignore reset errors */ }
-
-    toast.success(this._localize("serial.flash_success"), { id: compileToast, richColors: true });
   }
 
   private _openLogs(device: ConfiguredDevice) {

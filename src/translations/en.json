@@ -168,6 +168,25 @@
     "clean_success": "Build files cleaned.",
     "clean_failed": "Clean failed."
   },
+  "firmware": {
+    "install_title": "Install — {name}",
+    "status_connecting": "Connecting to device…",
+    "status_verifying": "Verifying chip…",
+    "status_compiling": "Compiling firmware…",
+    "status_installing": "Compiling and installing firmware…",
+    "status_downloading": "Downloading firmware…",
+    "status_flashing": "Flashing firmware to device…",
+    "status_resetting": "Restarting device…",
+    "status_done": "Installation complete!",
+    "status_failed": "Installation failed",
+    "install_failed": "Installation failed.",
+    "compile_failed": "Compilation failed.",
+    "download_failed": "Failed to download firmware.",
+    "flash_failed": "Failed to flash firmware to device.",
+    "chip_mismatch": "Chip mismatch: detected {detected} but device expects {expected}.",
+    "show_logs": "Show logs",
+    "hide_logs": "Hide logs"
+  },
   "serial": {
     "title": "USB Device",
     "detected_title": "Device Detected",

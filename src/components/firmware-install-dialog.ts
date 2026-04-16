@@ -1,0 +1,532 @@
+import { consume } from "@lit/context";
+import {
+  mdiAlertCircle,
+  mdiCheckCircle,
+  mdiChevronDown,
+  mdiChevronUp,
+  mdiClose,
+} from "@mdi/js";
+import { LitElement, css, html, nothing } from "lit";
+import { customElement, query, state } from "lit/decorators.js";
+import type { ESPHomeAPI } from "../api/index.js";
+import { JobStatus } from "../api/types.js";
+import type { ConfiguredDevice } from "../api/types.js";
+import type { LocalizeFunc } from "../common/localize.js";
+import { apiContext, darkModeContext, localizeContext } from "../context/index.js";
+import { espHomeStyles } from "../styles/shared.js";
+import { registerMdiIcons } from "../util/register-icons.js";
+import {
+  detectChip,
+  disconnect,
+  flashFirmware,
+  resetAndDisconnect,
+  type DetectedChip,
+} from "../util/web-serial.js";
+
+import "@home-assistant/webawesome/dist/components/dialog/dialog.js";
+import "@home-assistant/webawesome/dist/components/icon/icon.js";
+import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
+import "./ansi-log.js";
+
+registerMdiIcons({
+  "alert-circle": mdiAlertCircle,
+  "check-circle": mdiCheckCircle,
+  "chevron-down": mdiChevronDown,
+  "chevron-up": mdiChevronUp,
+  close: mdiClose,
+});
+
+type InstallStep = "connecting" | "installing" | "compiling" | "flashing" | "done" | "error";
+
+function normalizeChipName(name: string): string {
+  return name.split("(")[0].trim().toLowerCase().replace(/-/g, "");
+}
+
+@customElement("esphome-firmware-install-dialog")
+export class ESPHomeFirmwareInstallDialog extends LitElement {
+  @consume({ context: localizeContext, subscribe: true })
+  @state()
+  private _localize: LocalizeFunc = (key) => key;
+
+  @consume({ context: darkModeContext, subscribe: true })
+  @state()
+  private _darkMode = true;
+
+  @consume({ context: apiContext })
+  private _api!: ESPHomeAPI;
+
+  @state() private _open = false;
+  @state() private _step: InstallStep = "installing";
+  @state() private _statusMessage = "";
+  @state() private _errorMessage = "";
+  @state() private _logLines: string[] = [];
+  @state() private _logsExpanded = false;
+  @state() private _flashPercent = 0;
+
+  private _device: ConfiguredDevice | null = null;
+  private _jobId = "";
+  private _streamId = "";
+  private _detected: DetectedChip | null = null;
+
+  @query("wa-dialog")
+  private _dialog!: HTMLElement & { open: boolean };
+
+  // ─── Public API ────────────────────────────────────────
+
+  installOta(device: ConfiguredDevice) {
+    this._init(device);
+    this._step = "installing";
+    this._statusMessage = this._localize("firmware.status_installing");
+    this._dialog.open = true;
+    this._startServerInstall("OTA");
+  }
+
+  installServerSerial(device: ConfiguredDevice, port: string) {
+    this._init(device);
+    this._step = "installing";
+    this._statusMessage = this._localize("firmware.status_installing");
+    this._dialog.open = true;
+    this._startServerInstall(port);
+  }
+
+  installWebSerial(device: ConfiguredDevice) {
+    this._init(device);
+    this._step = "connecting";
+    this._statusMessage = this._localize("firmware.status_connecting");
+    this._dialog.open = true;
+    this._startWebSerialInstall();
+  }
+
+  private _init(device: ConfiguredDevice) {
+    this._device = device;
+    this._open = true;
+    this._step = "installing";
+    this._statusMessage = "";
+    this._errorMessage = "";
+    this._logLines = [];
+    this._logsExpanded = false;
+    this._flashPercent = 0;
+    this._jobId = "";
+    this._streamId = "";
+    this._detected = null;
+  }
+
+  // ─── Styles ────────────────────────────────────────────
+
+  static styles = [
+    espHomeStyles,
+    css`
+      :host {
+        --term-bg: #1e1e1e;
+        --term-fg: #d4d4d4;
+        --term-border: #333;
+        --term-success: #6a9955;
+        --term-error: #f44747;
+      }
+      :host([light]) {
+        --term-bg: #f5f5f5;
+        --term-fg: #333;
+        --term-border: #ddd;
+        --term-success: #3d7a28;
+        --term-error: #c72e2e;
+      }
+
+      wa-dialog { --width: 520px; }
+
+      wa-dialog::part(header) {
+        background: var(--esphome-primary);
+        padding: 0 var(--wa-space-m);
+        height: 40px;
+        box-sizing: border-box;
+      }
+      wa-dialog::part(title) {
+        color: var(--esphome-on-primary);
+        font-size: var(--wa-font-size-s);
+        font-weight: var(--wa-font-weight-bold);
+      }
+      wa-dialog::part(close-button__base) {
+        background: transparent; border: none; box-shadow: none;
+        padding: 0; min-width: unset; min-height: unset;
+        color: var(--esphome-on-primary); cursor: pointer;
+      }
+      wa-dialog::part(body) {
+        padding: var(--wa-space-l) var(--wa-space-xl);
+      }
+      wa-dialog::part(footer) { display: none; }
+
+      .status {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: var(--wa-space-m);
+        padding: var(--wa-space-l) 0;
+      }
+
+      .status wa-spinner {
+        font-size: 36px;
+        --indicator-color: var(--esphome-primary);
+        --track-color: color-mix(in srgb, var(--esphome-primary), transparent 80%);
+      }
+
+      .status-icon {
+        font-size: 42px;
+      }
+      .status-icon--success { color: var(--esphome-success); }
+      .status-icon--error { color: var(--esphome-error); }
+
+      .status-text {
+        font-size: var(--wa-font-size-m);
+        font-weight: var(--wa-font-weight-bold);
+        color: var(--wa-color-text-normal);
+      }
+
+      .status-detail {
+        font-size: var(--wa-font-size-xs);
+        color: var(--wa-color-text-quiet);
+        max-width: 380px;
+        line-height: 1.5;
+      }
+
+      .progress-bar {
+        width: 100%;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--wa-color-surface-lowered);
+        overflow: hidden;
+        margin-top: var(--wa-space-xs);
+      }
+
+      .progress-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        background: var(--esphome-primary);
+        transition: width 0.2s;
+      }
+
+      .logs-toggle {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0;
+        margin-top: var(--wa-space-m);
+        background: none;
+        border: none;
+        font-family: inherit;
+        font-size: var(--wa-font-size-xs);
+        color: var(--wa-color-text-quiet);
+        cursor: pointer;
+      }
+      .logs-toggle:hover { color: var(--wa-color-text-normal); }
+      .logs-toggle wa-icon { font-size: 16px; }
+
+      .logs-container {
+        margin-top: var(--wa-space-s);
+        border: 1px solid var(--term-border);
+        border-radius: var(--wa-border-radius-m);
+        overflow: hidden;
+      }
+
+      esphome-ansi-log {
+        --log-height: 200px;
+      }
+      esphome-ansi-log::part(container) { border-radius: 0; }
+
+      .footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--wa-space-s);
+        margin-top: var(--wa-space-l);
+        padding-top: var(--wa-space-m);
+        border-top: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 6px 16px;
+        border-radius: var(--wa-border-radius-m);
+        font-size: var(--wa-font-size-xs);
+        font-weight: var(--wa-font-weight-bold);
+        font-family: inherit;
+        cursor: pointer;
+        border: var(--wa-border-width-s) solid transparent;
+      }
+
+      .btn--primary {
+        background: var(--esphome-primary);
+        color: var(--esphome-on-primary);
+      }
+      .btn--ghost {
+        background: transparent;
+        color: var(--wa-color-text-normal);
+        border-color: var(--wa-color-surface-border);
+      }
+    `,
+  ];
+
+  protected willUpdate(changedProperties: Map<string, unknown>) {
+    if (changedProperties.has("_darkMode")) {
+      this.toggleAttribute("light", !this._darkMode);
+    }
+  }
+
+  // ─── Render ────────────────────────────────────────────
+
+  protected render() {
+    const name = this._device?.friendly_name || this._device?.name || "";
+    return html`
+      <wa-dialog
+        label=${this._localize("firmware.install_title", { name })}
+        ?open=${this._open}
+        @wa-after-hide=${this._onClose}
+      >
+        ${this._renderStatus()}
+        ${this._renderProgress()}
+        ${this._renderLogs()}
+        ${this._renderFooter()}
+      </wa-dialog>
+    `;
+  }
+
+  private _renderStatus() {
+    if (this._step === "done") {
+      return html`
+        <div class="status">
+          <wa-icon class="status-icon status-icon--success" library="mdi" name="check-circle"></wa-icon>
+          <span class="status-text">${this._localize("firmware.status_done")}</span>
+        </div>
+      `;
+    }
+    if (this._step === "error") {
+      return html`
+        <div class="status">
+          <wa-icon class="status-icon status-icon--error" library="mdi" name="alert-circle"></wa-icon>
+          <span class="status-text">${this._localize("firmware.status_failed")}</span>
+          <span class="status-detail">${this._errorMessage}</span>
+        </div>
+      `;
+    }
+    return html`
+      <div class="status">
+        <wa-spinner></wa-spinner>
+        <span class="status-text">${this._statusMessage}</span>
+      </div>
+    `;
+  }
+
+  private _renderProgress() {
+    if (this._step !== "flashing") return nothing;
+    return html`
+      <div class="progress-bar">
+        <div class="progress-bar-fill" style="width:${this._flashPercent}%"></div>
+      </div>
+    `;
+  }
+
+  private _renderLogs() {
+    if (this._logLines.length === 0) return nothing;
+    return html`
+      <button class="logs-toggle" @click=${() => { this._logsExpanded = !this._logsExpanded; }}>
+        <wa-icon library="mdi" name=${this._logsExpanded ? "chevron-up" : "chevron-down"}></wa-icon>
+        ${this._logsExpanded ? this._localize("firmware.hide_logs") : this._localize("firmware.show_logs")}
+      </button>
+      ${this._logsExpanded
+        ? html`<div class="logs-container"><esphome-ansi-log .lines=${this._logLines}></esphome-ansi-log></div>`
+        : nothing}
+    `;
+  }
+
+  private _renderFooter() {
+    const isRunning = this._step !== "done" && this._step !== "error";
+    return html`
+      <div class="footer">
+        ${isRunning
+          ? html`<button class="btn btn--ghost" @click=${this._cancel}>${this._localize("command.stop")}</button>`
+          : html`<button class="btn btn--primary" @click=${this._close}>${this._localize("command.close")}</button>`}
+      </div>
+    `;
+  }
+
+  // ─── Server-side Install (OTA / Server Serial) ─────────
+
+  private async _startServerInstall(port: string) {
+    const device = this._device;
+    if (!device) return;
+
+    try {
+      const job = await this._api.firmwareInstall(device.configuration, port);
+      this._jobId = job.job_id;
+      this._streamId = this._api.firmwareFollowJob(job.job_id, {
+        onOutput: (line) => { this._logLines = [...this._logLines, line]; },
+        onResult: (data) => {
+          this._streamId = "";
+          this._jobId = "";
+          const result = data as unknown as { status: string };
+          if (result.status === JobStatus.COMPLETED) {
+            this._step = "done";
+          } else {
+            this._fail(this._localize("firmware.install_failed"));
+          }
+        },
+        onError: (error) => {
+          this._streamId = "";
+          this._jobId = "";
+          this._fail(error);
+        },
+      });
+    } catch (err) {
+      this._fail(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // ─── Web Serial Install ────────────────────────────────
+
+  private async _startWebSerialInstall() {
+    const device = this._device;
+    if (!device) return;
+
+    // 1. Connect and detect chip
+    let detected: DetectedChip;
+    try {
+      detected = await detectChip();
+    } catch {
+      this._close(); // User cancelled port selection
+      return;
+    }
+    this._detected = detected;
+
+    // 2. Verify chip matches device platform
+    this._statusMessage = this._localize("firmware.status_verifying");
+    const detectedNorm = normalizeChipName(detected.chipName);
+    const expectedNorm = device.target_platform.toLowerCase();
+    if (detectedNorm !== expectedNorm) {
+      try { await disconnect(detected.transport); } catch { /* ignore */ }
+      this._fail(this._localize("firmware.chip_mismatch", { detected: detected.chipName, expected: device.target_platform }));
+      return;
+    }
+
+    // Disconnect during compile — we'll reconnect to flash
+    try { await disconnect(detected.transport); } catch { /* ignore */ }
+
+    // 3. Compile
+    this._step = "compiling";
+    this._statusMessage = this._localize("firmware.status_compiling");
+    try {
+      await this._compileAndWait(device.configuration);
+    } catch {
+      this._fail(this._localize("firmware.compile_failed"));
+      return;
+    }
+
+    // 4. Download binary
+    this._statusMessage = this._localize("firmware.status_downloading");
+    let firmwareBytes: Uint8Array;
+    let flashAddress = 0x10000;
+    try {
+      const binaries = await this._api.firmwareGetBinaries(device.configuration);
+      // Prefer factory binary (flashes at 0x0, includes bootloader)
+      const factory = binaries.find((b) => b.file.includes("factory"));
+      const binary = factory || binaries[0];
+      if (!binary) {
+        this._fail(this._localize("serial.no_firmware"));
+        return;
+      }
+      if (factory) flashAddress = 0x0;
+      const result = await this._api.firmwareDownload(device.configuration, binary.file);
+      firmwareBytes = Uint8Array.from(atob(result.data), (c) => c.charCodeAt(0));
+    } catch {
+      this._fail(this._localize("firmware.download_failed"));
+      return;
+    }
+
+    // 5. Reconnect and flash
+    this._step = "flashing";
+    this._statusMessage = this._localize("firmware.status_flashing");
+    this._flashPercent = 0;
+    let flashDetected: DetectedChip;
+    try {
+      flashDetected = await detectChip();
+    } catch {
+      this._fail(this._localize("firmware.status_connecting"));
+      return;
+    }
+
+    try {
+      await flashFirmware(flashDetected.loader, firmwareBytes, flashAddress, (p) => {
+        this._flashPercent = p.percent;
+      });
+    } catch (err) {
+      try { await disconnect(flashDetected.transport); } catch { /* ignore */ }
+      this._fail(err instanceof Error ? err.message : this._localize("firmware.flash_failed"));
+      return;
+    }
+
+    // 6. Reset
+    this._statusMessage = this._localize("firmware.status_resetting");
+    try {
+      await resetAndDisconnect(flashDetected.loader, flashDetected.transport);
+    } catch { /* ignore reset errors */ }
+
+    this._step = "done";
+  }
+
+  private _compileAndWait(configuration: string): Promise<void> {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const job = await this._api.firmwareCompile(configuration);
+        this._jobId = job.job_id;
+        this._streamId = this._api.firmwareFollowJob(job.job_id, {
+          onOutput: (line) => { this._logLines = [...this._logLines, line]; },
+          onResult: (data) => {
+            this._streamId = "";
+            this._jobId = "";
+            const result = data as unknown as { status: string };
+            result.status === JobStatus.COMPLETED ? resolve() : reject(new Error("Compilation failed"));
+          },
+          onError: (error) => {
+            this._streamId = "";
+            this._jobId = "";
+            reject(new Error(error));
+          },
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  // ─── Helpers ───────────────────────────────────────────
+
+  private _fail(message: string) {
+    this._step = "error";
+    this._errorMessage = message;
+    this._logsExpanded = true;
+  }
+
+  private async _cancel() {
+    if (this._jobId) {
+      try { await this._api.firmwareCancel(this._jobId); } catch { /* ignore */ }
+    }
+    this._close();
+  }
+
+  private _close() {
+    this._open = false;
+    this._device = null;
+    this._jobId = "";
+    this._streamId = "";
+    this.dispatchEvent(new CustomEvent("close", { bubbles: true, composed: true }));
+  }
+
+  private _onClose() {
+    this._open = false;
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "esphome-firmware-install-dialog": ESPHomeFirmwareInstallDialog;
+  }
+}
