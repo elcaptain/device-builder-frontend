@@ -36,7 +36,7 @@ registerMdiIcons({
   close: mdiClose,
 });
 
-type InstallStep = "connecting" | "installing" | "compiling" | "flashing" | "done" | "error";
+type InstallStep = "connecting" | "queued" | "installing" | "compiling" | "flashing" | "done" | "error";
 
 function normalizeChipName(name: string): string {
   return name.split("(")[0].trim().toLowerCase().replace(/-/g, "");
@@ -75,16 +75,16 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
 
   installOta(device: ConfiguredDevice) {
     this._init(device);
-    this._step = "installing";
-    this._statusMessage = this._localize("firmware.status_installing");
+    this._step = "queued";
+    this._statusMessage = this._localize("firmware.status_queued");
     this._dialog.open = true;
     this._startServerInstall("OTA");
   }
 
   installServerSerial(device: ConfiguredDevice, port: string) {
     this._init(device);
-    this._step = "installing";
-    this._statusMessage = this._localize("firmware.status_installing");
+    this._step = "queued";
+    this._statusMessage = this._localize("firmware.status_queued");
     this._dialog.open = true;
     this._startServerInstall(port);
   }
@@ -359,7 +359,13 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
       const job = await this._api.firmwareInstall(device.configuration, port);
       this._jobId = job.job_id;
       this._streamId = this._api.firmwareFollowJob(job.job_id, {
-        onOutput: (line) => { this._logLines = [...this._logLines, line]; },
+        onOutput: (line) => {
+          if (this._step === "queued") {
+            this._step = "installing";
+            this._statusMessage = this._localize("firmware.status_installing");
+          }
+          this._logLines = [...this._logLines, line];
+        },
         onResult: (data) => {
           this._streamId = "";
           this._jobId = "";
@@ -413,8 +419,8 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
     try { await disconnect(detected.transport); } catch { /* ignore */ }
 
     // 3. Compile
-    this._step = "compiling";
-    this._statusMessage = this._localize("firmware.status_compiling");
+    this._step = "queued";
+    this._statusMessage = this._localize("firmware.status_queued");
     try {
       await this._compileAndWait(device.configuration);
     } catch {
@@ -480,7 +486,13 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
         const job = await this._api.firmwareCompile(configuration);
         this._jobId = job.job_id;
         this._streamId = this._api.firmwareFollowJob(job.job_id, {
-          onOutput: (line) => { this._logLines = [...this._logLines, line]; },
+          onOutput: (line) => {
+            if (this._step === "queued") {
+              this._step = "compiling";
+              this._statusMessage = this._localize("firmware.status_compiling");
+            }
+            this._logLines = [...this._logLines, line];
+          },
           onResult: (data) => {
             this._streamId = "";
             this._jobId = "";

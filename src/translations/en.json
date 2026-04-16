@@ -173,6 +173,7 @@
     "status_connecting": "Connecting to device…",
     "status_verifying": "Verifying chip…",
     "status_compiling": "Compiling firmware…",
+    "status_queued": "Waiting for server…",
     "status_installing": "Compiling and installing firmware…",
     "status_downloading": "Downloading firmware…",
     "status_flashing": "Flashing firmware to device…",
