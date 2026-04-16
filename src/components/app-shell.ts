@@ -30,6 +30,7 @@ import {
   devicesContext,
   devicesLoadedContext,
   importableDevicesContext,
+  isHaIngressContext,
   localizeContext,
   versionContext,
 } from "../context/index.js";
@@ -65,6 +66,10 @@ export class ESPHomeApp extends LitElement {
   @provide({ context: darkModeContext })
   @state()
   private _darkMode = false;
+
+  @provide({ context: isHaIngressContext })
+  @state()
+  private _isHaIngress = false;
 
   @provide({ context: localizeContext })
   @state()
@@ -165,6 +170,7 @@ export class ESPHomeApp extends LitElement {
     // Set up connection callbacks
     this._api.onConnected = (info: ServerInfoMessage) => {
       this._version = info.esphome_version;
+      this._isHaIngress = info.ha_addon && window.location.pathname.includes("/ingress");
       this._subscribeToEvents();
     };
 
@@ -176,6 +182,7 @@ export class ESPHomeApp extends LitElement {
     try {
       const info = await this._api.connect();
       this._version = info.esphome_version;
+      this._isHaIngress = info.ha_addon && window.location.pathname.includes("/ingress");
       // Sync theme from backend once connected
       this._loadThemePreference();
     } catch (err) {

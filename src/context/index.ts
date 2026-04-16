@@ -6,4 +6,5 @@ export {
   darkModeContext,
   localizeContext,
   devicesLoadedContext,
+  isHaIngressContext,
 } from "./contexts.js";

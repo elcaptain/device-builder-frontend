@@ -37,3 +37,8 @@ export const localizeContext = createContext<LocalizeFunc>(
 export const devicesLoadedContext = createContext<boolean>(
   Symbol("esphome-devices-loaded")
 );
+
+/** Context for whether the frontend is running inside HA ingress. */
+export const isHaIngressContext = createContext<boolean>(
+  Symbol("esphome-is-ha-ingress")
+);

@@ -1,9 +1,9 @@
 import { consume } from "@lit/context";
 import { mdiArrowCollapseRight } from "@mdi/js";
-import { LitElement, css, html } from "lit";
+import { LitElement, css, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import type { LocalizeFunc } from "../common/localize.js";
-import { localizeContext } from "../context/index.js";
+import { isHaIngressContext, localizeContext } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
 import { registerMdiIcons } from "../util/register-icons.js";
 
@@ -20,6 +20,10 @@ export class ESPHomeLayout extends LitElement {
   @consume({ context: localizeContext, subscribe: true })
   @state()
   private _localize: LocalizeFunc = (key) => key;
+
+  @consume({ context: isHaIngressContext, subscribe: true })
+  @state()
+  private _isHaIngress = false;
 
   static styles = [
     espHomeStyles,
@@ -108,11 +112,15 @@ export class ESPHomeLayout extends LitElement {
     return html`
       <div class="app-header">
         <div class="header-logos">
-          <wa-button class="ha-btn" variant="light" size="small" title=${this._localize("layout.home_assistant")}>
-            <wa-icon library="mdi" name="arrow-collapse-right"></wa-icon>
-            <img src="/assets/logo/ha.svg" alt="Home Assistant" />
-          </wa-button>
-          <div class="header-separator"></div>
+          ${this._isHaIngress
+            ? html`
+                <wa-button class="ha-btn" variant="light" size="small" title=${this._localize("layout.home_assistant")}>
+                  <wa-icon library="mdi" name="arrow-collapse-right"></wa-icon>
+                  <img src="/assets/logo/ha.svg" alt="Home Assistant" />
+                </wa-button>
+                <div class="header-separator"></div>
+              `
+            : nothing}
           <button class="header-logo" @click=${this._goHome}>
             <img src="/assets/logo/esphome.svg" alt="ESPHome" />
           </button>

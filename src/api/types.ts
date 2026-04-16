@@ -39,6 +39,9 @@ export interface EventMessage {
 export interface ServerInfoMessage {
   server_version: string;
   esphome_version: string;
+  port: number;
+  ha_addon: boolean;
+  requires_auth: boolean;
 }
 
 export type ServerMessage = ResultMessage | ErrorMessage | EventMessage;
