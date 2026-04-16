@@ -51,7 +51,6 @@ import type { ESPHomeLogsDialog } from "../components/logs-dialog.js";
 import "../components/firmware-install-dialog.js";
 import type { ESPHomeFirmwareInstallDialog } from "../components/firmware-install-dialog.js";
 import "../components/install-method-dialog.js";
-import "../components/logs-method-dialog.js";
 import "../components/rename-device-dialog.js";
 import type { ESPHomeRenameDeviceDialog } from "../components/rename-device-dialog.js";
 import "../components/select-bar.js";
@@ -97,10 +96,9 @@ export class ESPHomePageDashboard extends LitElement {
 
   @state() private _showDiscovered = false;
   @state() private _search = "";
-  @state() private _logsMethodOpen = false;
-  @state() private _logsMethodDevice: ConfiguredDevice | null = null;
   @state() private _installMethodOpen = false;
   @state() private _installMethodDevice: ConfiguredDevice | null = null;
+  @state() private _installMethodMode: "install" | "logs" = "install";
   @state() private _selectMode = false;
   @state() private _selectedDevices = new Set<string>();
   @state() private _drawerOpen = false;
@@ -434,11 +432,6 @@ export class ESPHomePageDashboard extends LitElement {
       <esphome-command-dialog></esphome-command-dialog>
       <esphome-firmware-install-dialog></esphome-firmware-install-dialog>
       <esphome-logs-dialog></esphome-logs-dialog>
-      <esphome-logs-method-dialog
-        ?open=${this._logsMethodOpen}
-        @close=${() => { this._logsMethodOpen = false; }}
-        @web-serial=${this._openLogsWebSerial}
-      ></esphome-logs-method-dialog>
       <esphome-install-method-dialog
         ?open=${this._installMethodOpen}
         .deviceState=${this._installMethodDevice?.state ?? DeviceState.UNKNOWN}
@@ -567,6 +560,7 @@ export class ESPHomePageDashboard extends LitElement {
 
   private _openInstallMethod(device: ConfiguredDevice) {
     this._installMethodDevice = device;
+    this._installMethodMode = "install";
     this._installMethodOpen = true;
   }
 
@@ -576,12 +570,44 @@ export class ESPHomePageDashboard extends LitElement {
     if (!device) return;
 
     const { method, port } = e.detail;
+    if (this._installMethodMode === "logs") {
+      this._openLogsWithMethod(device, method, port);
+    } else {
+      if (method === "ota") {
+        this._firmwareDialog.installOta(device);
+      } else if (method === "server-serial") {
+        this._firmwareDialog.installServerSerial(device, port!);
+      } else if (method === "web-serial") {
+        this._firmwareDialog.installWebSerial(device);
+      }
+    }
+  }
+
+  private async _openLogsWithMethod(device: ConfiguredDevice, method: string, port?: string) {
     if (method === "ota") {
-      this._firmwareDialog.installOta(device);
+      // Network logs
+      this._logsDialog.configuration = device.configuration;
+      this._logsDialog.name = device.friendly_name || device.name;
+      this._logsDialog.open();
     } else if (method === "server-serial") {
-      this._firmwareDialog.installServerSerial(device, port!);
+      // Server serial logs — pass the selected port
+      this._logsDialog.configuration = device.configuration;
+      this._logsDialog.name = device.friendly_name || device.name;
+      this._logsDialog.open(port);
     } else if (method === "web-serial") {
-      this._firmwareDialog.installWebSerial(device);
+      // Web Serial logs
+      if (!("serial" in navigator)) {
+        toast.error(this._localize("dashboard.logs_web_serial_unsupported"), { richColors: true });
+        return;
+      }
+      try {
+        const serialPort = await (navigator as any).serial.requestPort();
+        await serialPort.open({ baudRate: 115200 });
+        this._logsDialog.configuration = device.configuration;
+        this._logsDialog.name = device.friendly_name || device.name;
+        this._logsDialog.open();
+        streamSerialToDialog(serialPort, this._logsDialog);
+      } catch { /* User cancelled */ }
     }
   }
 
@@ -591,27 +617,11 @@ export class ESPHomePageDashboard extends LitElement {
       this._logsDialog.name = device.friendly_name || device.name;
       this._logsDialog.open();
     } else {
-      this._logsMethodDevice = device;
-      this._logsMethodOpen = true;
+      // Device offline — show method picker (reuse install method dialog)
+      this._installMethodDevice = device;
+      this._installMethodMode = "logs";
+      this._installMethodOpen = true;
     }
-  }
-
-  private async _openLogsWebSerial() {
-    const device = this._logsMethodDevice;
-    if (!device) return;
-    if (!("serial" in navigator)) {
-      toast.error(this._localize("dashboard.logs_web_serial_unsupported"), { richColors: true });
-      return;
-    }
-    try {
-      const port = await (navigator as any).serial.requestPort();
-      await port.open({ baudRate: 115200 });
-      this._logsMethodOpen = false;
-      this._logsDialog.configuration = device.configuration;
-      this._logsDialog.name = device.friendly_name || device.name;
-      this._logsDialog.open();
-      streamSerialToDialog(port, this._logsDialog);
-    } catch { /* User cancelled */ }
   }
 
   private _toggleDevice(configuration: string) {

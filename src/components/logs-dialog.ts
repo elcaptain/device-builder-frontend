@@ -236,7 +236,10 @@ export class ESPHomeLogsDialog extends LitElement {
     }
   }
 
-  public open() {
+  private _port = "OTA";
+
+  public open(port = "OTA") {
+    this._port = port;
     this._lines = [];
     this._streaming = false;
     this._expanded = false;
@@ -314,7 +317,7 @@ export class ESPHomeLogsDialog extends LitElement {
     this._streaming = true;
     this._lines = [];
 
-    this._streamId = this._api.logs(this.configuration, "OTA", {
+    this._streamId = this._api.logs(this.configuration, this._port, {
       onOutput: (line: string) => {
         this._lines = [...this._lines, line];
       },
