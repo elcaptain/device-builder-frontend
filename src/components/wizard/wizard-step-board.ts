@@ -53,7 +53,18 @@ export class ESPHomeWizardStepBoard extends LitElement {
   @state()
   private _expandedBoardId: string | null = null;
 
+  @state()
+  private _selectedPlatform = "";
+
   private _debouncedSearch = debounce(() => this._fetchBoards(), 300);
+
+  private static readonly PLATFORMS = [
+    { value: "esp32", label: "ESP32" },
+    { value: "esp8266", label: "ESP8266" },
+    { value: "rp2040", label: "RP2040" },
+    { value: "bk72xx", label: "BK72xx" },
+    { value: "rtl87xx", label: "RTL87xx" },
+  ];
 
   connectedCallback() {
     super.connectedCallback();
@@ -64,7 +75,8 @@ export class ESPHomeWizardStepBoard extends LitElement {
     this._loading = true;
     try {
       const query = this._search.trim() || undefined;
-      const response = await this._api.getBoards({ query, limit: 50 });
+      const platform = this._selectedPlatform || undefined;
+      const response = await this._api.getBoards({ query, platform, limit: 50 });
       this._boards = response.boards;
     } catch (e) {
       console.error("Failed to load board catalog:", e);
@@ -307,6 +319,38 @@ export class ESPHomeWizardStepBoard extends LitElement {
         cursor: pointer;
       }
 
+      .platform-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .platform-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 12px;
+        border-radius: 999px;
+        font-size: var(--wa-font-size-2xs);
+        font-weight: var(--wa-font-weight-bold);
+        font-family: inherit;
+        cursor: pointer;
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+        background: transparent;
+        color: var(--wa-color-text-quiet);
+        transition: all 0.12s;
+      }
+
+      .platform-chip:hover {
+        border-color: var(--esphome-primary);
+        color: var(--esphome-primary);
+      }
+
+      .platform-chip--active {
+        background: color-mix(in srgb, var(--esphome-primary), transparent 88%);
+        border-color: var(--esphome-primary);
+        color: var(--esphome-primary);
+      }
+
       .loading {
         color: var(--wa-color-text-quiet);
         font-size: var(--wa-font-size-s);
@@ -331,6 +375,15 @@ export class ESPHomeWizardStepBoard extends LitElement {
         @input=${this._onSearchInput}
         placeholder=${this._localize("wizard.search_boards_placeholder")}
       ></wa-input>
+
+      <div class="platform-filters">
+        ${ESPHomeWizardStepBoard.PLATFORMS.map(
+          (p) => html`<button
+            class="platform-chip ${this._selectedPlatform === p.value ? "platform-chip--active" : ""}"
+            @click=${() => this._onPlatformFilter(p.value)}
+          >${p.label}</button>`
+        )}
+      </div>
 
       <div class="helper-row">
         <button class="helper-link" type="button">
@@ -477,6 +530,11 @@ export class ESPHomeWizardStepBoard extends LitElement {
 
   private _onToggleExpand(board: BoardCatalogEntry) {
     this._expandedBoardId = this._expandedBoardId === board.id ? null : board.id;
+  }
+
+  private _onPlatformFilter(platform: string) {
+    this._selectedPlatform = this._selectedPlatform === platform ? "" : platform;
+    this._fetchBoards();
   }
 
   private _localizeTag(tag: string): string {
