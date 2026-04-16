@@ -264,6 +264,8 @@ export class ESPHomePageDashboard extends LitElement {
               .name=${device.friendly_name || device.name}
               .configuration=${device.configuration}
               .state=${device.state}
+              ?has-pending-changes=${device.has_pending_changes === true}
+              ?has-update-available=${!!(device.deployed_version && device.current_version && device.deployed_version !== device.current_version)}
               ?select-mode=${this._selectMode}
               ?selected=${this._selectedDevices.has(device.configuration)}
               @edit-device=${() => editDevice(device)}

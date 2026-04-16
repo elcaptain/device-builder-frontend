@@ -1,4 +1,4 @@
-import { html } from "lit";
+import { html, nothing } from "lit";
 import type { ColumnDef } from "@tanstack/lit-table";
 import { DeviceState } from "../../api/types.js";
 import type { ConfiguredDevice } from "../../api/types.js";
@@ -14,6 +14,8 @@ export interface DeviceRow {
   comment: string;
   tags: string[];
   config: string;
+  hasPendingChanges: boolean;
+  hasUpdateAvailable: boolean;
   _device: ConfiguredDevice;
 }
 
@@ -43,9 +45,15 @@ export function createDeviceColumns(localize: LocalizeFunc): ColumnDef<DeviceRow
       header: localize("dashboard.table_col_name"),
       cell: (info) => {
         const row = info.row.original;
-        return html`<span class="cell-name"
-          >${row.friendly_name || row.name}</span
-        >`;
+        return html`<span class="cell-name-wrap">
+          <span class="cell-name">${row.friendly_name || row.name}</span>
+          ${row.hasPendingChanges
+            ? html`<span class="cell-indicator cell-indicator--modified" title=${localize("dashboard.status_modified")}></span>`
+            : nothing}
+          ${row.hasUpdateAvailable
+            ? html`<span class="cell-indicator cell-indicator--update" title=${localize("dashboard.status_update_available")}></span>`
+            : nothing}
+        </span>`;
       },
       size: 200,
       enableHiding: true,

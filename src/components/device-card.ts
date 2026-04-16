@@ -1,5 +1,6 @@
 import { consume } from "@lit/context";
 import {
+  mdiAlertCircleOutline,
   mdiBroom,
   mdiCheckboxBlankOutline,
   mdiCheckboxMarked,
@@ -12,6 +13,7 @@ import {
   mdiKeyVariant,
   mdiPencil,
   mdiRenameOutline,
+  mdiUpdate,
   mdiUpload,
   mdiWifi,
   mdiWifiOff,
@@ -29,6 +31,7 @@ import "@home-assistant/webawesome/dist/components/dropdown/dropdown.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 
 registerMdiIcons({
+  "alert-circle-outline": mdiAlertCircleOutline,
   broom: mdiBroom,
   "checkbox-blank-outline": mdiCheckboxBlankOutline,
   "checkbox-marked": mdiCheckboxMarked,
@@ -41,6 +44,7 @@ registerMdiIcons({
   "key-variant": mdiKeyVariant,
   pencil: mdiPencil,
   "rename-outline": mdiRenameOutline,
+  update: mdiUpdate,
   upload: mdiUpload,
   wifi: mdiWifi,
   "wifi-off": mdiWifiOff,
@@ -60,6 +64,12 @@ export class ESPHomeDeviceCard extends LitElement {
 
   @property()
   state: DeviceState = DeviceState.UNKNOWN;
+
+  @property({ type: Boolean, attribute: "has-pending-changes" })
+  hasPendingChanges = false;
+
+  @property({ type: Boolean, attribute: "has-update-available" })
+  hasUpdateAvailable = false;
 
   @property({ type: Boolean, attribute: "select-mode" })
   selectMode = false;
@@ -168,6 +178,38 @@ export class ESPHomeDeviceCard extends LitElement {
 
       .device-status wa-icon {
         font-size: 13px;
+      }
+
+      .device-indicators {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 0 var(--wa-space-m) var(--wa-space-s);
+      }
+
+      .indicator-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: var(--wa-font-size-2xs);
+        font-weight: var(--wa-font-weight-bold);
+        letter-spacing: 0.02em;
+      }
+
+      .indicator-badge wa-icon {
+        font-size: 12px;
+      }
+
+      .indicator-badge--modified {
+        background: color-mix(in srgb, var(--esphome-warning, #f59e0b), transparent 85%);
+        color: var(--esphome-warning, #d97706);
+      }
+
+      .indicator-badge--update {
+        background: color-mix(in srgb, var(--esphome-primary), transparent 88%);
+        color: var(--esphome-primary);
       }
 
       .device-checkbox {
@@ -279,6 +321,7 @@ export class ESPHomeDeviceCard extends LitElement {
                 : this._localize("dashboard.unknown")}
           </div>
         </div>
+        ${this._renderIndicators()}
         ${!this.selectMode
           ? html`
               <div class="device-actions" @click=${(e: Event) => e.stopPropagation()}>
@@ -350,6 +393,26 @@ export class ESPHomeDeviceCard extends LitElement {
                 </wa-dropdown>
               </div>
             `
+          : nothing}
+      </div>
+    `;
+  }
+
+  private _renderIndicators() {
+    if (!this.hasPendingChanges && !this.hasUpdateAvailable) return nothing;
+    return html`
+      <div class="device-indicators">
+        ${this.hasPendingChanges
+          ? html`<span class="indicator-badge indicator-badge--modified">
+              <wa-icon library="mdi" name="alert-circle-outline"></wa-icon>
+              ${this._localize("dashboard.status_modified")}
+            </span>`
+          : nothing}
+        ${this.hasUpdateAvailable
+          ? html`<span class="indicator-badge indicator-badge--update">
+              <wa-icon library="mdi" name="update"></wa-icon>
+              ${this._localize("dashboard.status_update_available")}
+            </span>`
           : nothing}
       </div>
     `;

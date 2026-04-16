@@ -1,11 +1,13 @@
 import { consume } from "@lit/context";
 import {
+  mdiAlertCircleOutline,
   mdiFileDocumentOutline,
   mdiInformationOutline,
   mdiIpNetworkOutline,
   mdiMemory,
   mdiTagMultiple,
   mdiTextShort,
+  mdiUpdate,
   mdiUpload,
 } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
@@ -19,12 +21,14 @@ import { registerMdiIcons } from "../../util/register-icons.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 
 registerMdiIcons({
+  "alert-circle-outline": mdiAlertCircleOutline,
   "file-document-outline": mdiFileDocumentOutline,
   "information-outline": mdiInformationOutline,
   "ip-network-outline": mdiIpNetworkOutline,
   memory: mdiMemory,
   "tag-multiple": mdiTagMultiple,
   "text-short": mdiTextShort,
+  update: mdiUpdate,
   upload: mdiUpload,
 });
 
@@ -138,6 +142,38 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
         color: var(--wa-color-text-quiet);
         border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
       }
+
+      .status-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: var(--wa-space-l);
+      }
+
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: var(--wa-font-size-2xs);
+        font-weight: var(--wa-font-weight-bold);
+        letter-spacing: 0.02em;
+      }
+
+      .status-badge wa-icon {
+        font-size: 13px;
+      }
+
+      .status-badge--modified {
+        background: color-mix(in srgb, var(--esphome-warning, #f59e0b), transparent 85%);
+        color: var(--esphome-warning, #d97706);
+      }
+
+      .status-badge--update {
+        background: color-mix(in srgb, var(--esphome-primary), transparent 88%);
+        color: var(--esphome-primary);
+      }
     `,
   ];
 
@@ -145,7 +181,26 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
     const d = this.device;
     if (!d) return nothing;
 
+    const hasPendingChanges = d.has_pending_changes === true;
+    const hasUpdateAvailable = !!(d.deployed_version && d.current_version && d.deployed_version !== d.current_version);
+
     return html`
+      ${hasPendingChanges || hasUpdateAvailable
+        ? html`<div class="status-badges">
+            ${hasPendingChanges
+              ? html`<span class="status-badge status-badge--modified">
+                  <wa-icon library="mdi" name="alert-circle-outline"></wa-icon>
+                  ${this._localize("dashboard.status_modified")}
+                </span>`
+              : nothing}
+            ${hasUpdateAvailable
+              ? html`<span class="status-badge status-badge--update">
+                  <wa-icon library="mdi" name="update"></wa-icon>
+                  ${this._localize("dashboard.status_update_available")}
+                </span>`
+              : nothing}
+          </div>`
+        : nothing}
       <div class="section">
         <h4 class="section-title">${this._localize("dashboard.drawer_device_info")}</h4>
         ${this._row("information-outline", this._localize("dashboard.drawer_name"), d.friendly_name || d.name)}

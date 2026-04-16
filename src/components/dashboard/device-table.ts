@@ -206,6 +206,8 @@ export class ESPHomeDeviceTable extends LitElement {
         comment: d.comment || "",
         tags: d.loaded_integrations?.slice(0, 3) || [],
         config: d.configuration,
+        hasPendingChanges: d.has_pending_changes === true,
+        hasUpdateAvailable: !!(d.deployed_version && d.current_version && d.deployed_version !== d.current_version),
         _device: d,
       }));
     }

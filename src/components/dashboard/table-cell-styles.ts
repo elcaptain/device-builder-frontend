@@ -27,8 +27,32 @@ export const tableCellStyles = css`
     opacity: 0.5;
   }
 
+  .cell-name-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
   .cell-name {
     font-weight: var(--wa-font-weight-bold);
+  }
+
+  .cell-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .cell-indicator--modified {
+    background: var(--esphome-warning, #f59e0b);
+    box-shadow: 0 0 5px color-mix(in srgb, var(--esphome-warning, #f59e0b), transparent 50%);
+  }
+
+  .cell-indicator--update {
+    background: var(--esphome-primary);
+    box-shadow: 0 0 5px color-mix(in srgb, var(--esphome-primary), transparent 50%);
   }
 
   .cell-mono {
