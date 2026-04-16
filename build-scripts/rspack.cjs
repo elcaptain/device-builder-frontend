@@ -151,6 +151,12 @@ const createRspackConfig = ({ isProdBuild = false } = {}) => ({
         ws: true,
       },
       {
+        // Backend-served static files (board images, etc.)
+        context: ["/boards"],
+        target: "http://localhost:6052",
+        changeOrigin: true,
+      },
+      {
         // Legacy REST endpoints (for backward compat if needed)
         context: ["/devices", "/json-config", "/compile", "/upload"],
         target: "http://localhost:6052",
