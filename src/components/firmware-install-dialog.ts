@@ -194,7 +194,8 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
         --term-error: #c72e2e;
       }
 
-      wa-dialog { --width: 520px; }
+      wa-dialog { --width: 520px; transition: width 0.2s; }
+      :host([expanded]) wa-dialog { --width: min(900px, 90vw); }
 
       wa-dialog::part(header) {
         background: var(--esphome-primary);
@@ -354,6 +355,9 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
   protected willUpdate(changedProperties: Map<string, unknown>) {
     if (changedProperties.has("_darkMode")) {
       this.toggleAttribute("light", !this._darkMode);
+    }
+    if (changedProperties.has("_logsFullHeight")) {
+      this.toggleAttribute("expanded", this._logsFullHeight);
     }
   }
 
