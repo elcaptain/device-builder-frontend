@@ -1,6 +1,8 @@
 import { consume } from "@lit/context";
 import {
   mdiAlertCircle,
+  mdiArrowExpand,
+  mdiArrowCollapse,
   mdiCheckCircle,
   mdiChevronDown,
   mdiChevronUp,
@@ -30,6 +32,8 @@ import "./ansi-log.js";
 
 registerMdiIcons({
   "alert-circle": mdiAlertCircle,
+  "arrow-expand": mdiArrowExpand,
+  "arrow-collapse": mdiArrowCollapse,
   "check-circle": mdiCheckCircle,
   "chevron-down": mdiChevronDown,
   "chevron-up": mdiChevronUp,
@@ -62,6 +66,7 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
   @state() private _errorMessage = "";
   @state() private _logLines: string[] = [];
   @state() private _logsExpanded = false;
+  @state() private _logsFullHeight = false;
   @state() private _flashPercent = 0;
 
   private _device: ConfiguredDevice | null = null;
@@ -162,6 +167,7 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
     this._errorMessage = "";
     this._logLines = [];
     this._logsExpanded = false;
+    this._logsFullHeight = false;
     this._flashPercent = 0;
     this._jobId = "";
     this._streamId = "";
@@ -277,6 +283,24 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
       .logs-toggle:hover { color: var(--wa-color-text-normal); }
       .logs-toggle wa-icon { font-size: 16px; }
 
+      .logs-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .expand-btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 0;
+        background: none;
+        border: none;
+        font-size: 16px;
+        color: var(--wa-color-text-quiet);
+        cursor: pointer;
+      }
+      .expand-btn:hover { color: var(--wa-color-text-normal); }
+
       .logs-container {
         margin-top: var(--wa-space-s);
         border: 1px solid var(--term-border);
@@ -286,6 +310,10 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
 
       esphome-ansi-log {
         --log-height: 200px;
+      }
+
+      .logs-container--full esphome-ansi-log {
+        --log-height: 50vh;
       }
       esphome-ansi-log::part(container) { border-radius: 0; }
 
@@ -384,12 +412,21 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
   private _renderLogs() {
     if (this._logLines.length === 0) return nothing;
     return html`
-      <button class="logs-toggle" @click=${() => { this._logsExpanded = !this._logsExpanded; }}>
-        <wa-icon library="mdi" name=${this._logsExpanded ? "chevron-up" : "chevron-down"}></wa-icon>
-        ${this._logsExpanded ? this._localize("firmware.hide_details") : this._localize("firmware.show_details")}
-      </button>
+      <div class="logs-header">
+        <button class="logs-toggle" @click=${() => { this._logsExpanded = !this._logsExpanded; }}>
+          <wa-icon library="mdi" name=${this._logsExpanded ? "chevron-up" : "chevron-down"}></wa-icon>
+          ${this._logsExpanded ? this._localize("firmware.hide_details") : this._localize("firmware.show_details")}
+        </button>
+        ${this._logsExpanded
+          ? html`<button class="expand-btn" @click=${() => { this._logsFullHeight = !this._logsFullHeight; }}>
+              <wa-icon library="mdi" name=${this._logsFullHeight ? "arrow-collapse" : "arrow-expand"}></wa-icon>
+            </button>`
+          : nothing}
+      </div>
       ${this._logsExpanded
-        ? html`<div class="logs-container"><esphome-ansi-log .lines=${this._logLines} ?light=${!this._darkMode}></esphome-ansi-log></div>`
+        ? html`<div class="logs-container ${this._logsFullHeight ? "logs-container--full" : ""}">
+            <esphome-ansi-log .lines=${this._logLines} ?light=${!this._darkMode}></esphome-ansi-log>
+          </div>`
         : nothing}
     `;
   }

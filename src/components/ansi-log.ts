@@ -238,7 +238,7 @@ export class ESPHomeAnsiLog extends LitElement {
     // starts at the same left offset), and drop empty ones.
     const visual: string[] = [];
     for (const raw of this.lines) {
-      const normalized = raw.replace(/\r\n?/g, "\n");
+      const normalized = raw.replace(/\r\n?/g, "\n").trimEnd();
       for (const part of normalized.split("\n")) {
         const trimmed = this._stripLeadingWhitespace(part);
         if (trimmed.replace(/\u001b\[[0-9;]*m/g, "").trim().length > 0) {
