@@ -50,6 +50,9 @@ export class ESPHomeTableRowMenu extends LitElement {
   @property({ attribute: false })
   device: ConfiguredDevice | null = null;
 
+  @property({ type: Boolean })
+  busy = false;
+
   @property({ attribute: false })
   position: MenuPosition | null = null;
 
@@ -126,6 +129,11 @@ export class ESPHomeTableRowMenu extends LitElement {
         margin: var(--wa-space-2xs) 0;
       }
 
+      .menu-item--disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
       .menu-item--danger {
         color: var(--esphome-error);
       }
@@ -158,11 +166,11 @@ export class ESPHomeTableRowMenu extends LitElement {
           <wa-icon library="mdi" name="check-decagram"></wa-icon>
           ${this._localize("dashboard.action_validate")}
         </div>
-        <div class="menu-item" @click=${() => this._emit("install-device")}>
+        <div class="menu-item ${this.busy ? "menu-item--disabled" : ""}" @click=${this.busy ? undefined : () => this._emit("install-device")}>
           <wa-icon library="mdi" name="upload"></wa-icon>
           ${this._localize("dashboard.action_install")}
         </div>
-        <div class="menu-item" @click=${() => this._emit("open-logs")}>
+        <div class="menu-item ${this.busy ? "menu-item--disabled" : ""}" @click=${this.busy ? undefined : () => this._emit("open-logs")}>
           <wa-icon library="mdi" name="console"></wa-icon>
           ${this._localize("dashboard.drawer_logs")}
         </div>

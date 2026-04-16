@@ -33,6 +33,9 @@ export class ESPHomeDeviceDrawer extends LitElement {
   @property({ attribute: false })
   device: ConfiguredDevice | null = null;
 
+  @property({ type: Boolean })
+  busy = false;
+
   static styles = [
     espHomeStyles,
     css`
@@ -276,6 +279,12 @@ export class ESPHomeDeviceDrawer extends LitElement {
         background: var(--wa-color-surface-lowered);
         border-color: var(--wa-color-text-quiet);
       }
+
+      .action:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
     `,
   ];
 
@@ -324,6 +333,7 @@ export class ESPHomeDeviceDrawer extends LitElement {
           </button>
           <button
             class="action action--accent"
+            ?disabled=${this.busy}
             @click=${() => this._emitAction("update-device")}
           >
             <wa-icon library="mdi" name="upload"></wa-icon>
@@ -331,6 +341,7 @@ export class ESPHomeDeviceDrawer extends LitElement {
           </button>
           <button
             class="action action--ghost"
+            ?disabled=${this.busy}
             @click=${() => this._emitAction("open-logs")}
           >
             <wa-icon library="mdi" name="console"></wa-icon>

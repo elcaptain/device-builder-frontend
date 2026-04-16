@@ -190,6 +190,7 @@ export class ESPHomeDeviceCard extends LitElement {
       .device-status.busy {
         background: color-mix(in srgb, var(--esphome-primary), transparent 85%);
         color: var(--esphome-primary);
+        cursor: pointer;
       }
 
       .device-status.busy wa-spinner {
@@ -315,9 +316,9 @@ export class ESPHomeDeviceCard extends LitElement {
             <p class="device-config">${this.configuration}</p>
           </div>
           ${this.busy
-            ? html`<div class="device-status busy">
+            ? html`<div class="device-status busy" @click=${(e: Event) => { e.stopPropagation(); this._emit("show-progress"); }}>
                 <wa-spinner></wa-spinner>
-                ${this._localize("dashboard.status_busy")}
+                ${this._localize("dashboard.status_installing")}
               </div>`
             : html`<div class="device-status ${this.state}">
                 <wa-icon library="mdi" name=${this.state === DeviceState.ONLINE ? "wifi" : "wifi-off"}></wa-icon>

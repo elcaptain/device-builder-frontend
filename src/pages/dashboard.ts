@@ -291,6 +291,7 @@ export class ESPHomePageDashboard extends LitElement {
               @edit-device=${() => editDevice(device)}
               @install-device=${() => this._openInstallMethod(device)}
               @update-device=${() => this._firmwareDialog.installOta(device)}
+              @show-progress=${() => this._showJobProgress(device)}
               @card-click=${() => { this._drawerDevice = device; this._drawerOpen = true; }}
               @card-context-menu=${(e: CustomEvent) => { this._cardContextDevice = device; this._cardContextPosition = e.detail; }}
               @toggle-select=${() => this._toggleDevice(device.configuration)}
@@ -357,6 +358,7 @@ export class ESPHomePageDashboard extends LitElement {
       <esphome-device-drawer
         ?open=${this._drawerOpen}
         .device=${this._drawerDevice}
+        ?busy=${this._drawerDevice ? this._activeJobs.has(this._drawerDevice.configuration) : false}
         @drawer-close=${() => { this._drawerOpen = false; }}
         @edit-device=${(e: CustomEvent) => { this._drawerOpen = false; editDevice(e.detail); }}
         @update-device=${(e: CustomEvent) => { this._drawerOpen = false; this._firmwareDialog.installOta(e.detail); }}
@@ -370,6 +372,7 @@ export class ESPHomePageDashboard extends LitElement {
       <esphome-table-row-menu
         .device=${this._cardContextDevice}
         .position=${this._cardContextPosition}
+        ?busy=${this._cardContextDevice ? this._activeJobs.has(this._cardContextDevice.configuration) : false}
         @menu-close=${() => { this._cardContextDevice = null; this._cardContextPosition = null; }}
         @edit-device=${(e: CustomEvent<ConfiguredDevice>) => editDevice(e.detail)}
         @update-device=${(e: CustomEvent<ConfiguredDevice>) => this._firmwareDialog.installOta(e.detail)}
@@ -553,6 +556,13 @@ export class ESPHomePageDashboard extends LitElement {
     this._commandDialog.configuration = device.configuration;
     this._commandDialog.name = device.friendly_name || device.name;
     this._commandDialog.open(type);
+  }
+
+  private _showJobProgress(device: ConfiguredDevice) {
+    const job = this._activeJobs.get(device.configuration);
+    if (job) {
+      this._firmwareDialog.followJob(device, job);
+    }
   }
 
   private _openInstallMethod(device: ConfiguredDevice) {

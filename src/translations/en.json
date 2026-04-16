@@ -147,7 +147,7 @@
     "context_select": "Select",
     "status_modified": "Modified",
     "status_update_available": "Update available",
-    "status_busy": "Working…"
+    "status_installing": "Installing…"
   },
   "command": {
     "install_title": "Install — {name}",

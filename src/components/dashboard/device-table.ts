@@ -281,6 +281,7 @@ export class ESPHomeDeviceTable extends LitElement {
         .device=${this._contextMenuDevice}
         .position=${this._contextMenuPos}
         ?anchor-right=${this._contextMenuAnchorRight}
+        ?busy=${this._contextMenuDevice ? this.activeJobs.has(this._contextMenuDevice.configuration) : false}
         @menu-close=${this._closeContextMenu}
         @edit-device=${(e: CustomEvent) => {
           e.stopPropagation();

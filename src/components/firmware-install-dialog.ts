@@ -10,7 +10,7 @@ import { LitElement, css, html, nothing } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 import type { ESPHomeAPI } from "../api/index.js";
 import { JobStatus } from "../api/types.js";
-import type { ConfiguredDevice } from "../api/types.js";
+import type { ConfiguredDevice, FirmwareJob } from "../api/types.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import { apiContext, darkModeContext, localizeContext } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
@@ -95,6 +95,35 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
     this._statusMessage = this._localize("firmware.status_connecting");
     this._dialog.open = true;
     this._startWebSerialInstall();
+  }
+
+  /** Attach to an already-running job and show its progress. */
+  followJob(device: ConfiguredDevice, job: FirmwareJob) {
+    this._init(device);
+    this._step = "installing";
+    this._statusMessage = this._localize("firmware.status_installing");
+    this._dialog.open = true;
+    this._jobId = job.job_id;
+    this._streamId = this._api.firmwareFollowJob(job.job_id, {
+      onOutput: (line) => {
+        this._logLines = [...this._logLines, line];
+      },
+      onResult: (data) => {
+        this._streamId = "";
+        this._jobId = "";
+        const result = data as unknown as { status: string };
+        if (result.status === JobStatus.COMPLETED) {
+          this._step = "done";
+        } else {
+          this._fail(this._localize("firmware.install_failed"));
+        }
+      },
+      onError: (error) => {
+        this._streamId = "";
+        this._jobId = "";
+        this._fail(error);
+      },
+    });
   }
 
   private _init(device: ConfiguredDevice) {
