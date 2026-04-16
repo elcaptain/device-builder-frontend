@@ -13,7 +13,7 @@ import { css, html, LitElement } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import toast from "sonner-js";
 import { ESPHomeAPI } from "../api/index.js";
-import { DeviceEventType, Theme } from "../api/types.js";
+import { DeviceEventType, DeviceState, Theme } from "../api/types.js";
 import type {
   AdoptableDevice,
   ConfiguredDevice,
@@ -29,7 +29,6 @@ import {
   darkModeContext,
   devicesContext,
   devicesLoadedContext,
-  deviceStatesContext,
   importableDevicesContext,
   localizeContext,
   versionContext,
@@ -50,10 +49,6 @@ export class ESPHomeApp extends LitElement {
   @provide({ context: devicesContext })
   @state()
   private _devices: ConfiguredDevice[] = [];
-
-  @provide({ context: deviceStatesContext })
-  @state()
-  private _deviceStates: Record<string, boolean> = {};
 
   @provide({ context: importableDevicesContext })
   @state()
@@ -231,12 +226,13 @@ export class ESPHomeApp extends LitElement {
         break;
       }
       case DeviceEventType.DEVICE_STATE_CHANGED: {
-        const { configuration, online } =
+        const { configuration, state } =
           data as DeviceStateChangedEventData;
-        this._deviceStates = {
-          ...this._deviceStates,
-          [configuration]: online,
-        };
+        this._devices = this._devices.map((d) =>
+          d.configuration === configuration
+            ? { ...d, state: state as DeviceState }
+            : d
+        );
         break;
       }
       case DeviceEventType.IMPORTABLE_DEVICE_ADDED: {

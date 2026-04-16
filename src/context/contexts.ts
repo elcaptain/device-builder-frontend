@@ -17,11 +17,6 @@ export const devicesContext = createContext<ConfiguredDevice[]>(
   Symbol("esphome-devices")
 );
 
-/** Context for the device online/offline status map. */
-export const deviceStatesContext = createContext<Record<string, boolean>>(
-  Symbol("esphome-device-states")
-);
-
 /** Context for the list of importable/adoptable devices. */
 export const importableDevicesContext = createContext<AdoptableDevice[]>(
   Symbol("esphome-importable-devices")

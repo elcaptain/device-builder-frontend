@@ -1,7 +1,6 @@
 export {
   apiContext,
   devicesContext,
-  deviceStatesContext,
   importableDevicesContext,
   versionContext,
   darkModeContext,

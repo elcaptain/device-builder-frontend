@@ -11,13 +11,12 @@ import { LitElement, html, type PropertyValues } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 import toast from "sonner-js";
 import type { ESPHomeAPI } from "../api/index.js";
-import { DashboardView, SortDirection } from "../api/types.js";
+import { DashboardView, DeviceState, SortDirection } from "../api/types.js";
 import type { AdoptableDevice, ConfiguredDevice } from "../api/types.js";
 import type { SortingState, VisibilityState } from "@tanstack/lit-table";
 import type { LocalizeFunc } from "../common/localize.js";
 import {
   apiContext,
-  deviceStatesContext,
   devicesContext,
   devicesLoadedContext,
   importableDevicesContext,
@@ -78,10 +77,6 @@ export class ESPHomePageDashboard extends LitElement {
   @consume({ context: importableDevicesContext, subscribe: true })
   @state()
   private _importableDevices: AdoptableDevice[] = [];
-
-  @consume({ context: deviceStatesContext, subscribe: true })
-  @state()
-  private _deviceStates: Record<string, boolean> = {};
 
   @consume({ context: devicesLoadedContext, subscribe: true })
   @state()
@@ -264,12 +259,11 @@ export class ESPHomePageDashboard extends LitElement {
       <div class="devices-grid">
         ${this._devices.length === 0 ? this._renderAddDeviceCard() : ""}
         ${filtered.map((device) => {
-          const online = this._deviceStates[device.configuration] ?? false;
           return html`
             <esphome-device-card
               .name=${device.friendly_name || device.name}
               .configuration=${device.configuration}
-              ?online=${online}
+              .state=${device.state}
               ?select-mode=${this._selectMode}
               ?selected=${this._selectedDevices.has(device.configuration)}
               @edit-device=${() => editDevice(device)}
@@ -295,7 +289,6 @@ export class ESPHomePageDashboard extends LitElement {
     return html`
       <esphome-device-table
         .devices=${this._devices}
-        .deviceStates=${this._deviceStates}
         .search=${this._search}
         .initialPageSize=${this._tablePageSize}
         .initialSorting=${this._tableSorting}
@@ -497,8 +490,7 @@ export class ESPHomePageDashboard extends LitElement {
   }
 
   private _openLogs(device: ConfiguredDevice) {
-    const online = this._deviceStates[device.configuration] ?? false;
-    if (online) {
+    if (device.state === DeviceState.ONLINE) {
       this._logsDialog.configuration = device.configuration;
       this._logsDialog.name = device.friendly_name || device.name;
       this._logsDialog.open();

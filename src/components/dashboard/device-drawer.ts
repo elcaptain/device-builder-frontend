@@ -3,8 +3,9 @@ import { mdiClose, mdiConsole, mdiPencil, mdiUpload, mdiWifi, mdiWifiOff } from 
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { LocalizeFunc } from "../../common/localize.js";
+import { DeviceState } from "../../api/types.js";
 import type { ConfiguredDevice } from "../../api/types.js";
-import { deviceStatesContext, localizeContext } from "../../context/index.js";
+import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
@@ -25,10 +26,6 @@ export class ESPHomeDeviceDrawer extends LitElement {
   @consume({ context: localizeContext, subscribe: true })
   @state()
   private _localize: LocalizeFunc = (key) => key;
-
-  @consume({ context: deviceStatesContext, subscribe: true })
-  @state()
-  private _deviceStates: Record<string, boolean> = {};
 
   @property({ type: Boolean, reflect: true })
   open = false;
@@ -286,7 +283,8 @@ export class ESPHomeDeviceDrawer extends LitElement {
     const device = this.device;
     if (!device) return nothing;
 
-    const online = this._deviceStates[device.configuration] ?? false;
+    const online = device.state === DeviceState.ONLINE;
+    const stateClass = device.state === DeviceState.ONLINE ? "online" : "offline";
 
     return html`
       <div class="backdrop" @click=${this._close}></div>
@@ -301,8 +299,8 @@ export class ESPHomeDeviceDrawer extends LitElement {
           </button>
         </div>
 
-        <div class="status-banner ${online ? "online" : "offline"}">
-          <span class="status-dot ${online ? "online" : "offline"}"></span>
+        <div class="status-banner ${stateClass}">
+          <span class="status-dot ${stateClass}"></span>
           <wa-icon
             library="mdi"
             name=${online ? "wifi" : "wifi-off"}

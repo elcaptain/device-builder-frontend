@@ -18,6 +18,7 @@ import {
 } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import { DeviceState } from "../api/types.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import { localizeContext } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
@@ -57,8 +58,8 @@ export class ESPHomeDeviceCard extends LitElement {
   @property()
   configuration = "";
 
-  @property({ type: Boolean })
-  online = false;
+  @property()
+  state: DeviceState = DeviceState.UNKNOWN;
 
   @property({ type: Boolean, attribute: "select-mode" })
   selectMode = false;
@@ -154,6 +155,11 @@ export class ESPHomeDeviceCard extends LitElement {
       .device-status.online {
         background: color-mix(in srgb, var(--esphome-success), transparent 85%);
         color: var(--esphome-success);
+      }
+
+      .device-status.unknown {
+        background: var(--wa-color-surface-lowered);
+        color: var(--wa-color-text-quiet);
       }
 
       .device-status wa-icon {
@@ -260,11 +266,13 @@ export class ESPHomeDeviceCard extends LitElement {
             <h3 class="device-name">${this.name}</h3>
             <p class="device-config">${this.configuration}</p>
           </div>
-          <div class="device-status ${this.online ? "online" : "offline"}">
-            <wa-icon library="mdi" name=${this.online ? "wifi" : "wifi-off"}></wa-icon>
-            ${this.online
+          <div class="device-status ${this.state}">
+            <wa-icon library="mdi" name=${this.state === DeviceState.ONLINE ? "wifi" : "wifi-off"}></wa-icon>
+            ${this.state === DeviceState.ONLINE
               ? this._localize("dashboard.online")
-              : this._localize("dashboard.offline")}
+              : this.state === DeviceState.OFFLINE
+                ? this._localize("dashboard.offline")
+                : this._localize("dashboard.unknown")}
           </div>
         </div>
         ${!this.selectMode

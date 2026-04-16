@@ -22,6 +22,10 @@ export const tableCellStyles = css`
     box-shadow: 0 0 6px
       color-mix(in srgb, var(--esphome-error), transparent 60%);
   }
+  .status-dot.unknown {
+    background: var(--wa-color-text-quiet);
+    opacity: 0.5;
+  }
 
   .cell-name {
     font-weight: var(--wa-font-weight-bold);

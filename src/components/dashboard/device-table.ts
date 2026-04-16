@@ -63,9 +63,6 @@ export class ESPHomeDeviceTable extends LitElement {
   devices: ConfiguredDevice[] = [];
 
   @property({ attribute: false })
-  deviceStates: Record<string, boolean> = {};
-
-  @property({ attribute: false })
   search = "";
 
   @property({ type: Boolean, attribute: "select-mode" })
@@ -198,9 +195,9 @@ export class ESPHomeDeviceTable extends LitElement {
       this._prevLocalize = this._localize;
       this._columns = createDeviceColumns(this._localize);
     }
-    if (changed.has("devices") || changed.has("deviceStates")) {
+    if (changed.has("devices")) {
       this._rows = this.devices.map((d) => ({
-        status: this.deviceStates[d.configuration] ?? false,
+        status: d.state,
         name: d.name,
         friendly_name: d.friendly_name,
         ip: d.address || "",

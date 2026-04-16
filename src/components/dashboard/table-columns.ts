@@ -1,10 +1,11 @@
 import { html } from "lit";
 import type { ColumnDef } from "@tanstack/lit-table";
+import { DeviceState } from "../../api/types.js";
 import type { ConfiguredDevice } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 
 export interface DeviceRow {
-  status: boolean;
+  status: DeviceState;
   name: string;
   friendly_name: string;
   ip: string;
@@ -22,10 +23,16 @@ export function createDeviceColumns(localize: LocalizeFunc): ColumnDef<DeviceRow
       accessorKey: "status",
       header: localize("dashboard.table_col_status"),
       cell: (info) => {
-        const online = info.getValue() as boolean;
+        const state = info.getValue() as DeviceState;
+        const dotClass = state === DeviceState.ONLINE ? "online" : "offline";
+        const title = state === DeviceState.ONLINE
+          ? localize("dashboard.table_status_online")
+          : state === DeviceState.OFFLINE
+            ? localize("dashboard.table_status_offline")
+            : localize("dashboard.table_status_unknown");
         return html`<span
-          class="status-dot ${online ? "online" : "offline"}"
-          title="${online ? localize("dashboard.table_status_online") : localize("dashboard.table_status_offline")}"
+          class="status-dot ${dotClass}"
+          title="${title}"
         ></span>`;
       },
       size: 80,

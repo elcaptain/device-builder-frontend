@@ -61,6 +61,12 @@ export interface PagedResponse {
 
 // ─── Devices ─────────────────────────────────────────────────
 
+export enum DeviceState {
+  UNKNOWN = "unknown",
+  ONLINE = "online",
+  OFFLINE = "offline",
+}
+
 /** A configured ESPHome device. */
 export interface ConfiguredDevice {
   name: string;
@@ -75,6 +81,7 @@ export interface ConfiguredDevice {
   deployed_version: string;
   loaded_integrations: string[];
   board_id: string;
+  state: DeviceState;
   /** null = never compiled, true = YAML newer than binary, false = up to date */
   has_pending_changes: boolean | null;
 }
@@ -358,7 +365,7 @@ export interface DeviceEventData {
 /** Data payload for device_state_changed event. */
 export interface DeviceStateChangedEventData {
   configuration: string;
-  online: boolean;
+  state: DeviceState;
 }
 
 /** Data payload for importable_device_added / importable_device_removed events. */
