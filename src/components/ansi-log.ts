@@ -280,8 +280,7 @@ export class ESPHomeAnsiLog extends LitElement {
       }
     }
 
-    return html`<div class="log-line">
-      ${spans.map((span) => {
+    return html`<div class="log-line">${spans.map((span) => {
         const style = [
           span.color ? `color:${span.color}` : "",
           span.bgColor ? `background:${span.bgColor}` : "",
@@ -294,13 +293,10 @@ export class ESPHomeAnsiLog extends LitElement {
           .join(" ");
 
         if (style || classes) {
-          return html`<span class=${classes || nothing} style=${style || nothing}
-            >${span.text}</span
-          >`;
+          return html`<span class=${classes || nothing} style=${style || nothing}>${span.text}</span>`;
         }
         return span.text;
-      })}
-    </div>`;
+      })}</div>`;
   }
 
   private _ignoreNextScroll = false;
