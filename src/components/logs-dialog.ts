@@ -1,5 +1,5 @@
 import { consume } from "@lit/context";
-import { mdiClose, mdiDeleteSweep, mdiPlay, mdiStop } from "@mdi/js";
+import { mdiClose, mdiDeleteSweep, mdiDownload, mdiPlay, mdiStop } from "@mdi/js";
 import { LitElement, css, html } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { ESPHomeAPI } from "../api/index.js";
@@ -14,6 +14,7 @@ import "./ansi-log.js";
 
 registerMdiIcons({
   close: mdiClose,
+  download: mdiDownload,
   play: mdiPlay,
   stop: mdiStop,
   "delete-sweep": mdiDeleteSweep,
@@ -75,7 +76,7 @@ export class ESPHomeLogsDialog extends LitElement {
       }
 
       wa-dialog {
-        --width: 720px;
+        --width: min(900px, 90vw);
       }
 
       wa-dialog::part(header) {
@@ -253,6 +254,12 @@ export class ESPHomeLogsDialog extends LitElement {
             <span class="spacer"></span>
             <button
               class="term-btn term-btn--ghost"
+              @click=${this._downloadLogs}
+            >
+              <wa-icon library="mdi" name="download"></wa-icon>
+            </button>
+            <button
+              class="term-btn term-btn--ghost"
               @click=${this._clearLogs}
               title=${this._localize("dashboard.logs_clear")}
             >
@@ -301,6 +308,19 @@ export class ESPHomeLogsDialog extends LitElement {
   private _stopStreaming() {
     this._streaming = false;
     this._streamId = "";
+  }
+
+  private _downloadLogs() {
+    const text = this._lines
+      .map((l) => l.replace(/\u001b\[[0-9;]*m/g, ""))
+      .join("\n");
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${this.configuration.replace(/\.yaml$/, "")}-logs.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   private _clearLogs() {

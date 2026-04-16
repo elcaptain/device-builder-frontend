@@ -77,7 +77,7 @@ export class ESPHomeCommandDialog extends LitElement {
         --term-success: #3d7a28;
       }
 
-      wa-dialog { --width: 720px; }
+      wa-dialog { --width: min(900px, 90vw); }
       wa-dialog::part(header) {
         background: var(--term-bg);
         padding: 0 var(--wa-space-m);

@@ -54,6 +54,26 @@ interface AnsiSpan {
   dim?: boolean;
 }
 
+/**
+ * ESPHome log level colors.
+ * Applied when a line matches `[timestamp][LEVEL][component:]` but has no ANSI codes.
+ */
+const LOG_LEVEL_COLORS: Record<string, string> = {
+  E: "#f44747", // ERROR — red
+  W: "#dcdcaa", // WARNING — yellow
+  I: "#6a9955", // INFO — green
+  C: "#4ec9b0", // CONFIG — cyan
+  D: "#569cd6", // DEBUG — blue
+  V: "#808080", // VERBOSE — gray
+  VV: "#666666", // VERY_VERBOSE — dark gray
+};
+
+/** Detect ESPHome log level from a line like `[22:40:23.513][C][component:123]: text` */
+function detectLogLevelColor(line: string): string | undefined {
+  const match = line.match(/^\[[\d:.]+\]\[([EWICDV]V?)\]\[/);
+  return match ? LOG_LEVEL_COLORS[match[1]] : undefined;
+}
+
 /** Parse a single log line with ANSI codes into styled spans. */
 function parseAnsiLine(line: string): AnsiSpan[] {
   const spans: AnsiSpan[] = [];
@@ -170,14 +190,14 @@ export class ESPHomeAnsiLog extends LitElement {
       background: var(--log-bg);
       color: var(--log-fg);
       font-family: "SF Mono", "Fira Code", "Fira Mono", "Cascadia Code", monospace;
-      font-size: 0.8rem;
-      padding: 8px 16px;
+      font-size: 12px;
+      padding: 8px 12px;
       border-radius: 8px;
       height: 100%;
       overflow-y: auto;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
-      line-height: 1.2;
+      line-height: 1.4;
       box-sizing: border-box;
       tab-size: 4;
     }
@@ -185,8 +205,7 @@ export class ESPHomeAnsiLog extends LitElement {
     .log-line {
       margin: 0;
       padding: 0;
-      border-radius: 3px;
-      min-height: 1em;
+      border-radius: 2px;
     }
 
     .log-line:hover {
@@ -255,6 +274,15 @@ export class ESPHomeAnsiLog extends LitElement {
 
   private _renderLine(line: string) {
     const spans = parseAnsiLine(line);
+    const hasAnsiColor = spans.some((s) => s.color || s.bgColor);
+
+    // If no ANSI colors, try ESPHome log-level colorization
+    if (!hasAnsiColor) {
+      const levelColor = detectLogLevelColor(line);
+      if (levelColor) {
+        return html`<div class="log-line" style="color:${levelColor}">${line}</div>`;
+      }
+    }
 
     return html`<div class="log-line">
       ${spans.map((span) => {
