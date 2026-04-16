@@ -195,9 +195,10 @@ export class ESPHomeAnsiLog extends LitElement {
       border-radius: 8px;
       height: 100%;
       overflow-y: auto;
-      white-space: pre-wrap;
+      white-space: pre;
       overflow-wrap: anywhere;
-      line-height: 1.4;
+      overflow-x: auto;
+      line-height: 1.3;
       box-sizing: border-box;
       tab-size: 4;
     }
@@ -238,11 +239,13 @@ export class ESPHomeAnsiLog extends LitElement {
     // starts at the same left offset), and drop empty ones.
     const visual: string[] = [];
     for (const raw of this.lines) {
-      const normalized = raw.replace(/\r\n?/g, "\n").trimEnd();
+      // Normalize line endings and strip carriage returns
+      const normalized = raw.replace(/\r\n?/g, "\n");
       for (const part of normalized.split("\n")) {
-        const trimmed = this._stripLeadingWhitespace(part);
-        if (trimmed.replace(/\u001b\[[0-9;]*m/g, "").trim().length > 0) {
-          visual.push(trimmed);
+        // Strip all leading/trailing whitespace while keeping inline ANSI codes
+        const stripped = this._stripLeadingWhitespace(part.trim());
+        if (stripped.replace(/\u001b\[[0-9;]*m/g, "").trim().length > 0) {
+          visual.push(stripped);
         }
       }
     }
