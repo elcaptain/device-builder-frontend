@@ -139,6 +139,7 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
         this._jobId = "";
         const result = data as unknown as { status: string };
         if (result.status === JobStatus.COMPLETED) {
+          this._statusMessage = this._localize("firmware.status_done");
           this._step = "done";
         } else {
           this._fail(this._localize("firmware.install_failed"));
@@ -350,7 +351,7 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
       return html`
         <div class="status">
           <wa-icon class="status-icon status-icon--success" library="mdi" name="check-circle"></wa-icon>
-          <span class="status-text">${this._localize("firmware.status_done")}</span>
+          <span class="status-text">${this._statusMessage}</span>
         </div>
       `;
     }
@@ -358,7 +359,7 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
       return html`
         <div class="status">
           <wa-icon class="status-icon status-icon--error" library="mdi" name="alert-circle"></wa-icon>
-          <span class="status-text">${this._localize("firmware.status_failed")}</span>
+          <span class="status-text">${this._statusMessage}</span>
           <span class="status-detail">${this._errorMessage}</span>
         </div>
       `;
@@ -426,6 +427,7 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
           this._jobId = "";
           const result = data as unknown as { status: string };
           if (result.status === JobStatus.COMPLETED) {
+            this._statusMessage = this._localize("firmware.status_done");
             this._step = "done";
           } else {
             this._fail(this._localize("firmware.install_failed"));
@@ -532,6 +534,7 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
       await resetAndDisconnect(flashDetected.loader, flashDetected.transport);
     } catch { /* ignore reset errors */ }
 
+    this._statusMessage = this._localize("firmware.status_done");
     this._step = "done";
   }
 
@@ -570,6 +573,7 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
 
   private _fail(message: string) {
     this._step = "error";
+    this._statusMessage = message;
     this._errorMessage = message;
     this._logsExpanded = true;
   }
