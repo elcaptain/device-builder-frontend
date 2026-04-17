@@ -54,16 +54,21 @@ export class ESPHomeWizardStepBoard extends LitElement {
   private _expandedBoardId: string | null = null;
 
   @state()
-  private _selectedPlatform = "";
+  private _selectedFilter = "";
 
   private _debouncedSearch = debounce(() => this._fetchBoards(), 300);
 
   private static readonly PLATFORMS = [
-    { value: "esp32", label: "ESP32" },
-    { value: "esp8266", label: "ESP8266" },
-    { value: "rp2040", label: "RP2040" },
-    { value: "bk72xx", label: "BK72xx" },
-    { value: "rtl87xx", label: "RTL87xx" },
+    { platform: "esp32", variant: "esp32", label: "ESP32" },
+    { platform: "esp32", variant: "esp32s2", label: "ESP32-S2" },
+    { platform: "esp32", variant: "esp32s3", label: "ESP32-S3" },
+    { platform: "esp32", variant: "esp32c3", label: "ESP32-C3" },
+    { platform: "esp32", variant: "esp32c6", label: "ESP32-C6" },
+    { platform: "esp32", variant: "esp32h2", label: "ESP32-H2" },
+    { platform: "esp8266", variant: "", label: "ESP8266" },
+    { platform: "rp2040", variant: "", label: "RP2040" },
+    { platform: "bk72xx", variant: "", label: "BK72xx" },
+    { platform: "rtl87xx", variant: "", label: "RTL87xx" },
   ];
 
   connectedCallback() {
@@ -75,8 +80,10 @@ export class ESPHomeWizardStepBoard extends LitElement {
     this._loading = true;
     try {
       const query = this._search.trim() || undefined;
-      const platform = this._selectedPlatform || undefined;
-      const response = await this._api.getBoards({ query, platform, limit: 50 });
+      const filter = ESPHomeWizardStepBoard.PLATFORMS.find((p) => p.label === this._selectedFilter);
+      const platform = filter?.platform || undefined;
+      const variant = filter?.variant || undefined;
+      const response = await this._api.getBoards({ query, platform, variant, limit: 50 });
       this._boards = response.boards;
     } catch (e) {
       console.error("Failed to load board catalog:", e);
@@ -379,8 +386,8 @@ export class ESPHomeWizardStepBoard extends LitElement {
       <div class="platform-filters">
         ${ESPHomeWizardStepBoard.PLATFORMS.map(
           (p) => html`<button
-            class="platform-chip ${this._selectedPlatform === p.value ? "platform-chip--active" : ""}"
-            @click=${() => this._onPlatformFilter(p.value)}
+            class="platform-chip ${this._selectedFilter === p.label ? "platform-chip--active" : ""}"
+            @click=${() => this._onPlatformFilter(p.label)}
           >${p.label}</button>`
         )}
       </div>
@@ -532,8 +539,8 @@ export class ESPHomeWizardStepBoard extends LitElement {
     this._expandedBoardId = this._expandedBoardId === board.id ? null : board.id;
   }
 
-  private _onPlatformFilter(platform: string) {
-    this._selectedPlatform = this._selectedPlatform === platform ? "" : platform;
+  private _onPlatformFilter(label: string) {
+    this._selectedFilter = this._selectedFilter === label ? "" : label;
     this._fetchBoards();
   }
 
