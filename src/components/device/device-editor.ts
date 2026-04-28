@@ -221,6 +221,7 @@ export class ESPHomeDeviceEditor extends LitElement {
                     ></esphome-yaml-diff>`
                   : html`<esphome-yaml-editor
                       .value=${this.yaml}
+                      .configuration=${this.configuration}
                       .highlightRange=${this.highlightRange}
                       .scrollToHighlight=${this.scrollToHighlight}
                       @yaml-change=${this._onYamlChange}

@@ -27,6 +27,7 @@ import type {
   StreamCallbacks,
   UpdateDeviceResponse,
   UserPreferences,
+  ValidateYamlResult,
   WizardResponse,
 } from "./types.js";
 
@@ -585,6 +586,17 @@ export class ESPHomeAPI {
   /** Get compiled device metadata. */
   async getInfo(configuration: string): Promise<Record<string, unknown> | null> {
     return this.sendCommand("config/get_info", { configuration });
+  }
+
+  /** Validate YAML using ESPHome's vscode/ace protocol — structured errors with line ranges. */
+  async validateYaml(
+    configuration: string,
+    content: string
+  ): Promise<ValidateYamlResult> {
+    return this.sendCommand<ValidateYamlResult>("editor/validate_yaml", {
+      configuration,
+      content,
+    });
   }
 
   /** Ping the server. */

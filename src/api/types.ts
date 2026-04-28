@@ -281,6 +281,28 @@ export interface BulkDeleteResult {
   error?: string;
 }
 
+export interface ValidationRange {
+  document?: string;
+  start_line: number;
+  start_col: number;
+  end_line: number;
+  end_col: number;
+}
+
+export interface ValidationError {
+  range?: ValidationRange | null;
+  message: string;
+}
+
+export interface YamlError {
+  message: string;
+}
+
+export interface ValidateYamlResult {
+  yaml_errors: YamlError[];
+  validation_errors: ValidationError[];
+}
+
 // ─── Firmware Jobs ──────────────────────────────────────────
 
 export enum JobStatus {

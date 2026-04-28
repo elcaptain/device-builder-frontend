@@ -1,4 +1,5 @@
 import { consume } from "@lit/context";
+import { lintGutter } from "@codemirror/lint";
 import { StateEffect, StateField } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { Decoration, type DecorationSet } from "@codemirror/view";
@@ -6,9 +7,13 @@ import { LitElement, css, html } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { basicSetup, EditorView } from "codemirror";
 import { EditorState } from "@codemirror/state";
-import { darkModeContext } from "../context/index.js";
+import type { ESPHomeAPI } from "../api/index.js";
+import { apiContext, darkModeContext } from "../context/index.js";
 import { esphomeYaml } from "../util/esphome-yaml-lang.js";
 import type { YamlSection } from "../util/yaml-sections.js";
+import { createYamlCompletion } from "../util/yaml-completion.js";
+import { yamlLinter } from "../util/yaml-lint.js";
+import { createBackendYamlLinter } from "../util/yaml-lint-backend.js";
 
 export type HighlightRange = Pick<YamlSection, "fromLine" | "toLine">;
 
@@ -41,7 +46,12 @@ export class ESPHomeYamlEditor extends LitElement {
   @state()
   private _darkMode = false;
 
+  @consume({ context: apiContext })
+  private _api?: ESPHomeAPI;
+
   @property() value = "";
+
+  @property() configuration = "";
 
   @property({ attribute: false }) highlightRange: HighlightRange | null = null;
 
@@ -81,6 +91,17 @@ export class ESPHomeYamlEditor extends LitElement {
           basicSetup,
           esphomeYaml(),
           highlightField,
+          yamlLinter,
+          ...(this._api
+            ? [
+                createBackendYamlLinter({
+                  api: this._api,
+                  getConfiguration: () => this.configuration,
+                }),
+                createYamlCompletion(this._api),
+              ]
+            : []),
+          lintGutter(),
           EditorView.theme({
             "&": { height: "100%" },
             ".cm-scroller": {
@@ -92,6 +113,45 @@ export class ESPHomeYamlEditor extends LitElement {
               background: this._darkMode
                 ? "rgba(99, 179, 237, 0.2)"
                 : "rgba(59, 130, 246, 0.1)",
+            },
+            ".cm-tooltip-lint": {
+              maxWidth: "520px",
+              borderRadius: "8px",
+              border: this._darkMode
+                ? "1px solid #30363d"
+                : "1px solid #d0d7de",
+              background: this._darkMode ? "#161b22" : "#ffffff",
+              color: this._darkMode ? "#e6edf3" : "#1f2328",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+              padding: "10px 12px",
+              fontSize: "12px",
+              lineHeight: "1.5",
+            },
+            ".cm-diagnostic": {
+              padding: "0",
+              borderLeft: "none",
+              background: "transparent",
+            },
+            ".cm-diagnostic-error": {
+              borderLeft: "3px solid #cf222e",
+              paddingLeft: "10px",
+            },
+            ".esphome-lint-reason": {
+              fontWeight: "600",
+              marginBottom: "6px",
+              color: this._darkMode ? "#ffcecb" : "#cf222e",
+            },
+            ".esphome-lint-snippet": {
+              margin: "0",
+              padding: "8px 10px",
+              borderRadius: "6px",
+              background: this._darkMode ? "#0d1117" : "#f6f8fa",
+              color: this._darkMode ? "#e6edf3" : "#1f2328",
+              fontFamily:
+                '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
+              fontSize: "11px",
+              whiteSpace: "pre",
+              overflowX: "auto",
             },
           }),
           EditorView.updateListener.of((update) => {
