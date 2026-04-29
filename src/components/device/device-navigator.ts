@@ -274,7 +274,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
       // Match by fromLine first (exact), fall back to key/platform match
       const match = this.selectedFromLine !== undefined
         ? allSections.find((s) => s.fromLine === this.selectedFromLine)
-        : allSections.find((s) => (s.platform || s.key) === this.selectedKey);
+        : allSections.find((s) => (s.platform ? `${s.key}.${s.platform}` : s.key) === this.selectedKey);
       if (match) {
         this._selectedLine = match.fromLine;
         this._selectedRange = { fromLine: match.fromLine, toLine: match.toLine };
@@ -431,7 +431,10 @@ export class ESPHomeDeviceNavigator extends LitElement {
 
   private _onItemClick(item: YamlSection) {
     const { fromLine, toLine } = item;
-    const sectionKey = item.platform || item.key;
+    // Component IDs in the catalog are namespaced as `parent.platform` for
+    // platform-based components (e.g. `switch.template`, `binary_sensor.gpio`).
+    // Top-level components use just their key (e.g. `wifi`, `api`).
+    const sectionKey = item.platform ? `${item.key}.${item.platform}` : item.key;
 
     if (this._selectedLine === fromLine) {
       this.selectedKey = null;
