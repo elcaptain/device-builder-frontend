@@ -93,7 +93,10 @@ export function validateEntry(
     }
   }
 
-  if (entry.type === ConfigEntryType.SELECT && entry.options) {
+  // Validate against the option list when present — but skip the check
+  // for fields that opt into custom values (combobox-style entries treat
+  // `options` as suggestions, not a fixed set).
+  if (entry.options && entry.options.length > 0 && !entry.allow_custom_value) {
     const allowed = entry.options.map((o) => o.value);
     if (!allowed.includes(String(raw))) {
       return { key: entry.key, code: "validation.invalid_option" };

@@ -303,6 +303,13 @@ export interface ConfigEntry {
   // === value constraints ===
   /** Constrains the value to a fixed set of choices. */
   options: ConfigValueOption[] | null;
+  /**
+   * When `true`, `options` are treated as suggestions rather than the
+   * exhaustive set of allowed values — the frontend should render a
+   * combobox/autocomplete that lets the user pick a suggested value
+   * or type a custom one. Has no effect when `options` is empty.
+   */
+  allow_custom_value: boolean;
   /** Min/max bounds for INTEGER / FLOAT entries. */
   range: [number, number] | null;
   /** When True the field accepts a list of values. */

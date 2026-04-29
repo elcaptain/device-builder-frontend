@@ -349,6 +349,35 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         cursor: not-allowed;
       }
 
+      /* Combobox input — same styling as multi-row inputs but standalone. */
+      .combobox-input {
+        font-family: inherit;
+        font-size: var(--wa-font-size-s);
+        padding: 6px 12px;
+        border-radius: var(--wa-border-radius-m);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+        background: var(--wa-color-surface-default);
+        color: var(--wa-color-text-normal);
+        outline: none;
+        box-sizing: border-box;
+        transition: border-color 0.12s, box-shadow 0.12s;
+      }
+
+      .combobox-input:focus {
+        border-color: var(--esphome-primary);
+        box-shadow: 0 0 0 3px
+          color-mix(in srgb, var(--esphome-primary), transparent 80%);
+      }
+
+      .combobox-input.invalid {
+        border-color: var(--esphome-error);
+      }
+
+      .combobox-input:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
       .multi-btn {
         display: inline-flex;
         align-items: center;
@@ -992,18 +1021,48 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
   private _renderSelectField(entry: ConfigEntry) {
     const value = String(this._values[entry.key] ?? "");
     const invalid = this._errorFor(entry.key) !== null;
+
+    // Combobox mode: options act as suggestions, user can also type a
+    // custom value. Rendered as a plain input + datalist so the browser
+    // shows autocomplete with the suggestions but doesn't restrict
+    // input to the listed values.
+    if (entry.allow_custom_value && entry.options && entry.options.length > 0) {
+      const listId = `combobox-${entry.key}`;
+      return html`
+        <div class="field" data-field-key=${entry.key}>
+          ${this._renderLabel(entry)}
+          <input
+            type="text"
+            class="combobox-input ${invalid ? "invalid" : ""}"
+            list=${listId}
+            .value=${value}
+            ?disabled=${this._saving}
+            placeholder=${String(entry.default_value ?? "")}
+            @input=${(e: Event) =>
+              this._setValue(entry.key, (e.target as HTMLInputElement).value)}
+          />
+          <datalist id=${listId}>
+            ${entry.options.map(
+              (opt) => html`<option value=${opt.value}>${opt.label}</option>`,
+            )}
+          </datalist>
+          ${this._fieldError(entry.key)}
+        </div>
+      `;
+    }
+
     return html`
       <div class="field" data-field-key=${entry.key}>
         ${this._renderLabel(entry)}
         <wa-select
           class=${invalid ? "invalid" : ""}
-          value=${value}
+          .value=${value}
           ?disabled=${this._saving}
           @change=${(e: Event) =>
             this._setValue(entry.key, (e.target as HTMLSelectElement).value)}
         >
           ${(entry.options ?? []).map(
-            (opt) => html`<wa-option value=${opt.value}>${opt.label}</wa-option>`
+            (opt) => html`<wa-option value=${opt.value}>${opt.label}</wa-option>`,
           )}
         </wa-select>
         ${this._fieldError(entry.key)}
