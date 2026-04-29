@@ -1,5 +1,6 @@
 import { consume } from "@lit/context";
 import {
+  mdiAlertCircleOutline,
   mdiChevronDown,
   mdiChevronUp,
   mdiClose,
@@ -45,6 +46,7 @@ import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
 import "@home-assistant/webawesome/dist/components/switch/switch.js";
 
 registerMdiIcons({
+  "alert-circle-outline": mdiAlertCircleOutline,
   "chevron-down": mdiChevronDown,
   "chevron-up": mdiChevronUp,
   close: mdiClose,
@@ -453,6 +455,23 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
       .pin-option[disabled] .pin-option-primary,
       .pin-option[disabled] .pin-option-secondary {
         color: var(--wa-color-text-quiet);
+      }
+
+      .pin-option-primary {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .pin-warn-icon {
+        color: var(--esphome-warning, #d97706);
+        font-size: 14px;
+        flex-shrink: 0;
+      }
+
+      .pin-option--warn .pin-option-secondary {
+        color: var(--esphome-warning, #d97706);
+        font-style: normal;
       }
 
       /* ─── ID reference picker option layout ──────────────────
@@ -1156,38 +1175,68 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
     const visible = this.board.pins.filter(matchesFeatures);
 
+    // Pins claimed by other components in the YAML (excluding the section
+    // we're currently editing — that one's allowed to keep its own pin).
+    const usedPins = this._findUsedPins(
+      this._yaml,
+      this.fromLine,
+      this._sectionEndLine(),
+    );
+
     return html`
       <div class="field" data-field-key=${entry.key}>
         ${this._renderLabel(entry)}
         <wa-select
           class=${invalid ? "invalid" : ""}
-          value=${value}
           ?disabled=${this._saving}
           @change=${(e: Event) =>
             this._setValue(entry.key, (e.target as HTMLSelectElement).value)}
         >
           ${visible.map((pin) => {
-            const disabled = pin.available === false;
-            const supporting =
-              pin.occupied_by ||
-              pin.notes ||
-              (disabled ? this._localize("device.pin_unavailable") : "");
             const optValue = `GPIO${pin.gpio}`;
             const primary = pin.label || optValue;
-            // Show GPIO number alongside the friendly label when both exist.
+            const disabled = pin.available === false;
+            const occupiedBy = pin.occupied_by || "";
+            const usedBy = usedPins.get(pin.gpio) || "";
+            // Show a warning when the pin is already claimed — either by
+            // the board metadata (occupied_by) or by another component in
+            // the YAML. We don't disable in the YAML-conflict case so the
+            // user can still pick if they know what they're doing.
+            const inUse = !!(occupiedBy || usedBy);
+            const inUseText = occupiedBy
+              ? this._localize("device.pin_occupied_by", { name: occupiedBy })
+              : usedBy
+                ? this._localize("device.pin_used_by", { name: usedBy })
+                : "";
+            const baseSupporting =
+              pin.notes || (disabled ? this._localize("device.pin_unavailable") : "");
+
             const secondaryParts: string[] = [];
             if (pin.label && pin.label !== optValue) secondaryParts.push(optValue);
-            if (supporting) secondaryParts.push(supporting);
+            if (inUseText) secondaryParts.push(inUseText);
+            if (baseSupporting) secondaryParts.push(baseSupporting);
             const secondary = secondaryParts.join(" • ");
+            const titleText = [inUseText, baseSupporting].filter(Boolean).join(" — ");
+
             return html`<wa-option
-              class="pin-option"
+              class="pin-option ${inUse ? "pin-option--warn" : ""}"
               value=${optValue}
               .label=${primary}
+              ?selected=${optValue === value}
               ?disabled=${disabled}
-              title=${supporting || ""}
+              title=${titleText}
             >
               <span class="pin-option-stack">
-                <span class="pin-option-primary">${primary}</span>
+                <span class="pin-option-primary">
+                  ${primary}
+                  ${inUse
+                    ? html`<wa-icon
+                        class="pin-warn-icon"
+                        library="mdi"
+                        name="alert-circle-outline"
+                      ></wa-icon>`
+                    : nothing}
+                </span>
                 ${secondary
                   ? html`<span class="pin-option-secondary">${secondary}</span>`
                   : nothing}
@@ -1198,6 +1247,73 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         ${this._fieldError(entry.key)}
       </div>
     `;
+  }
+
+  /**
+   * Scan the device YAML for GPIO pin assignments and return a map of
+   * `{gpio_number → component_domain}`. A "pin assignment" is any line
+   * whose value matches the `GPIOnn` pattern under a top-level component
+   * section.
+   *
+   * Lines between [excludeFromLine, excludeToLine] (the currently
+   * edited section) are skipped — the user's own pin shouldn't be
+   * flagged as conflicting with itself.
+   */
+  private _findUsedPins(
+    yaml: string,
+    excludeFromLine?: number,
+    excludeToLine?: number,
+  ): Map<number, string> {
+    const used = new Map<number, string>();
+    if (!yaml) return used;
+    const lines = yaml.split("\n");
+
+    let currentDomain = "";
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const topMatch = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*):/);
+      if (topMatch) {
+        currentDomain = topMatch[1];
+        continue;
+      }
+      // 1-indexed CM line numbers are stored on the section, so map
+      // array index → 1-indexed line number for the comparison.
+      const lineNo = i + 1;
+      if (
+        excludeFromLine !== undefined &&
+        excludeToLine !== undefined &&
+        lineNo >= excludeFromLine &&
+        lineNo <= excludeToLine
+      ) {
+        continue;
+      }
+      // Match any value position with `GPIOnn` (pin: GPIO5, sda: GPIO21,
+      // - GPIO13, etc.). Captures bare integers too (e.g. `pin: 5`)
+      // when paired with a recognisable pin keyword.
+      const gpioMatches = line.matchAll(/GPIO(\d+)/g);
+      for (const m of gpioMatches) {
+        const num = parseInt(m[1], 10);
+        if (!Number.isNaN(num) && !used.has(num) && currentDomain) {
+          used.set(num, currentDomain);
+        }
+      }
+    }
+    return used;
+  }
+
+  /** Best-effort end line of the currently edited YAML section. We use
+   * a generous heuristic: from `fromLine` until the next non-indented
+   * line. This is only used to skip the user's own pin from conflict
+   * detection — false negatives are harmless. */
+  private _sectionEndLine(): number | undefined {
+    if (this.fromLine === undefined) return undefined;
+    const lines = this._yaml.split("\n");
+    for (let i = this.fromLine; i < lines.length; i++) {
+      const line = lines[i];
+      if (line === "") continue;
+      if (/^[a-zA-Z]/.test(line)) return i; // 1-indexed: previous line was last
+    }
+    return lines.length;
   }
 
   /**
