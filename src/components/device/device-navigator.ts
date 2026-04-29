@@ -274,7 +274,13 @@ export class ESPHomeDeviceNavigator extends LitElement {
       // Match by fromLine first (exact), fall back to key/platform match
       const match = this.selectedFromLine !== undefined
         ? allSections.find((s) => s.fromLine === this.selectedFromLine)
-        : allSections.find((s) => (s.platform ? `${s.key}.${s.platform}` : s.key) === this.selectedKey);
+        : allSections.find((s) => {
+            if (!s.platform) return s.key === this.selectedKey;
+            const candidate = s.platform.startsWith(`${s.key}.`)
+              ? s.platform
+              : `${s.key}.${s.platform}`;
+            return candidate === this.selectedKey;
+          });
       if (match) {
         this._selectedLine = match.fromLine;
         this._selectedRange = { fromLine: match.fromLine, toLine: match.toLine };
@@ -434,7 +440,22 @@ export class ESPHomeDeviceNavigator extends LitElement {
     // Component IDs in the catalog are namespaced as `parent.platform` for
     // platform-based components (e.g. `switch.template`, `binary_sensor.gpio`).
     // Top-level components use just their key (e.g. `wifi`, `api`).
-    const sectionKey = item.platform ? `${item.key}.${item.platform}` : item.key;
+    // Guard: if the platform value already starts with the parent key (e.g.
+    // a malformed YAML or a stale value), don't double-prefix it.
+    let sectionKey: string;
+    if (item.platform) {
+      const platform = item.platform;
+      sectionKey = platform.startsWith(`${item.key}.`)
+        ? platform
+        : `${item.key}.${platform}`;
+    } else {
+      sectionKey = item.key;
+    }
+    console.debug("[Navigator] click item:", {
+      key: item.key,
+      platform: item.platform,
+      sectionKey,
+    });
 
     if (this._selectedLine === fromLine) {
       this.selectedKey = null;
