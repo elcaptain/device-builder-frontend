@@ -381,6 +381,34 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         border-color: var(--esphome-error);
       }
 
+      /* ─── Pin selector option layout ──────────────────────────
+         Each option in the GPIO pin dropdown stacks the pin name on
+         top and any supporting text (occupied_by / notes / GPIO num)
+         below it in a smaller, muted line. */
+      .pin-option-stack {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 1px;
+        line-height: 1.25;
+      }
+
+      .pin-option-primary {
+        font-size: var(--wa-font-size-s);
+        font-weight: var(--wa-font-weight-semibold);
+        color: var(--wa-color-text-normal);
+      }
+
+      .pin-option-secondary {
+        font-size: var(--wa-font-size-2xs);
+        color: var(--wa-color-text-quiet);
+        font-style: italic;
+      }
+
+      .pin-option[disabled] .pin-option-primary,
+      .pin-option[disabled] .pin-option-secondary {
+        color: var(--wa-color-text-quiet);
+      }
+
       .alert-entry {
         padding: var(--wa-space-s) var(--wa-space-m);
         background: var(--wa-color-surface-lowered);
@@ -989,13 +1017,24 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
               pin.notes ||
               (disabled ? this._localize("device.pin_unavailable") : "");
             const optValue = `GPIO${pin.gpio}`;
-            const label = pin.label || optValue;
+            const primary = pin.label || optValue;
+            // Show GPIO number alongside the friendly label when both exist.
+            const secondaryParts: string[] = [];
+            if (pin.label && pin.label !== optValue) secondaryParts.push(optValue);
+            if (supporting) secondaryParts.push(supporting);
+            const secondary = secondaryParts.join(" • ");
             return html`<wa-option
+              class="pin-option"
               value=${optValue}
               ?disabled=${disabled}
               title=${supporting || ""}
             >
-              ${label}${supporting ? html` — <em>${supporting}</em>` : nothing}
+              <span class="pin-option-stack">
+                <span class="pin-option-primary">${primary}</span>
+                ${secondary
+                  ? html`<span class="pin-option-secondary">${secondary}</span>`
+                  : nothing}
+              </span>
             </wa-option>`;
           })}
         </wa-select>
