@@ -535,17 +535,34 @@ export class ESPHomeAPI {
 
   // ─── Component Commands ───────────────────────────────────
 
-  /** Get a single component by ID. */
-  async getComponent(componentId: string): Promise<ComponentCatalogEntry | null> {
+  /**
+   * Get a single component by ID.
+   *
+   * Pass `platform` (the device's target platform, e.g. "esp32",
+   * "esp8266") to have the backend resolve any per-platform
+   * `cv.SplitDefault` fields into a single `default_value`. Omit it
+   * when querying the generic catalog.
+   */
+  async getComponent(
+    componentId: string,
+    platform?: string,
+  ): Promise<ComponentCatalogEntry | null> {
     return this.sendCommand("components/get_component", {
       component_id: componentId,
+      ...(platform ? { platform } : {}),
     });
   }
 
-  /** Get components with optional filtering, search, and pagination. */
+  /**
+   * Get components with optional filtering, search, and pagination.
+   *
+   * `platform` works the same as in `getComponent` — pass the device's
+   * target platform to have per-platform defaults pre-resolved.
+   */
   async getComponents(args?: {
     query?: string;
     category?: string;
+    platform?: string;
     offset?: number;
     limit?: number;
   }): Promise<PagedComponentsResponse> {

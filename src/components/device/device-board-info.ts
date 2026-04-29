@@ -329,6 +329,7 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
       <esphome-add-component-dialog
         .boardName=${this.board.name}
         .configuration=${this.configuration}
+        .platform=${this.board.esphome.platform}
       ></esphome-add-component-dialog>
       <esphome-add-automation-dialog
         .boardName=${this.board.name}

@@ -47,6 +47,10 @@ export class ESPHomeAddConfigDialog extends LitElement {
   @property()
   configuration = "";
 
+  /** Device's target platform — forwarded so per-platform defaults resolve. */
+  @property()
+  platform = "";
+
   @query("wa-dialog")
   private _dialog!: HTMLElement & { open: boolean };
 
@@ -385,6 +389,7 @@ export class ESPHomeAddConfigDialog extends LitElement {
       // Fetch core infrastructure components from the component catalog
       const response = await this._api.getComponents({
         category: "core",
+        platform: this.platform || undefined,
         limit: 100,
       });
       this._sections = response.components.map((c) => ({

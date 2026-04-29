@@ -1,7 +1,7 @@
 import { consume } from "@lit/context";
 import { mdiArrowCollapseAll, mdiArrowExpandAll, mdiMemory, mdiOpenInNew, mdiPlus } from "@mdi/js";
 import { css, html, LitElement } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import type { ComponentCatalogEntry } from "../../api/types.js";
 import type { ESPHomeAPI } from "../../api/index.js";
 import type { LocalizeFunc } from "../../common/localize.js";
@@ -30,6 +30,11 @@ export class ESPHomeComponentCatalog extends LitElement {
 
   @consume({ context: apiContext })
   private _api!: ESPHomeAPI;
+
+  /** Device's target platform (e.g. "esp32"). Forwarded to the backend
+   * so any per-platform `cv.SplitDefault` defaults are pre-resolved. */
+  @property()
+  platform = "";
 
   @state()
   private _components: ComponentCatalogEntry[] = [];
@@ -78,7 +83,8 @@ export class ESPHomeComponentCatalog extends LitElement {
     try {
       const query = this._search.trim() || undefined;
       const category = this._category !== "all" ? this._category : undefined;
-      const response = await this._api.getComponents({ query, category, limit: 50 });
+      const platform = this.platform || undefined;
+      const response = await this._api.getComponents({ query, category, platform, limit: 50 });
       this._components = response.components;
       this._categories = response.categories;
       this._total = response.total;

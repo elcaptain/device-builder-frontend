@@ -544,7 +544,10 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     this._dirty = false;
 
     try {
-      const component = await this._api.getComponent(this.sectionKey);
+      // Pass the device's target platform so the backend can resolve
+      // any cv.SplitDefault fields into a single default_value.
+      const platform = this.board?.esphome.platform;
+      const component = await this._api.getComponent(this.sectionKey, platform);
 
       // Stale — user clicked another component while this was loading
       if (id !== this._loadId) return;

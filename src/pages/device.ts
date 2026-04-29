@@ -299,6 +299,7 @@ export class ESPHomePageDevice extends LitElement {
           .yaml=${this._yaml}
           .boardName=${this._board?.name ?? ""}
           .configuration=${this.id}
+          .platform=${this._board?.esphome.platform ?? ""}
           .selectedKey=${this._selectedSection}
           .selectedFromLine=${this._selectedFromLine}
         ></esphome-device-navigator>

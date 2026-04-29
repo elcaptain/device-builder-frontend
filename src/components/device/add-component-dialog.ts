@@ -33,6 +33,10 @@ export class ESPHomeAddComponentDialog extends LitElement {
   @property()
   configuration = "";
 
+  /** Device's target platform — forwarded to the catalog for default resolution. */
+  @property()
+  platform = "";
+
   @query("wa-dialog")
   private _dialog!: HTMLElement & { open: boolean };
 
@@ -153,7 +157,10 @@ export class ESPHomeAddComponentDialog extends LitElement {
               ? this._localize("device.add_component_dialog_title", { name: this.boardName })
               : this._localize("device.add_component")}
         </span>
-        <esphome-component-catalog ?hidden=${isForm}></esphome-component-catalog>
+        <esphome-component-catalog
+          ?hidden=${isForm}
+          .platform=${this.platform}
+        ></esphome-component-catalog>
         ${isForm
           ? html`<esphome-add-component-form
               .component=${this._selected!}

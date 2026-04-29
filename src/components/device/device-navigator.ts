@@ -58,6 +58,11 @@ export class ESPHomeDeviceNavigator extends LitElement {
   @property()
   configuration = "";
 
+  /** Device's target platform — forwarded to add-component / add-config
+   * dialogs so the backend can resolve per-platform default values. */
+  @property()
+  platform = "";
+
   @query("esphome-add-config-dialog")
   private _addConfigDialog!: ESPHomeAddConfigDialog;
 
@@ -336,10 +341,12 @@ export class ESPHomeDeviceNavigator extends LitElement {
         <esphome-add-config-dialog
           .boardName=${this.boardName}
           .configuration=${this.configuration}
+          .platform=${this.platform}
         ></esphome-add-config-dialog>
         <esphome-add-component-dialog
           .boardName=${this.boardName}
           .configuration=${this.configuration}
+          .platform=${this.platform}
         ></esphome-add-component-dialog>
         <esphome-add-automation-dialog
           .boardName=${this.boardName}
