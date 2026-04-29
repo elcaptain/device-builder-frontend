@@ -1056,13 +1056,16 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         ${this._renderLabel(entry)}
         <wa-select
           class=${invalid ? "invalid" : ""}
-          .value=${value}
           ?disabled=${this._saving}
           @change=${(e: Event) =>
             this._setValue(entry.key, (e.target as HTMLSelectElement).value)}
         >
           ${(entry.options ?? []).map(
-            (opt) => html`<wa-option value=${opt.value}>${opt.label}</wa-option>`,
+            (opt) => html`<wa-option
+              value=${opt.value}
+              ?selected=${opt.value === value}
+              >${opt.label}</wa-option
+            >`,
           )}
         </wa-select>
         ${this._fieldError(entry.key)}
