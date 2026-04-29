@@ -291,15 +291,14 @@ export interface ConfigEntry {
   description: string | null;
   /** When True the YAML is invalid without this field set. */
   required: boolean;
-  /** Default value. For multi_value entries this is the default list. */
-  default_value: ConfigPrimitive | ConfigPrimitive[] | null;
   /**
-   * Per-target-platform defaults for fields using `cv.SplitDefault` (e.g.
-   * `wifi.power_save_mode` is "light" on ESP32, "none" on ESP8266). Look
-   * up the device's target platform here and fall back to `default_value`
-   * when the platform isn't listed.
+   * Default value. For multi_value entries this is the default list.
+   * The backend pre-resolves `cv.SplitDefault` fields against the
+   * device's target platform, so this is always the effective default
+   * for the current device — the frontend doesn't need to know about
+   * per-platform variants.
    */
-  platform_defaults: Record<string, ConfigPrimitive> | null;
+  default_value: ConfigPrimitive | ConfigPrimitive[] | null;
 
   // === value constraints ===
   /** Constrains the value to a fixed set of choices. */
