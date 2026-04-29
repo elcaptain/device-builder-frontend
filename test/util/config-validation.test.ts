@@ -15,6 +15,7 @@ function makeEntry(overrides: Partial<ConfigEntry>): ConfigEntry {
     required: false,
     description: null,
     options: null,
+    allow_custom_value: false,
     range: null,
     help_link: null,
     multi_value: false,

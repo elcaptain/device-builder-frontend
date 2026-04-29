@@ -44,6 +44,7 @@ import "@home-assistant/webawesome/dist/components/option/option.js";
 import "@home-assistant/webawesome/dist/components/select/select.js";
 import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
 import "@home-assistant/webawesome/dist/components/switch/switch.js";
+import "../mdi-icon-picker.js";
 
 registerMdiIcons({
   "alert-circle-outline": mdiAlertCircleOutline,
@@ -964,12 +965,34 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         }
         return this._renderStringField(entry, "text");
 
-      // ICON, TRIGGER, TIME_PERIOD, STRING, UNKNOWN → text input
+      case ConfigEntryType.ICON:
+        return this._renderIconField(entry);
+
+      // TRIGGER, TIME_PERIOD, STRING, UNKNOWN → text input
       // (richer pickers are a follow-up — schemas don't yet expose enough
       // info for cross-component trigger lookups).
       default:
         return this._renderStringField(entry, "text");
     }
+  }
+
+  private _renderIconField(entry: ConfigEntry) {
+    const value = String(this._values[entry.key] ?? "");
+    const invalid = this._errorFor(entry.key) !== null;
+    return html`
+      <div class="field" data-field-key=${entry.key}>
+        ${this._renderLabel(entry)}
+        <esphome-mdi-icon-picker
+          .value=${value}
+          .invalid=${invalid}
+          .disabled=${this._saving}
+          .placeholder=${String(entry.default_value ?? "Choose an icon…")}
+          @change=${(e: CustomEvent<{ value: string }>) =>
+            this._setValue(entry.key, e.detail.value)}
+        ></esphome-mdi-icon-picker>
+        ${this._fieldError(entry.key)}
+      </div>
+    `;
   }
 
   private _renderStringField(entry: ConfigEntry, inputType: string) {
