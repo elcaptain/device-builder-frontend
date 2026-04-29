@@ -236,31 +236,34 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
     const showAddAutomations = hasComponents && !hasAutomations;
 
     return html`
-      <div class="board-header">
-        <div class="board-info">
-          <h3 class="board-name">${this.board.name}</h3>
-          <div class="board-tags">
-            ${this.board.tags.map(
-              (tag) => html`<wa-badge variant="brand" pill>${tag}</wa-badge>`,
-            )}
-            <a
-              class="board-info-link"
-              href=${this.board.docs_url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              ${this._localize("device.more_info")}
-              <wa-icon library="mdi" name="open-in-new"></wa-icon>
-            </a>
-          </div>
-          <p class="board-description">${this.board.description}</p>
-        </div>
-        <div class="board-image">
-          <img src=${this._boardImageUrl(this.board)} alt=${this.board.name} />
-        </div>
-      </div>
-
-      <div class="board-separator"></div>
+      ${!this.selectedSection
+        ? html`
+            <div class="board-header">
+              <div class="board-info">
+                <h3 class="board-name">${this.board.name}</h3>
+                <div class="board-tags">
+                  ${this.board.tags.map(
+                    (tag) => html`<wa-badge variant="brand" pill>${tag}</wa-badge>`,
+                  )}
+                  <a
+                    class="board-info-link"
+                    href=${this.board.docs_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    ${this._localize("device.more_info")}
+                    <wa-icon library="mdi" name="open-in-new"></wa-icon>
+                  </a>
+                </div>
+                <p class="board-description">${this.board.description}</p>
+              </div>
+              <div class="board-image">
+                <img src=${this._boardImageUrl(this.board)} alt=${this.board.name} />
+              </div>
+            </div>
+            <div class="board-separator"></div>
+          `
+        : nothing}
 
       ${this.selectedSection
         ? html`

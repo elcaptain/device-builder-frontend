@@ -15,6 +15,7 @@ interface SectionConfigResponse {
   description: string;
   docs_url: string;
   icon: string;
+  image_url: string;
   entries: ConfigEntry[];
 }
 import type { LocalizeFunc } from "../../common/localize.js";
@@ -90,9 +91,46 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
       .section-header {
         display: flex;
+        flex-direction: row;
         align-items: center;
-        justify-content: space-between;
-        gap: var(--wa-space-s);
+        gap: var(--wa-space-l);
+        padding-bottom: var(--wa-space-m);
+        margin-bottom: var(--wa-space-m);
+        border-bottom: 1px solid var(--wa-color-surface-lowered);
+      }
+
+      .section-header-info {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        gap: var(--wa-space-2xs);
+        min-width: 0;
+      }
+
+      .section-header-title-row {
+        display: flex;
+        align-items: center;
+        gap: var(--wa-space-m);
+        flex-wrap: wrap;
+      }
+
+      .section-image {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 110px;
+        height: 80px;
+        padding: var(--wa-space-s);
+        background: var(--wa-color-surface-lowered);
+        border-radius: var(--wa-border-radius-l);
+        box-sizing: border-box;
+      }
+
+      .section-image img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
       }
 
       .section-title {
@@ -301,6 +339,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         description: component.description,
         docs_url: component.docs_url,
         icon: "",
+        image_url: component.image_url,
         entries: component.config_entries,
       };
       this._values = this._parseYamlSectionValues(yaml);
@@ -415,18 +454,30 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
     return html`
       <div class="section-header">
-        <h3 class="section-title">${this._config.title}</h3>
-        <a
-          class="docs-link"
-          href=${this._config.docs_url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          ${this._localize("device.docs")}
-          <wa-icon library="mdi" name="open-in-new"></wa-icon>
-        </a>
+        <div class="section-header-info">
+          <div class="section-header-title-row">
+            <h3 class="section-title">${this._config.title}</h3>
+            ${this._config.docs_url
+              ? html`<a
+                  class="docs-link"
+                  href=${this._config.docs_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  ${this._localize("device.docs")}
+                  <wa-icon library="mdi" name="open-in-new"></wa-icon>
+                </a>`
+              : nothing}
+          </div>
+          <p class="section-desc">${this._config.description}</p>
+        </div>
+        <div class="section-image">
+          <img
+            src=${this._config.image_url || "/assets/board/default.svg"}
+            alt=${this._config.title}
+          />
+        </div>
       </div>
-      <p class="section-desc">${this._config.description}</p>
       <div class="form">${visibleEntries.map((entry) => this._renderEntry(entry))}</div>
       ${this._error ? html`<p class="error">${this._error}</p>` : nothing}
       <div class="actions">
