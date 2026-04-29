@@ -15,6 +15,7 @@ function makeEntry(overrides: Partial<ConfigEntry>): ConfigEntry {
     required: false,
     description: null,
     options: null,
+    allow_custom_value: false,
     range: null,
     help_link: null,
     multi_value: false,
@@ -22,14 +23,16 @@ function makeEntry(overrides: Partial<ConfigEntry>): ConfigEntry {
     advanced: false,
     translation_key: null,
     translation_params: null,
-    value: null,
     templatable: false,
     depends_on: null,
     depends_on_value: null,
     depends_on_value_not: null,
     depends_on_component: null,
+    references_component: null,
     pin_features: [],
     pin_mode: null,
+    config_entries: null,
+    platform_type: null,
     ...overrides,
   };
 }
@@ -125,6 +128,31 @@ describe("validateEntries", () => {
   it("returns an empty map when everything validates", () => {
     const entries = [makeEntry({ key: "a", required: true })];
     const errors = validateEntries(entries, { a: "hello" });
+    expect(errors.size).toBe(0);
+  });
+
+  it("recurses into NESTED entries with dotted error keys", () => {
+    const entries = [
+      makeEntry({
+        key: "temperature",
+        type: ConfigEntryType.NESTED,
+        config_entries: [makeEntry({ key: "name", required: true })],
+      }),
+    ];
+    const errors = validateEntries(entries, { temperature: { name: "" } });
+    expect(errors.get("temperature.name")?.code).toBe("validation.required");
+  });
+
+  it("does not validate inside a hidden NESTED entry", () => {
+    const entries = [
+      makeEntry({
+        key: "temperature",
+        type: ConfigEntryType.NESTED,
+        hidden: true,
+        config_entries: [makeEntry({ key: "name", required: true })],
+      }),
+    ];
+    const errors = validateEntries(entries, { temperature: {} });
     expect(errors.size).toBe(0);
   });
 });

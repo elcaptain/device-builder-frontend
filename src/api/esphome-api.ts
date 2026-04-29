@@ -393,13 +393,17 @@ export class ESPHomeAPI {
     await this.sendCommand("devices/update_config", { configuration, content });
   }
 
-  /** Add a component to a device config. */
+  /**
+   * Add a component to a device config.
+   *
+   * Nested values mirror the YAML structure: pass them as nested dicts
+   * inside `fields` (e.g. `{ pin: 5, temperature: { name: "T" } }`).
+   */
   async addComponent(
     configuration: string,
     args: {
       component_id: string;
       fields?: Record<string, unknown>;
-      sub_entries?: Record<string, Record<string, unknown>>;
     }
   ): Promise<AddComponentResponse> {
     return this.sendCommand<AddComponentResponse>("devices/add_component", {

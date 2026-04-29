@@ -205,16 +205,6 @@ export enum ComponentCategory {
   MISC = "misc",
 }
 
-/** A nested sub-configuration inside a parent component. */
-export interface ComponentSubEntry {
-  /** YAML key under the parent component (e.g. "temperature", "humidity"). */
-  key: string;
-  /** ESPHome platform type the sub-entry represents (e.g. "sensor"). */
-  platform_type: string;
-  /** Sub-entry-specific config fields beyond the platform defaults. */
-  config_entries: ConfigEntry[];
-}
-
 export interface ComponentCatalogEntry {
   id: string;
   name: string;
@@ -228,10 +218,9 @@ export interface ComponentCatalogEntry {
   multi_conf: boolean;
   /** Empty list = works on every target platform. Non-empty = restricted to those. */
   supported_platforms: string[];
-  /** The component's own configuration fields. */
+  /** The component's configuration schema. May contain `nested` entries
+   *  (`type === "nested"`) whose `config_entries` recurse. */
   config_entries: ConfigEntry[];
-  /** Nested configurations the component exposes. */
-  sub_entries: ComponentSubEntry[];
 }
 
 export interface PagedComponentsResponse extends PagedResponse {
@@ -356,6 +345,22 @@ export interface ConfigEntry {
   translation_key: string | null;
   /** Substitution params for the translation string. */
   translation_params: Record<string, unknown> | null;
+
+  // === nested groups (only meaningful when type === "nested") ===
+  /**
+   * Inner schema when this entry is a nested group. Recursive — these
+   * entries can themselves be `nested`. Always null for non-nested types.
+   */
+  config_entries: ConfigEntry[] | null;
+  /**
+   * When the nested group represents an ESPHome entity sub-reading
+   * (e.g. a DHT sensor's "temperature" / "humidity" outputs), this is
+   * the platform type ("sensor", "binary_sensor", ...) so the frontend
+   * can apply the standard platform-base fields (name, icon,
+   * device_class, ...) on top of `config_entries`. null = plain
+   * nested form, render only the inner fields.
+   */
+  platform_type: string | null;
 }
 
 export enum ConfigEntryType {
@@ -391,6 +396,10 @@ export enum ConfigEntryType {
   LABEL = "label",
   DIVIDER = "divider",
   ALERT = "alert",
+  // Nested configuration group — entry has its own `config_entries`
+  // array (recursive) and an optional `platform_type` indicating which
+  // ESPHome platform's base entity fields should be applied on top.
+  NESTED = "nested",
   // Fallback for fields whose type couldn't be determined
   UNKNOWN = "unknown",
   /** @deprecated Backend signals dropdown via populated `options` instead. Kept for legacy callers. */

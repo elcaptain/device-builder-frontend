@@ -112,13 +112,49 @@ export function validateEntries(
   presentComponents?: Set<string>,
 ): Map<string, ValidationError> {
   const errors = new Map<string, ValidationError>();
+  _validateEntriesRecursive(entries, values, presentComponents, [], errors);
+  return errors;
+}
+
+/**
+ * Recurse through `entries`, validating each leaf and descending into
+ * NESTED entries. Errors are keyed by the dotted path so callers can
+ * look them up by `path.join(".")` (matching how
+ * `device-section-config.ts` reads them in `_errorAt`).
+ */
+function _validateEntriesRecursive(
+  entries: ConfigEntry[],
+  values: Record<string, unknown>,
+  presentComponents: Set<string> | undefined,
+  pathPrefix: string[],
+  errors: Map<string, ValidationError>,
+): void {
   for (const entry of entries) {
     // Skip hidden entries and those whose visibility predicates fail —
     // we don't want to require fields the user can't even see.
     if (!isEntryVisible(entry, values, presentComponents)) continue;
+
+    if (entry.type === ConfigEntryType.NESTED) {
+      const child = values[entry.key];
+      const childValues =
+        child !== null && typeof child === "object" && !Array.isArray(child)
+          ? (child as Record<string, unknown>)
+          : {};
+      _validateEntriesRecursive(
+        entry.config_entries ?? [],
+        childValues,
+        presentComponents,
+        [...pathPrefix, entry.key],
+        errors,
+      );
+      continue;
+    }
+
     const raw = values[entry.key] ?? entry.default_value;
     const err = validateEntry(entry, raw);
-    if (err) errors.set(entry.key, err);
+    if (err) {
+      const fullPath = [...pathPrefix, entry.key].join(".");
+      errors.set(fullPath, { ...err, key: fullPath });
+    }
   }
-  return errors;
 }

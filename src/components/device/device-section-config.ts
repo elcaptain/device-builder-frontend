@@ -26,6 +26,28 @@ import {
 } from "../../util/config-validation.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
+/**
+ * Immutably set `value` at `path` inside an object, returning a new
+ * object with structural sharing of untouched branches. Intermediate
+ * objects are created when the path crosses missing or non-object
+ * nodes (so a fresh form can write to nested fields).
+ */
+function _setIn(
+  obj: Record<string, unknown>,
+  path: string[],
+  value: unknown,
+): Record<string, unknown> {
+  if (path.length === 0) return obj;
+  const [head, ...rest] = path;
+  if (rest.length === 0) return { ...obj, [head]: value };
+  const child = obj[head];
+  const childObj =
+    child !== null && typeof child === "object" && !Array.isArray(child)
+      ? (child as Record<string, unknown>)
+      : {};
+  return { ...obj, [head]: _setIn(childObj, rest, value) };
+}
+
 // Local type — SectionConfigResponse is not yet available in the WebSocket backend
 interface SectionConfigResponse {
   section_key: string;
@@ -132,6 +154,10 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
   /** Full YAML of the device — kept so the ID picker can scan it. */
   @state()
   private _yaml = "";
+
+  /** Dotted-paths of nested entries currently expanded in the UI. */
+  @state()
+  private _nestedOpenSections: Set<string> = new Set();
 
   static styles = [
     espHomeStyles,
@@ -314,6 +340,65 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         flex-direction: column;
         gap: var(--wa-space-m);
         margin-top: var(--wa-space-m);
+      }
+
+      /* ─── Nested group ────────────────────────────────────────
+         Container for a NESTED config entry. Visually framed so
+         users can tell sub-readings (e.g. a sensor's temperature
+         block) apart from sibling fields. */
+      .nested-group {
+        display: flex;
+        flex-direction: column;
+        gap: var(--wa-space-s);
+        padding: var(--wa-space-s) var(--wa-space-m);
+        background: var(--wa-color-surface-lowered);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+        border-radius: var(--wa-border-radius-m);
+      }
+
+      .nested-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--wa-space-2xs);
+        background: none;
+        border: none;
+        padding: 0;
+        font-family: inherit;
+        font-size: var(--wa-font-size-s);
+        font-weight: var(--wa-font-weight-bold);
+        color: var(--wa-color-text-normal);
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .nested-toggle:hover {
+        color: var(--esphome-primary);
+      }
+
+      .nested-toggle wa-icon {
+        font-size: 18px;
+      }
+
+      .nested-title {
+        flex: 1;
+      }
+
+      .nested-platform {
+        font-size: var(--wa-font-size-2xs);
+        font-weight: var(--wa-font-weight-normal);
+        color: var(--wa-color-text-quiet);
+        background: var(--wa-color-surface-default);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+        border-radius: var(--wa-border-radius-s);
+        padding: 1px 6px;
+        margin-left: var(--wa-space-xs);
+      }
+
+      .nested-fields {
+        display: flex;
+        flex-direction: column;
+        gap: var(--wa-space-m);
+        padding-top: var(--wa-space-xs);
       }
 
       .multi-row {
@@ -741,29 +826,51 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
       const key = match[1];
       let raw = match[2].trim();
 
-      // Empty value with list items below → collect into a string array
-      // (e.g. `options:` followed by `  - "UIT"`, `  - "LAAG"` lines).
+      // Empty value: either a list of items, a nested object, or just
+      // an empty key (skip).
       if (raw === "") {
-        const items: string[] = [];
-        let j = i + 1;
-        for (; j < lines.length; j++) {
-          const next = lines[j];
-          if (next.trim() === "") continue;
-          if (!next.startsWith(listItemIndent)) break;
-          const m = next.match(listItemRegex);
-          if (!m) break;
-          let item = m[1].trim();
-          if (
-            (item.startsWith('"') && item.endsWith('"')) ||
-            (item.startsWith("'") && item.endsWith("'"))
-          ) {
-            item = item.slice(1, -1);
+        // Look at the first non-empty line below to decide.
+        let peek = i + 1;
+        while (peek < lines.length && lines[peek].trim() === "") peek++;
+        if (peek >= lines.length) continue;
+        const peekLine = lines[peek];
+
+        // Block list of scalars (e.g. `options:` then `  - "UIT"` lines).
+        if (peekLine.startsWith(listItemIndent)) {
+          const items: string[] = [];
+          let j = i + 1;
+          for (; j < lines.length; j++) {
+            const next = lines[j];
+            if (next.trim() === "") continue;
+            if (!next.startsWith(listItemIndent)) break;
+            const m = next.match(listItemRegex);
+            if (!m) break;
+            let item = m[1].trim();
+            if (
+              (item.startsWith('"') && item.endsWith('"')) ||
+              (item.startsWith("'") && item.endsWith("'"))
+            ) {
+              item = item.slice(1, -1);
+            }
+            items.push(item);
           }
-          items.push(item);
+          if (items.length > 0) {
+            values[key] = items;
+            i = j - 1;
+          }
+          continue;
         }
-        if (items.length > 0) {
-          values[key] = items;
-          i = j - 1; // skip past the consumed list lines
+
+        // Nested object (e.g. `temperature:` then `      name: ...`
+        // lines indented one level deeper than `childIndent`).
+        const nestedIndent = `${childIndent}  `;
+        if (peekLine.startsWith(nestedIndent)) {
+          const result = this._parseNestedBlock(lines, i + 1, nestedIndent);
+          if (Object.keys(result.values).length > 0) {
+            values[key] = result.values;
+          }
+          i = result.endIdx - 1;
+          continue;
         }
         continue;
       }
@@ -799,6 +906,108 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     }
 
     return values;
+  }
+
+  /**
+   * Parse a nested YAML block at the given indent level. Returns the
+   * extracted values plus the array index immediately after the block
+   * (for the caller to advance past). Recurses into deeper-nested
+   * objects and handles block lists at the same level.
+   */
+  private _parseNestedBlock(
+    lines: string[],
+    startIdx: number,
+    indent: string,
+  ): { values: Record<string, unknown>; endIdx: number } {
+    const childRegex = new RegExp(
+      `^${indent}([a-zA-Z_][a-zA-Z0-9_]*):\\s*(.*)$`,
+    );
+    const listItemPrefix = `${indent}  - `;
+    const listItemRegex = new RegExp(`^${indent}  -\\s+(.*)$`);
+    const values: Record<string, unknown> = {};
+    let i = startIdx;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (line.trim() === "") {
+        i++;
+        continue;
+      }
+      // Block ends when indentation drops below `indent`.
+      if (!line.startsWith(indent)) break;
+      const match = line.match(childRegex);
+      if (!match) {
+        i++;
+        continue;
+      }
+      const key = match[1];
+      let raw = match[2].trim();
+
+      if (raw === "") {
+        let peek = i + 1;
+        while (peek < lines.length && lines[peek].trim() === "") peek++;
+        if (peek < lines.length && lines[peek].startsWith(listItemPrefix)) {
+          const items: string[] = [];
+          let j = i + 1;
+          for (; j < lines.length; j++) {
+            if (lines[j].trim() === "") continue;
+            if (!lines[j].startsWith(listItemPrefix)) break;
+            const m = lines[j].match(listItemRegex);
+            if (!m) break;
+            let item = m[1].trim();
+            if (
+              (item.startsWith('"') && item.endsWith('"')) ||
+              (item.startsWith("'") && item.endsWith("'"))
+            ) {
+              item = item.slice(1, -1);
+            }
+            items.push(item);
+          }
+          values[key] = items;
+          i = j;
+          continue;
+        }
+        const deeper = `${indent}  `;
+        if (peek < lines.length && lines[peek].startsWith(deeper)) {
+          const sub = this._parseNestedBlock(lines, i + 1, deeper);
+          if (Object.keys(sub.values).length > 0) values[key] = sub.values;
+          i = sub.endIdx;
+          continue;
+        }
+        i++;
+        continue;
+      }
+
+      if (raw.startsWith("[") && raw.endsWith("]")) {
+        const inner = raw.slice(1, -1).trim();
+        values[key] =
+          inner === ""
+            ? []
+            : inner.split(",").map((p) => {
+                let v = p.trim();
+                if (
+                  (v.startsWith('"') && v.endsWith('"')) ||
+                  (v.startsWith("'") && v.endsWith("'"))
+                ) {
+                  v = v.slice(1, -1);
+                }
+                return v;
+              });
+        i++;
+        continue;
+      }
+
+      if (
+        (raw.startsWith('"') && raw.endsWith('"')) ||
+        (raw.startsWith("'") && raw.endsWith("'"))
+      ) {
+        raw = raw.slice(1, -1);
+      }
+      if (raw === "true") values[key] = true;
+      else if (raw === "false") values[key] = false;
+      else values[key] = raw;
+      i++;
+    }
+    return { values, endIdx: i };
   }
 
   private _onImageError(e: Event) {
@@ -901,7 +1110,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     `;
   }
 
-  private _renderEntry(entry: ConfigEntry) {
+  private _renderEntry(entry: ConfigEntry, path: string[] = [entry.key]) {
     // Layout-only entries: render before any value-driven branches.
     if (entry.type === ConfigEntryType.DIVIDER) {
       return html`<wa-divider></wa-divider>`;
@@ -913,46 +1122,51 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
       return html`<div class="alert-entry">${this._labelFor(entry)}</div>`;
     }
 
+    // Nested groups: render a collapsible container with the inner schema.
+    if (entry.type === ConfigEntryType.NESTED) {
+      return this._renderNestedField(entry, path);
+    }
+
     // Multi-value entries get a list editor regardless of underlying type.
     if (entry.multi_value) {
-      return this._renderMultiValueField(entry);
+      return this._renderMultiValueField(entry, path);
     }
 
     // Any entry with options becomes a dropdown — independent of `type`.
     // The backend signals "use a dropdown" by populating `options`; the
     // underlying value type (string, integer, etc.) is unchanged.
     if (entry.options && entry.options.length > 0) {
-      return this._renderSelectField(entry);
+      return this._renderSelectField(entry, path);
     }
 
     switch (entry.type) {
       case ConfigEntryType.BOOLEAN:
-        return this._renderBooleanField(entry);
+        return this._renderBooleanField(entry, path);
 
       case ConfigEntryType.SELECT:
         // Backwards-compat: if the deprecated SELECT type is used without
         // options, fall through to a string input rather than a broken select.
-        return this._renderStringField(entry, "text");
+        return this._renderStringField(entry, "text", path);
 
       case ConfigEntryType.SECURE_STRING:
-        return this._renderStringField(entry, "password");
+        return this._renderStringField(entry, "password", path);
 
       case ConfigEntryType.INTEGER:
       case ConfigEntryType.FLOAT:
-        return this._renderNumberField(entry);
+        return this._renderNumberField(entry, path);
 
       case ConfigEntryType.PIN:
-        return this._renderPinField(entry);
+        return this._renderPinField(entry, path);
 
       case ConfigEntryType.COLOR:
-        return this._renderStringField(entry, "color");
+        return this._renderStringField(entry, "color", path);
 
       case ConfigEntryType.MAC_ADDRESS:
-        return this._renderStringField(entry, "text");
+        return this._renderStringField(entry, "text", path);
 
       case ConfigEntryType.LAMBDA:
       case ConfigEntryType.JSON:
-        return this._renderTextareaField(entry);
+        return this._renderTextareaField(entry, path);
 
       case ConfigEntryType.ID:
         // When the schema declares a domain via references_component
@@ -960,23 +1174,86 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         // existing components of that domain configured in the YAML.
         // Free-form ID entries fall through to the text input.
         if (entry.references_component) {
-          return this._renderIdReferenceField(entry);
+          return this._renderIdReferenceField(entry, path);
         }
-        return this._renderStringField(entry, "text");
+        return this._renderStringField(entry, "text", path);
 
       // ICON, TRIGGER, TIME_PERIOD, STRING, UNKNOWN → text input
       // (richer pickers are a follow-up — schemas don't yet expose enough
       // info for cross-component trigger lookups).
       default:
-        return this._renderStringField(entry, "text");
+        return this._renderStringField(entry, "text", path);
     }
   }
 
-  private _renderStringField(entry: ConfigEntry, inputType: string) {
-    const value = String(this._values[entry.key] ?? "");
-    const invalid = this._errorFor(entry.key) !== null;
+  /**
+   * Render a nested config group as a collapsible section.
+   *
+   * The outer entry has no value of its own — its children live at
+   * `path` inside `_values` (e.g. `_values.temperature.name`). When
+   * `platform_type` is set the group represents an entity sub-reading
+   * (sensor, binary_sensor, ...) and the relevant base fields are
+   * already included in `entry.config_entries` by the backend, so we
+   * just recurse.
+   */
+  private _renderNestedField(entry: ConfigEntry, path: string[]) {
+    const children = entry.config_entries ?? [];
+    const isOpen = this._nestedOpenSections.has(path.join("."));
+    const visibleChildren = children.filter((c) =>
+      isEntryVisible(c, this._scopeValues(path), this._presentComponents),
+    );
     return html`
-      <div class="field" data-field-key=${entry.key}>
+      <div class="nested-group" data-field-key=${path.join(".")}>
+        <button
+          type="button"
+          class="nested-toggle"
+          @click=${() => this._toggleNested(path.join("."))}
+        >
+          <wa-icon
+            library="mdi"
+            name=${isOpen ? "chevron-up" : "chevron-down"}
+          ></wa-icon>
+          <span class="nested-title">${this._labelFor(entry)}</span>
+          ${entry.platform_type
+            ? html`<span class="nested-platform">${entry.platform_type}</span>`
+            : nothing}
+        </button>
+        ${isOpen
+          ? html`<div class="nested-fields">
+              ${visibleChildren.map((child) =>
+                this._renderEntry(child, [...path, child.key]),
+              )}
+            </div>`
+          : nothing}
+      </div>
+    `;
+  }
+
+  /** Read the values dict at `path` so children can evaluate their own
+   *  depends_on predicates against their siblings. */
+  private _scopeValues(path: string[]): Record<string, unknown> {
+    const v = this._getAt(path);
+    return v && typeof v === "object" && !Array.isArray(v)
+      ? (v as Record<string, unknown>)
+      : {};
+  }
+
+  private _toggleNested(key: string) {
+    const next = new Set(this._nestedOpenSections);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    this._nestedOpenSections = next;
+  }
+
+  private _renderStringField(
+    entry: ConfigEntry,
+    inputType: string,
+    path: string[] = [entry.key],
+  ) {
+    const value = String(this._getAt(path) ?? "");
+    const invalid = this._errorAt(path) !== null;
+    return html`
+      <div class="field" data-field-key=${path.join(".")}>
         ${this._renderLabel(entry)}
         <input
           type=${inputType}
@@ -985,20 +1262,20 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
           ?disabled=${this._saving}
           placeholder=${String(entry.default_value ?? "")}
           @input=${(e: Event) =>
-            this._setValue(entry.key, (e.target as HTMLInputElement).value)}
+            this._setAt(path, (e.target as HTMLInputElement).value)}
         />
-        ${this._fieldError(entry.key)}
+        ${this._fieldErrorAt(path)}
       </div>
     `;
   }
 
-  private _renderNumberField(entry: ConfigEntry) {
-    const value = String(this._values[entry.key] ?? "");
-    const invalid = this._errorFor(entry.key) !== null;
+  private _renderNumberField(entry: ConfigEntry, path: string[] = [entry.key]) {
+    const value = String(this._getAt(path) ?? "");
+    const invalid = this._errorAt(path) !== null;
     const min = entry.range ? String(entry.range[0]) : undefined;
     const max = entry.range ? String(entry.range[1]) : undefined;
     return html`
-      <div class="field" data-field-key=${entry.key}>
+      <div class="field" data-field-key=${path.join(".")}>
         ${this._renderLabel(entry)}
         <input
           type="number"
@@ -1010,45 +1287,45 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
           placeholder=${String(entry.default_value ?? "")}
           @input=${(e: Event) => {
             const raw = (e.target as HTMLInputElement).value;
-            this._setValue(entry.key, raw === "" ? "" : Number(raw));
+            this._setAt(path, raw === "" ? "" : Number(raw));
           }}
         />
-        ${this._fieldError(entry.key)}
+        ${this._fieldErrorAt(path)}
       </div>
     `;
   }
 
-  private _renderBooleanField(entry: ConfigEntry) {
-    const checked =
-      this._values[entry.key] === true || this._values[entry.key] === "true";
+  private _renderBooleanField(entry: ConfigEntry, path: string[] = [entry.key]) {
+    const raw = this._getAt(path);
+    const checked = raw === true || raw === "true";
     return html`
-      <div class="switch-field" data-field-key=${entry.key}>
+      <div class="switch-field" data-field-key=${path.join(".")}>
         <div class="field-info">${this._renderLabel(entry)}</div>
         <wa-switch
           ?checked=${checked}
           ?disabled=${this._saving}
           @change=${(e: Event) =>
-            this._setValue(
-              entry.key,
-              (e.target as HTMLInputElement & { checked: boolean }).checked
+            this._setAt(
+              path,
+              (e.target as HTMLInputElement & { checked: boolean }).checked,
             )}
         ></wa-switch>
       </div>
     `;
   }
 
-  private _renderSelectField(entry: ConfigEntry) {
-    const value = String(this._values[entry.key] ?? "");
-    const invalid = this._errorFor(entry.key) !== null;
+  private _renderSelectField(entry: ConfigEntry, path: string[] = [entry.key]) {
+    const value = String(this._getAt(path) ?? "");
+    const invalid = this._errorAt(path) !== null;
 
     // Combobox mode: options act as suggestions, user can also type a
     // custom value. Rendered as a plain input + datalist so the browser
     // shows autocomplete with the suggestions but doesn't restrict
     // input to the listed values.
     if (entry.allow_custom_value && entry.options && entry.options.length > 0) {
-      const listId = `combobox-${entry.key}`;
+      const listId = `combobox-${path.join("-")}`;
       return html`
-        <div class="field" data-field-key=${entry.key}>
+        <div class="field" data-field-key=${path.join(".")}>
           ${this._renderLabel(entry)}
           <input
             type="text"
@@ -1058,26 +1335,26 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
             ?disabled=${this._saving}
             placeholder=${String(entry.default_value ?? "")}
             @input=${(e: Event) =>
-              this._setValue(entry.key, (e.target as HTMLInputElement).value)}
+              this._setAt(path, (e.target as HTMLInputElement).value)}
           />
           <datalist id=${listId}>
             ${entry.options.map(
               (opt) => html`<option value=${opt.value}>${opt.label}</option>`,
             )}
           </datalist>
-          ${this._fieldError(entry.key)}
+          ${this._fieldErrorAt(path)}
         </div>
       `;
     }
 
     return html`
-      <div class="field" data-field-key=${entry.key}>
+      <div class="field" data-field-key=${path.join(".")}>
         ${this._renderLabel(entry)}
         <wa-select
           class=${invalid ? "invalid" : ""}
           ?disabled=${this._saving}
           @change=${(e: Event) =>
-            this._setValue(entry.key, (e.target as HTMLSelectElement).value)}
+            this._setAt(path, (e.target as HTMLSelectElement).value)}
         >
           ${(entry.options ?? []).map(
             (opt) => html`<wa-option
@@ -1087,7 +1364,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
             >`,
           )}
         </wa-select>
-        ${this._fieldError(entry.key)}
+        ${this._fieldErrorAt(path)}
       </div>
     `;
   }
@@ -1098,12 +1375,15 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
    * still drives validation but rendering uses a basic text input — a
    * richer per-type sub-renderer is a follow-up.
    */
-  private _renderMultiValueField(entry: ConfigEntry) {
-    const raw = this._values[entry.key];
+  private _renderMultiValueField(
+    entry: ConfigEntry,
+    path: string[] = [entry.key],
+  ) {
+    const raw = this._getAt(path);
     const items: string[] = Array.isArray(raw) ? raw.map((v) => String(v)) : [];
-    const invalid = this._errorFor(entry.key) !== null;
+    const invalid = this._errorAt(path) !== null;
     return html`
-      <div class="field" data-field-key=${entry.key}>
+      <div class="field" data-field-key=${path.join(".")}>
         ${this._renderLabel(entry)}
         ${items.length === 0
           ? html`<p class="field-description">
@@ -1120,9 +1400,9 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
                 ?disabled=${this._saving}
                 @input=${(e: Event) =>
                   this._updateMultiItem(
-                    entry.key,
+                    path,
                     i,
-                    (e.target as HTMLInputElement).value
+                    (e.target as HTMLInputElement).value,
                   )}
               />
               <button
@@ -1130,23 +1410,23 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
                 class="multi-btn"
                 ?disabled=${this._saving}
                 aria-label=${this._localize("device.multi_value_remove")}
-                @click=${() => this._removeMultiItem(entry.key, i)}
+                @click=${() => this._removeMultiItem(path, i)}
               >
                 <wa-icon library="mdi" name="close"></wa-icon>
               </button>
             </div>
-          `
+          `,
         )}
         <button
           type="button"
           class="multi-btn multi-add"
           ?disabled=${this._saving}
-          @click=${() => this._addMultiItem(entry.key)}
+          @click=${() => this._addMultiItem(path)}
         >
           <wa-icon library="mdi" name="plus"></wa-icon>
           ${this._localize("device.multi_value_add")}
         </button>
-        ${this._fieldError(entry.key)}
+        ${this._fieldErrorAt(path)}
       </div>
     `;
   }
@@ -1159,16 +1439,16 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
    * in the list but disabled, with their `occupied_by` / `notes` shown
    * as supporting text so the user understands why they can't pick them.
    */
-  private _renderPinField(entry: ConfigEntry) {
+  private _renderPinField(entry: ConfigEntry, path: string[] = [entry.key]) {
     // No board context — fall back to a plain text input so the field
     // remains editable (the user might know the pin name even without
     // the board metadata loaded).
     if (!this.board || this.board.pins.length === 0) {
-      return this._renderStringField(entry, "text");
+      return this._renderStringField(entry, "text", path);
     }
 
-    const value = String(this._values[entry.key] ?? "");
-    const invalid = this._errorFor(entry.key) !== null;
+    const value = String(this._getAt(path) ?? "");
+    const invalid = this._errorAt(path) !== null;
     const required = entry.pin_features ?? [];
     const matchesFeatures = (pin: BoardPin) =>
       required.every((f) => pin.features.includes(f));
@@ -1184,13 +1464,13 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     );
 
     return html`
-      <div class="field" data-field-key=${entry.key}>
+      <div class="field" data-field-key=${path.join(".")}>
         ${this._renderLabel(entry)}
         <wa-select
           class=${invalid ? "invalid" : ""}
           ?disabled=${this._saving}
           @change=${(e: Event) =>
-            this._setValue(entry.key, (e.target as HTMLSelectElement).value)}
+            this._setAt(path, (e.target as HTMLSelectElement).value)}
         >
           ${visible.map((pin) => {
             const optValue = `GPIO${pin.gpio}`;
@@ -1257,7 +1537,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
             </wa-option>`;
           })}
         </wa-select>
-        ${this._fieldError(entry.key)}
+        ${this._fieldErrorAt(path)}
       </div>
     `;
   }
@@ -1338,32 +1618,35 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
    * the user might be referencing a component they haven't added yet,
    * and we don't want to block them.
    */
-  private _renderIdReferenceField(entry: ConfigEntry) {
+  private _renderIdReferenceField(
+    entry: ConfigEntry,
+    path: string[] = [entry.key],
+  ) {
     const domain = entry.references_component || "";
     const candidates = this._findReferencedComponents(this._yaml, domain);
 
     if (candidates.length === 0) {
       // Fall back to text input but with a hint in the label / help.
-      return this._renderStringField(entry, "text");
+      return this._renderStringField(entry, "text", path);
     }
 
-    const value = String(this._values[entry.key] ?? "");
-    const invalid = this._errorFor(entry.key) !== null;
+    const value = String(this._getAt(path) ?? "");
+    const invalid = this._errorAt(path) !== null;
     return html`
-      <div class="field" data-field-key=${entry.key}>
+      <div class="field" data-field-key=${path.join(".")}>
         ${this._renderLabel(entry)}
         <wa-select
           class=${invalid ? "invalid" : ""}
-          value=${value}
           ?disabled=${this._saving}
           @change=${(e: Event) =>
-            this._setValue(entry.key, (e.target as HTMLSelectElement).value)}
+            this._setAt(path, (e.target as HTMLSelectElement).value)}
         >
           ${candidates.map(
             (c) => html`<wa-option
               class="id-option"
               value=${c.id}
               .label=${c.name || c.id}
+              ?selected=${c.id === value}
             >
               <span class="id-option-stack">
                 <span class="id-option-primary">${c.name || c.id}</span>
@@ -1374,7 +1657,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
             </wa-option>`,
           )}
         </wa-select>
-        ${this._fieldError(entry.key)}
+        ${this._fieldErrorAt(path)}
       </div>
     `;
   }
@@ -1442,11 +1725,11 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
   }
 
   /** Render a multi-line textarea for LAMBDA / JSON entries. */
-  private _renderTextareaField(entry: ConfigEntry) {
-    const value = String(this._values[entry.key] ?? "");
-    const invalid = this._errorFor(entry.key) !== null;
+  private _renderTextareaField(entry: ConfigEntry, path: string[] = [entry.key]) {
+    const value = String(this._getAt(path) ?? "");
+    const invalid = this._errorAt(path) !== null;
     return html`
-      <div class="field" data-field-key=${entry.key}>
+      <div class="field" data-field-key=${path.join(".")}>
         ${this._renderLabel(entry)}
         <textarea
           class="textarea-field ${invalid ? "invalid" : ""}"
@@ -1455,38 +1738,35 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
           .value=${value}
           placeholder=${String(entry.default_value ?? "")}
           @input=${(e: Event) =>
-            this._setValue(entry.key, (e.target as HTMLTextAreaElement).value)}
+            this._setAt(path, (e.target as HTMLTextAreaElement).value)}
         ></textarea>
-        ${this._fieldError(entry.key)}
+        ${this._fieldErrorAt(path)}
       </div>
     `;
   }
 
   // ─── multi_value helpers ────────────────────────────────────────
 
-  private _addMultiItem(key: string) {
-    const current = Array.isArray(this._values[key])
-      ? (this._values[key] as unknown[])
-      : [];
-    this._setValue(key, [...current, ""]);
+  private _addMultiItem(path: string[]) {
+    const cur = this._getAt(path);
+    const current = Array.isArray(cur) ? cur : [];
+    this._setAt(path, [...current, ""]);
   }
 
-  private _removeMultiItem(key: string, idx: number) {
-    const current = Array.isArray(this._values[key])
-      ? (this._values[key] as unknown[])
-      : [];
-    this._setValue(
-      key,
-      current.filter((_, i) => i !== idx)
+  private _removeMultiItem(path: string[], idx: number) {
+    const cur = this._getAt(path);
+    const current = Array.isArray(cur) ? cur : [];
+    this._setAt(
+      path,
+      current.filter((_, i) => i !== idx),
     );
   }
 
-  private _updateMultiItem(key: string, idx: number, value: string) {
-    const current = Array.isArray(this._values[key])
-      ? [...(this._values[key] as unknown[])]
-      : [];
+  private _updateMultiItem(path: string[], idx: number, value: string) {
+    const cur = this._getAt(path);
+    const current = Array.isArray(cur) ? [...cur] : [];
     current[idx] = value;
-    this._setValue(key, current);
+    this._setAt(path, current);
   }
 
   /**
@@ -1549,34 +1829,83 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     </a>`;
   }
 
-  private _setValue(key: string, value: unknown) {
-    this._values = { ...this._values, [key]: value };
+  /**
+   * Read the value at a (possibly nested) path inside `_values`. Returns
+   * undefined for missing paths or when the path crosses a non-object.
+   */
+  private _getAt(path: string[]): unknown {
+    let cur: unknown = this._values;
+    for (const k of path) {
+      if (cur === null || typeof cur !== "object" || Array.isArray(cur)) {
+        return undefined;
+      }
+      cur = (cur as Record<string, unknown>)[k];
+    }
+    return cur;
+  }
+
+  /**
+   * Write a value at a (possibly nested) path inside `_values`,
+   * preserving structural sharing of unrelated branches so Lit's
+   * change detection is still cheap.
+   */
+  private _setAt(path: string[], value: unknown) {
+    this._values = _setIn(this._values, path, value);
     this._dirty = true;
-    if (this._fieldErrors.has(key)) {
+    const errKey = path.join(".");
+    if (this._fieldErrors.has(errKey)) {
       const next = new Map(this._fieldErrors);
-      next.delete(key);
+      next.delete(errKey);
       this._fieldErrors = next;
     }
   }
 
+  private _errorAt(path: string[]): ValidationError | null {
+    return this._fieldErrors.get(path.join(".")) ?? null;
+  }
+
+  private _fieldErrorAt(path: string[]) {
+    const err = this._errorAt(path);
+    if (!err) return nothing;
+    return html`<span class="field-error">${this._localize(err.code, err.params)}</span>`;
+  }
+
   private async _scrollFirstErrorIntoView(errors: Map<string, ValidationError>) {
     if (!this._config) return;
-    // Find the first entry (in render order) that has an error so we land on
-    // the topmost issue rather than whatever Map iteration happens to surface.
-    const firstEntry = this._config.entries.find((e) => errors.has(e.key));
-    if (!firstEntry) return;
+
+    // Walk the entry tree in render order looking for the first
+    // (possibly nested) entry that owns an error. Returns the entry
+    // and the dotted path that produced the matching error key.
+    const firstHit = this._findFirstErrorTarget(
+      this._config.entries,
+      errors,
+      [],
+    );
+    if (!firstHit) return;
+    const { topEntry, path } = firstHit;
 
     // If the failing field lives in the collapsed Advanced section it isn't
     // in the DOM yet — open it and wait for the re-render before searching.
-    if (firstEntry.advanced && !this._advancedOpen) {
+    if (topEntry.advanced && !this._advancedOpen) {
       this._setAdvancedOpen(true);
+      await this.updateComplete;
+    }
+
+    // Make sure every parent NESTED group along the path is expanded
+    // so the failing field is actually rendered.
+    if (path.length > 1) {
+      const next = new Set(this._nestedOpenSections);
+      for (let i = 1; i < path.length; i++) {
+        next.add(path.slice(0, i).join("."));
+      }
+      this._nestedOpenSections = next;
       await this.updateComplete;
     }
 
     const root = this.shadowRoot;
     if (!root) return;
     const container = root.querySelector(
-      `[data-field-key="${CSS.escape(firstEntry.key)}"]`
+      `[data-field-key="${CSS.escape(path.join("."))}"]`
     ) as HTMLElement | null;
     if (!container) return;
 
@@ -1589,14 +1918,38 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     focusable?.focus({ preventScroll: true });
   }
 
-  private _errorFor(key: string): ValidationError | null {
-    return this._fieldErrors.get(key) ?? null;
-  }
-
-  private _fieldError(key: string) {
-    const err = this._errorFor(key);
-    if (!err) return nothing;
-    return html`<span class="field-error">${this._localize(err.code, err.params)}</span>`;
+  /**
+   * Walk the entries in render order and return the first error target.
+   * `topEntry` is the top-level entry under which the error sits (used
+   * to decide whether to expand the Advanced section); `path` is the
+   * dotted path of the actual leaf field with the error.
+   */
+  private _findFirstErrorTarget(
+    entries: ConfigEntry[],
+    errors: Map<string, ValidationError>,
+    pathPrefix: string[],
+  ): { topEntry: ConfigEntry; path: string[] } | null {
+    for (const entry of entries) {
+      const path = [...pathPrefix, entry.key];
+      if (entry.type === ConfigEntryType.NESTED) {
+        const found = this._findFirstErrorTarget(
+          entry.config_entries ?? [],
+          errors,
+          path,
+        );
+        if (found) {
+          return {
+            topEntry: pathPrefix.length === 0 ? entry : found.topEntry,
+            path: found.path,
+          };
+        }
+        continue;
+      }
+      if (errors.has(path.join("."))) {
+        return { topEntry: entry, path };
+      }
+    }
+    return null;
   }
 
   private async _onSave() {
@@ -1643,8 +1996,13 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     }
   }
 
-  /** Remove the entire section (from its top-level key to the next) from the YAML. */
-  /** Replace the section's direct child values in the YAML with the form values. */
+  /** Replace the section's child values in the YAML with the form values.
+   *
+   *  The section is rewritten wholesale — we re-emit every form value at
+   *  the correct indentation, including arrays and nested objects (recursive
+   *  for the latter). This is simpler than trying to merge diffs and the
+   *  schema-driven approach guarantees we never lose information.
+   */
   private _updateSectionInYaml(yaml: string): string {
     const lines = yaml.split("\n");
     const { start, end } = this._findSectionRange(lines);
@@ -1652,42 +2010,61 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
     const isListItem = /^\s+-\s/.test(lines[start]);
     const childIndent = isListItem ? "    " : "  ";
-    const childRegex = new RegExp(`^${childIndent}([a-zA-Z_][a-zA-Z0-9_]*):\\s*(.*)$`);
 
-    // Build updated lines for the section
     const sectionHeader = lines[start];
     const newLines = [sectionHeader];
-
-    // Collect existing lines that are nested blocks (not simple key: value)
-    const existingNested: string[] = [];
-    for (let i = start + 1; i < end; i++) {
-      const line = lines[i];
-      const match = line.match(childRegex);
-      if (match && match[2].trim() !== "") {
-        // Simple key: value — will be replaced by form values
-      } else if (line.trim() !== "") {
-        existingNested.push(line);
-      }
-    }
-
-    // Write form values at the correct indent
-    for (const entry of this._config!.entries) {
-      if (entry.hidden) continue;
-      const val = this._values[entry.key];
-      if (val === undefined || val === "" || val === null) continue;
-      const strVal =
-        typeof val === "boolean"
-          ? String(val)
-          : typeof val === "string" && val.includes(" ")
-            ? `"${val}"`
-            : String(val);
-      newLines.push(`${childIndent}${entry.key}: ${strVal}`);
-    }
-
-    newLines.push(...existingNested);
+    newLines.push(...this._serializeValues(this._values, childIndent));
 
     lines.splice(start, end - start, ...newLines);
     return lines.join("\n");
+  }
+
+  /**
+   * Recursively serialize a values dict as YAML lines at `indent`.
+   * Skips empty values. Arrays render as block-style lists. Nested
+   * objects recurse with `indent + "  "`.
+   */
+  private _serializeValues(
+    values: Record<string, unknown>,
+    indent: string,
+  ): string[] {
+    const lines: string[] = [];
+    for (const [key, val] of Object.entries(values)) {
+      if (val === undefined || val === null || val === "") continue;
+      if (Array.isArray(val)) {
+        if (val.length === 0) continue;
+        lines.push(`${indent}${key}:`);
+        for (const item of val) {
+          lines.push(`${indent}  - ${this._formatScalar(item)}`);
+        }
+        continue;
+      }
+      if (typeof val === "object") {
+        const sub = this._serializeValues(
+          val as Record<string, unknown>,
+          `${indent}  `,
+        );
+        if (sub.length === 0) continue;
+        lines.push(`${indent}${key}:`);
+        lines.push(...sub);
+        continue;
+      }
+      lines.push(`${indent}${key}: ${this._formatScalar(val)}`);
+    }
+    return lines;
+  }
+
+  private _formatScalar(v: unknown): string {
+    if (typeof v === "boolean") return String(v);
+    if (typeof v === "number") return String(v);
+    const s = String(v);
+    // Quote when the string contains characters YAML would interpret —
+    // spaces (alone are fine but most tooling quotes them), colons, or
+    // leading dash/quote.
+    if (/[:#]/.test(s) || /^[-\s'"]/.test(s) || /\s$/.test(s)) {
+      return `"${s.replace(/"/g, '\\"')}"`;
+    }
+    return s;
   }
 
   /** Find the 0-indexed line range [start, end) for the current section. */
