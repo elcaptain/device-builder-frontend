@@ -349,10 +349,6 @@ export interface ConfigEntry {
   translation_key: string | null;
   /** Substitution params for the translation string. */
   translation_params: Record<string, unknown> | null;
-
-  // === runtime ===
-  /** Current value when this entry describes an existing config. */
-  value: ConfigPrimitive | ConfigPrimitive[] | null;
 }
 
 export enum ConfigEntryType {
