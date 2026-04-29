@@ -224,6 +224,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         color: var(--wa-color-text-quiet);
         font-size: 16px;
         transition: color 0.12s;
+        margin-left: auto;
       }
 
       .help-button:hover {
