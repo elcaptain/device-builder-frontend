@@ -124,8 +124,8 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
       }
 
       .board-image img {
-        max-width: 100%;
-        max-height: 100%;
+        width: 100%;
+        height: 100%;
         object-fit: contain;
       }
 
@@ -258,7 +258,12 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
                 <p class="board-description">${this.board.description}</p>
               </div>
               <div class="board-image">
-                <img src=${this._boardImageUrl(this.board)} alt=${this.board.name} />
+                <img
+                  src=${this._boardImageUrl(this.board)}
+                  alt=${this.board.name}
+                  referrerpolicy="no-referrer"
+                  @error=${this._onImageError}
+                />
               </div>
             </div>
             <div class="board-separator"></div>
@@ -334,6 +339,14 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
   private _boardImageUrl(board: BoardCatalogEntry): string {
     if (board.images.length > 0) return board.images[0];
     return "/assets/board/default.svg";
+  }
+
+  private _onImageError(e: Event) {
+    const img = e.target as HTMLImageElement;
+    const fallback = "/assets/board/default.svg";
+    if (img.src !== window.location.origin + fallback && !img.src.endsWith(fallback)) {
+      img.src = fallback;
+    }
   }
 }
 
