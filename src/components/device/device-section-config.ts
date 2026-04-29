@@ -1026,6 +1026,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
             return html`<wa-option
               class="pin-option"
               value=${optValue}
+              .label=${primary}
               ?disabled=${disabled}
               title=${supporting || ""}
             >
