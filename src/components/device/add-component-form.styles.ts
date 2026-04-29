@@ -34,34 +34,34 @@ export const addComponentFormStyles = css`
     margin-left: 2px;
   }
 
-  input[type="text"],
-  input[type="number"],
   select {
     width: 100%;
-    padding: var(--wa-space-s) var(--wa-space-m);
-    font-size: var(--wa-font-size-m);
+    padding: 9px 14px;
+    font-size: var(--wa-font-size-s);
     font-family: inherit;
     color: var(--wa-color-text-normal);
-    background: var(--wa-color-surface-default);
-    border: var(--wa-border-width-m) solid var(--wa-color-surface-border);
-    border-radius: var(--wa-border-radius-m);
+    background: var(--wa-color-surface-raised);
+    border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    border-radius: var(--wa-border-radius-l);
     box-sizing: border-box;
     outline: none;
+    transition:
+      border-color 0.15s,
+      box-shadow 0.15s;
   }
 
-  input:focus,
   select:focus {
     border-color: var(--esphome-primary);
+    box-shadow: 0 0 0 3px
+      color-mix(in srgb, var(--esphome-primary), transparent 80%);
   }
 
-  input.invalid,
   select.invalid {
     border-color: var(--esphome-error);
   }
 
-  input:disabled,
   select:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 
@@ -126,23 +126,39 @@ export const addComponentFormStyles = css`
     display: flex;
     justify-content: flex-end;
     gap: var(--wa-space-s);
-    margin-top: var(--wa-space-m);
+    padding-top: var(--wa-space-m);
   }
 
   .btn {
-    padding: var(--wa-space-s) var(--wa-space-l);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 18px;
+    border-radius: var(--wa-border-radius-m);
     font-size: var(--wa-font-size-s);
     font-weight: var(--wa-font-weight-bold);
     font-family: inherit;
-    border-radius: var(--wa-border-radius-m);
     cursor: pointer;
-    border: var(--wa-border-width-m) solid transparent;
+    border: none;
+    transition:
+      background 0.12s,
+      opacity 0.12s;
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .btn-secondary {
-    background: none;
-    border-color: var(--wa-color-surface-border);
+    background: var(--wa-color-surface-lowered);
     color: var(--wa-color-text-normal);
+    border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--wa-color-surface-border);
   }
 
   .btn-primary {
@@ -150,10 +166,8 @@ export const addComponentFormStyles = css`
     color: var(--esphome-on-primary);
   }
 
-  .btn-primary:disabled,
-  .btn-secondary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .btn-primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--esphome-primary), black 10%);
   }
 
   .error {

@@ -9,11 +9,21 @@ import {
   mdiPlus,
 } from "@mdi/js";
 import { css, html, LitElement, nothing } from "lit";
-import toast from "sonner-js";
 import { customElement, property, state } from "lit/decorators.js";
+import toast from "sonner-js";
 import type { ESPHomeAPI } from "../../api/index.js";
 import type { BoardCatalogEntry, BoardPin, ConfigEntry } from "../../api/types.js";
 import { ConfigEntryType } from "../../api/types.js";
+import type { LocalizeFunc } from "../../common/localize.js";
+import { apiContext, localizeContext } from "../../context/index.js";
+import { inputStyles } from "../../styles/inputs.js";
+import { espHomeStyles } from "../../styles/shared.js";
+import {
+  isEntryVisible,
+  validateEntries,
+  type ValidationError,
+} from "../../util/config-validation.js";
+import { registerMdiIcons } from "../../util/register-icons.js";
 
 // Local type — SectionConfigResponse is not yet available in the WebSocket backend
 interface SectionConfigResponse {
@@ -26,15 +36,9 @@ interface SectionConfigResponse {
   image_url: string;
   entries: ConfigEntry[];
 }
-import type { LocalizeFunc } from "../../common/localize.js";
-import { apiContext, localizeContext } from "../../context/index.js";
-import { espHomeStyles } from "../../styles/shared.js";
-import { registerMdiIcons } from "../../util/register-icons.js";
-import { isEntryVisible, validateEntries, type ValidationError } from "../../util/config-validation.js";
 
 import "@home-assistant/webawesome/dist/components/divider/divider.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
-import "@home-assistant/webawesome/dist/components/input/input.js";
 import "@home-assistant/webawesome/dist/components/option/option.js";
 import "@home-assistant/webawesome/dist/components/popover/popover.js";
 import "@home-assistant/webawesome/dist/components/select/select.js";
@@ -109,6 +113,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
   static styles = [
     espHomeStyles,
+    inputStyles,
     css`
       :host {
         display: flex;
@@ -224,15 +229,18 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         margin-top: var(--wa-space-2xs);
       }
 
-      wa-input.invalid::part(base),
-      wa-select.invalid::part(combobox) {
-        border-color: var(--esphome-error);
-      }
-
       .field-description {
         font-size: var(--wa-font-size-2xs);
         color: var(--wa-color-text-quiet);
         margin: 0;
+      }
+
+      /* Push the input/select away from a description sitting right above it
+         so the two pieces of text don't collide. */
+      .field-description + input,
+      .field-description + textarea,
+      .field-description + wa-select {
+        margin-top: 8px;
       }
 
       .help-button {
@@ -283,8 +291,6 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
       .advanced-section {
         margin-top: var(--wa-space-l);
-        border-top: 1px solid var(--wa-color-surface-lowered);
-        padding-top: var(--wa-space-m);
       }
 
       .advanced-toggle {
@@ -339,7 +345,10 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         font-family: inherit;
         font-size: var(--wa-font-size-xs);
         cursor: pointer;
-        transition: background 0.12s, border-color 0.12s, color 0.12s;
+        transition:
+          background 0.12s,
+          border-color 0.12s,
+          color 0.12s;
       }
 
       .multi-btn:hover {
@@ -405,7 +414,6 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         justify-content: flex-end;
         gap: var(--wa-space-s);
         padding-top: var(--wa-space-s);
-        border-top: 1px solid var(--wa-color-surface-border);
       }
 
       .save-button {
@@ -415,7 +423,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         border: none;
         background: var(--esphome-primary);
         color: var(--esphome-on-primary);
-        padding: var(--wa-space-s) var(--wa-space-l);
+        padding: var(--wa-space-xs) var(--wa-space-m);
         border-radius: var(--wa-border-radius-m);
         cursor: pointer;
         font-size: var(--wa-font-size-s);
@@ -448,10 +456,8 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         padding: var(--wa-space-xl);
       }
 
-      wa-input {
-        width: 100%;
-      }
-
+      /* Sizing only — chrome (border / radius / focus ring) comes from the
+         shared inputStyles so wa-select matches every other input field. */
       wa-select {
         width: 100%;
       }
@@ -460,7 +466,9 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
   updated(changedProperties: Map<string, unknown>) {
     if (
-      (changedProperties.has("sectionKey") || changedProperties.has("configuration") || changedProperties.has("fromLine")) &&
+      (changedProperties.has("sectionKey") ||
+        changedProperties.has("configuration") ||
+        changedProperties.has("fromLine")) &&
       this.sectionKey &&
       this.configuration
     ) {
@@ -569,14 +577,12 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     // For list items, the first line may have `  - platform: binary`
     // and children are at 4-space indent. For top-level, children are at 2-space.
     const childIndent = isListItem ? "    " : "  ";
-    const childRegex = new RegExp(
-      `^${childIndent}([a-zA-Z_][a-zA-Z0-9_]*):\\s*(.*)$`,
-    );
+    const childRegex = new RegExp(`^${childIndent}([a-zA-Z_][a-zA-Z0-9_]*):\\s*(.*)$`);
 
     // Also parse the first line of a list item (  - key: value)
     if (isListItem) {
       const firstMatch = lines[startIdx].match(
-        /^\s+-\s+([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/,
+        /^\s+-\s+([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/
       );
       if (firstMatch) {
         const key = firstMatch[1];
@@ -647,7 +653,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     // standard and advanced. Advanced entries get rendered in a separate
     // collapsible section at the bottom.
     const visibleEntries = this._config.entries.filter((e) =>
-      isEntryVisible(e, this._values, this._presentComponents),
+      isEntryVisible(e, this._values, this._presentComponents)
     );
     const standardEntries = visibleEntries.filter((e) => !e.advanced);
     const advancedEntries = visibleEntries.filter((e) => e.advanced);
@@ -681,7 +687,9 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         </div>
       </div>
       <div class="form">${standardEntries.map((entry) => this._renderEntry(entry))}</div>
-      ${advancedEntries.length > 0 ? this._renderAdvancedSection(advancedEntries) : nothing}
+      ${advancedEntries.length > 0
+        ? this._renderAdvancedSection(advancedEntries)
+        : nothing}
       ${this._error ? html`<p class="error">${this._error}</p>` : nothing}
       <div class="actions">
         <button
@@ -690,7 +698,9 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
           @click=${this._onSave}
         >
           <wa-icon library="mdi" name="content-save"></wa-icon>
-          ${this._saving ? this._localize("device.saving") : this._localize("device.save")}
+          ${this._saving
+            ? this._localize("device.saving")
+            : this._localize("device.save")}
         </button>
       </div>
     `;
@@ -701,9 +711,14 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
       <div class="advanced-section">
         <button
           class="advanced-toggle"
-          @click=${() => { this._advancedOpen = !this._advancedOpen; }}
+          @click=${() => {
+            this._advancedOpen = !this._advancedOpen;
+          }}
         >
-          <wa-icon library="mdi" name=${this._advancedOpen ? "chevron-up" : "chevron-down"}></wa-icon>
+          <wa-icon
+            library="mdi"
+            name=${this._advancedOpen ? "chevron-up" : "chevron-down"}
+          ></wa-icon>
           ${this._localize("device.advanced_options")}
         </button>
         ${this._advancedOpen
@@ -780,9 +795,15 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     const value = String(this._values[entry.key] ?? "");
     const invalid = this._errorFor(entry.key) !== null;
     return html`
-      <div class="field">
-        ${this._renderLabel(entry)}
-        <wa-input
+      <div class="field" data-field-key=${entry.key}>
+        <label class="field-label">
+          ${entry.label}
+          ${entry.required ? html`<span class="required">*</span>` : nothing}
+        </label>
+        ${entry.description
+          ? html`<p class="field-description">${entry.description}</p>`
+          : nothing}
+        <input
           type=${inputType}
           class=${invalid ? "invalid" : ""}
           .value=${value}
@@ -790,7 +811,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
           placeholder=${String(entry.default_value ?? "")}
           @input=${(e: Event) =>
             this._setValue(entry.key, (e.target as HTMLInputElement).value)}
-        ></wa-input>
+        />
         ${this._fieldError(entry.key)}
       </div>
     `;
@@ -802,9 +823,15 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     const min = entry.range ? String(entry.range[0]) : undefined;
     const max = entry.range ? String(entry.range[1]) : undefined;
     return html`
-      <div class="field">
-        ${this._renderLabel(entry)}
-        <wa-input
+      <div class="field" data-field-key=${entry.key}>
+        <label class="field-label">
+          ${entry.label}
+          ${entry.required ? html`<span class="required">*</span>` : nothing}
+        </label>
+        ${entry.description
+          ? html`<p class="field-description">${entry.description}</p>`
+          : nothing}
+        <input
           type="number"
           class=${invalid ? "invalid" : ""}
           .value=${value}
@@ -816,7 +843,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
             const raw = (e.target as HTMLInputElement).value;
             this._setValue(entry.key, raw === "" ? "" : Number(raw));
           }}
-        ></wa-input>
+        />
         ${this._fieldError(entry.key)}
       </div>
     `;
@@ -826,10 +853,8 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     const checked =
       this._values[entry.key] === true || this._values[entry.key] === "true";
     return html`
-      <div class="switch-field">
-        <div class="field-info">
-          ${this._renderLabel(entry)}
-        </div>
+      <div class="switch-field" data-field-key=${entry.key}>
+        <div class="field-info">${this._renderLabel(entry)}</div>
         <wa-switch
           ?checked=${checked}
           ?disabled=${this._saving}
@@ -847,7 +872,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     const value = String(this._values[entry.key] ?? "");
     const invalid = this._errorFor(entry.key) !== null;
     return html`
-      <div class="field">
+      <div class="field" data-field-key=${entry.key}>
         ${this._renderLabel(entry)}
         <wa-select
           class=${invalid ? "invalid" : ""}
@@ -873,15 +898,15 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
    */
   private _renderMultiValueField(entry: ConfigEntry) {
     const raw = this._values[entry.key];
-    const items: string[] = Array.isArray(raw)
-      ? raw.map((v) => String(v))
-      : [];
+    const items: string[] = Array.isArray(raw) ? raw.map((v) => String(v)) : [];
     const invalid = this._errorFor(entry.key) !== null;
     return html`
-      <div class="field">
+      <div class="field" data-field-key=${entry.key}>
         ${this._renderLabel(entry)}
         ${items.length === 0
-          ? html`<p class="field-description">${this._localize("device.multi_value_empty")}</p>`
+          ? html`<p class="field-description">
+              ${this._localize("device.multi_value_empty")}
+            </p>`
           : nothing}
         ${items.map(
           (item, i) => html`
@@ -891,7 +916,11 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
                 .value=${item}
                 ?disabled=${this._saving}
                 @input=${(e: Event) =>
-                  this._updateMultiItem(entry.key, i, (e.target as HTMLInputElement).value)}
+                  this._updateMultiItem(
+                    entry.key,
+                    i,
+                    (e.target as HTMLInputElement).value
+                  )}
               ></wa-input>
               <button
                 type="button"
@@ -903,7 +932,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
                 <wa-icon library="mdi" name="close"></wa-icon>
               </button>
             </div>
-          `,
+          `
         )}
         <button
           type="button"
@@ -944,7 +973,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     const visible = this.board.pins.filter(matchesFeatures);
 
     return html`
-      <div class="field">
+      <div class="field" data-field-key=${entry.key}>
         ${this._renderLabel(entry)}
         <wa-select
           class=${invalid ? "invalid" : ""}
@@ -956,7 +985,9 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
           ${visible.map((pin) => {
             const disabled = pin.available === false;
             const supporting =
-              pin.occupied_by || pin.notes || (disabled ? this._localize("device.pin_unavailable") : "");
+              pin.occupied_by ||
+              pin.notes ||
+              (disabled ? this._localize("device.pin_unavailable") : "");
             const optValue = `GPIO${pin.gpio}`;
             const label = pin.label || optValue;
             return html`<wa-option
@@ -978,7 +1009,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     const value = String(this._values[entry.key] ?? "");
     const invalid = this._errorFor(entry.key) !== null;
     return html`
-      <div class="field">
+      <div class="field" data-field-key=${entry.key}>
         ${this._renderLabel(entry)}
         <textarea
           class="textarea-field ${invalid ? "invalid" : ""}"
@@ -1007,7 +1038,10 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     const current = Array.isArray(this._values[key])
       ? (this._values[key] as unknown[])
       : [];
-    this._setValue(key, current.filter((_, i) => i !== idx));
+    this._setValue(
+      key,
+      current.filter((_, i) => i !== idx)
+    );
   }
 
   private _updateMultiItem(key: string, idx: number, value: string) {
@@ -1105,6 +1139,36 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     }
   }
 
+  private async _scrollFirstErrorIntoView(errors: Map<string, ValidationError>) {
+    if (!this._config) return;
+    // Find the first entry (in render order) that has an error so we land on
+    // the topmost issue rather than whatever Map iteration happens to surface.
+    const firstEntry = this._config.entries.find((e) => errors.has(e.key));
+    if (!firstEntry) return;
+
+    // If the failing field lives in the collapsed Advanced section it isn't
+    // in the DOM yet — open it and wait for the re-render before searching.
+    if (firstEntry.advanced && !this._advancedOpen) {
+      this._advancedOpen = true;
+      await this.updateComplete;
+    }
+
+    const root = this.shadowRoot;
+    if (!root) return;
+    const container = root.querySelector(
+      `[data-field-key="${CSS.escape(firstEntry.key)}"]`
+    ) as HTMLElement | null;
+    if (!container) return;
+
+    container.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Focus the first focusable control so the user can fix it immediately
+    // without an extra click. `preventScroll` keeps our smooth scroll intact.
+    const focusable = container.querySelector<HTMLElement>(
+      "input, select, textarea, wa-select, wa-switch, [tabindex]"
+    );
+    focusable?.focus({ preventScroll: true });
+  }
+
   private _errorFor(key: string): ValidationError | null {
     return this._fieldErrors.get(key) ?? null;
   }
@@ -1117,9 +1181,17 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
   private async _onSave() {
     if (!this._config) return;
-    const errors = validateEntries(this._config.entries, this._values, this._presentComponents);
+    const errors = validateEntries(
+      this._config.entries,
+      this._values,
+      this._presentComponents
+    );
     if (errors.size > 0) {
       this._fieldErrors = errors;
+      // Wait for the DOM to reflect the new error markers, then scroll the
+      // first invalid field into view (no-op if it's already visible).
+      await this.updateComplete;
+      this._scrollFirstErrorIntoView(errors);
       return;
     }
     this._fieldErrors = new Map();
@@ -1130,7 +1202,8 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
       const newYaml = this._updateSectionInYaml(yaml);
       const title = this._config.title;
       this._api.updateConfig(this.configuration, newYaml).catch((e) => {
-        this._error = e instanceof Error ? e.message : this._localize("device.save_error");
+        this._error =
+          e instanceof Error ? e.message : this._localize("device.save_error");
       });
       this._dirty = false;
       this.dispatchEvent(
@@ -1140,7 +1213,9 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
           composed: true,
         })
       );
-      toast.success(this._localize("device.section_saved_toast", { title }), { richColors: true });
+      toast.success(this._localize("device.section_saved_toast", { title }), {
+        richColors: true,
+      });
     } catch (e) {
       this._error = e instanceof Error ? e.message : this._localize("device.save_error");
     } finally {
@@ -1157,9 +1232,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
     const isListItem = /^\s+-\s/.test(lines[start]);
     const childIndent = isListItem ? "    " : "  ";
-    const childRegex = new RegExp(
-      `^${childIndent}([a-zA-Z_][a-zA-Z0-9_]*):\\s*(.*)$`,
-    );
+    const childRegex = new RegExp(`^${childIndent}([a-zA-Z_][a-zA-Z0-9_]*):\\s*(.*)$`);
 
     // Build updated lines for the section
     const sectionHeader = lines[start];
@@ -1182,7 +1255,12 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
       if (entry.hidden) continue;
       const val = this._values[entry.key];
       if (val === undefined || val === "" || val === null) continue;
-      const strVal = typeof val === "boolean" ? String(val) : typeof val === "string" && val.includes(" ") ? `"${val}"` : String(val);
+      const strVal =
+        typeof val === "boolean"
+          ? String(val)
+          : typeof val === "string" && val.includes(" ")
+            ? `"${val}"`
+            : String(val);
       newLines.push(`${childIndent}${entry.key}: ${strVal}`);
     }
 
