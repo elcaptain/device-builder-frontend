@@ -483,6 +483,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     this._dirty = false;
 
     try {
+      console.debug("[SectionConfig] getComponent:", this.sectionKey);
       const component = await this._api.getComponent(this.sectionKey);
 
       // Stale — user clicked another component while this was loading
