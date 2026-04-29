@@ -657,6 +657,13 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
       }
     }
 
+    // Indent at which sub-items of a child list appear (2 spaces deeper
+    // than child indent — that's the standard YAML offset for the dash).
+    const listItemIndent = `${childIndent}  - `;
+    const listItemRegex = new RegExp(
+      `^${childIndent}  -\\s+(.*)$`,
+    );
+
     for (let i = startIdx + 1; i < lines.length; i++) {
       const line = lines[i];
       if (line.trim() === "") continue;
@@ -672,7 +679,53 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
       const key = match[1];
       let raw = match[2].trim();
-      if (raw === "") continue;
+
+      // Empty value with list items below → collect into a string array
+      // (e.g. `options:` followed by `  - "UIT"`, `  - "LAAG"` lines).
+      if (raw === "") {
+        const items: string[] = [];
+        let j = i + 1;
+        for (; j < lines.length; j++) {
+          const next = lines[j];
+          if (next.trim() === "") continue;
+          if (!next.startsWith(listItemIndent)) break;
+          const m = next.match(listItemRegex);
+          if (!m) break;
+          let item = m[1].trim();
+          if (
+            (item.startsWith('"') && item.endsWith('"')) ||
+            (item.startsWith("'") && item.endsWith("'"))
+          ) {
+            item = item.slice(1, -1);
+          }
+          items.push(item);
+        }
+        if (items.length > 0) {
+          values[key] = items;
+          i = j - 1; // skip past the consumed list lines
+        }
+        continue;
+      }
+
+      // Inline flow-style list `[a, b, c]`
+      if (raw.startsWith("[") && raw.endsWith("]")) {
+        const inner = raw.slice(1, -1).trim();
+        const items = inner === ""
+          ? []
+          : inner.split(",").map((p) => {
+              let v = p.trim();
+              if (
+                (v.startsWith('"') && v.endsWith('"')) ||
+                (v.startsWith("'") && v.endsWith("'"))
+              ) {
+                v = v.slice(1, -1);
+              }
+              return v;
+            });
+        values[key] = items;
+        continue;
+      }
+
       if (
         (raw.startsWith('"') && raw.endsWith('"')) ||
         (raw.startsWith("'") && raw.endsWith("'"))
