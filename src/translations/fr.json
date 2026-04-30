@@ -242,7 +242,6 @@
     "section_core_desc": "La fonctionnalité de base pour permettre à votre carte ESP de fonctionner.",
     "section_components_desc": "Vous pouvez ajouter des composants après avoir finalisé votre configuration principale, par exemple des capteurs.",
     "section_automations_desc": "Vous pouvez configurer des automatisations une fois la configuration principale et au moins un composant ajoutés.",
-    "editor_title": "Choisissez des composants pour votre {name}",
     "layout_components_only": "Afficher les composants uniquement",
     "layout_split": "Vue partagée",
     "layout_yaml_only": "Afficher l'éditeur YAML uniquement",
@@ -295,7 +294,6 @@
     "add_automation_unavailable": "Le support des automatisations n'est pas encore disponible",
     "add_config_error": "Échec de l'ajout de la section de configuration",
     "editor_layout_label": "Disposition de l'éditeur",
-    "editor_title_no_components": "Choisissez des composants pour votre {name}",
     "editor_title_ready": "Édition de {name}",
     "more_info": "Plus d'infos"
   },

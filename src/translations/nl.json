@@ -242,7 +242,6 @@
     "section_core_desc": "De basisfunctionaliteit om uw ESP-bord te laten werken.",
     "section_components_desc": "U kunt componenten toevoegen nadat u uw basisconfiguratie hebt voltooid, bijvoorbeeld sensoren.",
     "section_automations_desc": "U kunt automatiseringen instellen zodra de basisconfiguratie en minstens één component zijn toegevoegd.",
-    "editor_title": "Kies componenten voor uw {name}",
     "layout_components_only": "Alleen componenten weergeven",
     "layout_split": "Gesplitste weergave",
     "layout_yaml_only": "Alleen YAML-editor weergeven",
@@ -295,7 +294,6 @@
     "add_automation_unavailable": "Ondersteuning voor automatiseringen is nog niet beschikbaar",
     "add_config_error": "Toevoegen van configuratiesectie mislukt",
     "editor_layout_label": "Editor-indeling",
-    "editor_title_no_components": "Kies componenten voor uw {name}",
     "editor_title_ready": "{name} bewerken",
     "more_info": "Meer info"
   },

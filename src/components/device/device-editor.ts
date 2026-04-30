@@ -15,10 +15,6 @@ import { localizeContext, yamlDiffButtonContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { deviceEditorStyles } from "./device-editor.styles.js";
-import {
-  categorizeSections,
-  parseYamlTopLevelSections,
-} from "../../util/yaml-sections.js";
 import type { HighlightRange } from "../yaml-editor.js";
 
 import "@home-assistant/webawesome/dist/components/button/button.js";
@@ -144,21 +140,12 @@ export class ESPHomeDeviceEditor extends LitElement {
           ? "editor-layout--left"
           : "editor-layout--right";
 
-    const { components } = categorizeSections(parseYamlTopLevelSections(this.yaml));
-    const hasComponents = components.length > 0;
-
-    // Two-state title: a "what to do next" hint only when the device
-    // is empty (no components yet); otherwise just "Editing <name>".
-    // The middle "now add automations" state was confusing — the title
-    // shouldn't read like an instruction once the user is past the
-    // initial setup step.
-    const title = !hasComponents
-      ? this._localize("device.editor_title_no_components", {
-          name: this.deviceTitle,
-        })
-      : this._localize("device.editor_title_ready", {
-          name: this.deviceTitle,
-        });
+    // Single, calm title — guidance for empty / partially-filled
+    // devices belongs in the content pane (the cards / step prompts),
+    // not the editor's chrome.
+    const title = this._localize("device.editor_title_ready", {
+      name: this.deviceTitle,
+    });
 
     return html`
       <section class="card">
