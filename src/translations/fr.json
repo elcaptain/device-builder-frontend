@@ -297,6 +297,7 @@
     "unknown_section": "Section inconnue : {key}",
     "load_config_error": "Échec du chargement de la configuration",
     "yaml_only_section": "Cette section n'a pas d'éditeur structuré — modifiez-la directement dans le volet YAML à droite.",
+    "show_yaml_editor": "Afficher l'éditeur YAML",
     "save_error": "Échec de l'enregistrement",
     "section_saved_toast": "\"{title}\" enregistré",
     "add_component_error": "Échec de l'ajout du composant",

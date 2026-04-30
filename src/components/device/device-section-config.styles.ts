@@ -154,7 +154,8 @@ export const deviceSectionConfigStyles = css`
   /* Stand-in shown when a section has no editable form fields
      (substitutions, globals, packages) — tells the user to edit
      this part via the YAML pane instead of presenting an empty
-     form. */
+     form. Includes a "Show YAML editor" CTA when the pane is
+     hidden by the current layout. */
   .yaml-only-notice {
     display: flex;
     align-items: flex-start;
@@ -174,7 +175,34 @@ export const deviceSectionConfigStyles = css`
     color: var(--esphome-primary);
   }
 
+  .yaml-only-notice-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wa-space-s);
+    flex: 1;
+    min-width: 0;
+  }
+
   .yaml-only-notice p {
     margin: 0;
+  }
+
+  .yaml-only-notice-cta {
+    align-self: flex-start;
+    padding: var(--wa-space-2xs) var(--wa-space-m);
+    border: var(--wa-border-width-s) solid var(--esphome-primary);
+    border-radius: var(--wa-border-radius-m);
+    background: transparent;
+    color: var(--esphome-primary);
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: var(--wa-font-weight-bold);
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+  }
+
+  .yaml-only-notice-cta:hover {
+    background: var(--esphome-primary);
+    color: var(--esphome-on-primary);
   }
 `;

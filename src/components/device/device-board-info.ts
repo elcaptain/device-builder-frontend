@@ -64,6 +64,12 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
   @property({ type: Boolean })
   justCreated = false;
 
+  /** Forwarded from the editor — true when the YAML pane is currently
+   *  rendered in the layout. Section editor uses this to decide
+   *  whether to show its "Show YAML editor" CTA. */
+  @property({ type: Boolean })
+  yamlPaneVisible = true;
+
   @property({ attribute: false })
   selectedSection: string | null = null;
 
@@ -365,6 +371,7 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
               .sectionKey=${this.selectedSection}
               .fromLine=${this.selectedFromLine}
               .board=${this.board}
+              ?yamlPaneVisible=${this.yamlPaneVisible}
             ></esphome-device-section-config>
           `
         : html`

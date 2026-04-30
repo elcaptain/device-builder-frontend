@@ -57,6 +57,19 @@ interface SectionConfigResponse {
   entries: ConfigEntry[];
 }
 
+/**
+ * Top-level keys whose structure doesn't map cleanly to a form
+ * (free-form dicts, lists of typed variables, package imports, ...).
+ * For these we always render the "edit via YAML" notice instead of
+ * trying to coerce the schema into fields. The backend may still
+ * return a schema but the form would be either empty or misleading.
+ */
+const YAML_ONLY_SECTIONS = new Set([
+  "substitutions",
+  "globals",
+  "packages",
+]);
+
 @customElement("esphome-device-section-config")
 export class ESPHomeDeviceSectionConfig extends LitElement {
   @consume({ context: localizeContext, subscribe: true })
@@ -74,6 +87,12 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
   @property({ type: Number })
   fromLine?: number;
+
+  /** Whether the device editor's YAML pane is currently visible.
+   *  When it isn't, the YAML-only notice grows a "Show YAML editor"
+   *  button so the user can reach the editor in one click. */
+  @property({ type: Boolean })
+  yamlPaneVisible = true;
 
   /** Optional board metadata; used by the embedded form for PIN selectors. */
   @property({ attribute: false })
@@ -230,11 +249,15 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
     const showAdvanced = this._showAdvanced;
     const hasAdvanced = anyAdvancedEntry(this._config.entries);
-    // Some sections (substitutions, globals, packages) have no
-    // structured form schema — they're free-form YAML by design.
-    // Show the description + a "edit via YAML" notice instead of an
-    // empty form and a no-op save button.
-    const yamlOnly = this._config.entries.length === 0;
+    // Free-form / structural sections: show the description + a
+    // "edit via YAML" notice instead of attempting to render the form.
+    // We force this for `substitutions`, `globals`, `packages` (where
+    // any schema the backend returns won't match the actual list /
+    // dict shape) and also fall back to it for any section that
+    // happens to come back with no entries at all.
+    const yamlOnly =
+      YAML_ONLY_SECTIONS.has(this.sectionKey) ||
+      this._config.entries.length === 0;
 
     return html`
       <div class="section-header">
@@ -267,7 +290,18 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
       ${yamlOnly
         ? html`<div class="yaml-only-notice" role="note">
             <wa-icon library="mdi" name="information-outline"></wa-icon>
-            <p>${this._localize("device.yaml_only_section")}</p>
+            <div class="yaml-only-notice-body">
+              <p>${this._localize("device.yaml_only_section")}</p>
+              ${this.yamlPaneVisible
+                ? nothing
+                : html`<button
+                    type="button"
+                    class="yaml-only-notice-cta"
+                    @click=${this._onShowYamlEditor}
+                  >
+                    ${this._localize("device.show_yaml_editor")}
+                  </button>`}
+            </div>
           </div>`
         : html`
             <esphome-config-entry-form
@@ -316,6 +350,15 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
             </div>
           `}
     `;
+  }
+
+  private _onShowYamlEditor() {
+    this.dispatchEvent(
+      new CustomEvent("show-yaml-editor", {
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   private _onValueChange(e: CustomEvent<ConfigEntryValueChange>) {

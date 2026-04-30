@@ -250,6 +250,8 @@ export class ESPHomeDeviceEditor extends LitElement {
                 .selectedSection=${this.selectedSection}
                 .selectedFromLine=${this.selectedFromLine}
                 .justCreated=${this.justCreated}
+                ?yamlPaneVisible=${effectiveLayout !== "left"}
+                @show-yaml-editor=${this._onShowYamlEditor}
               ></esphome-device-board-info>
             </div>
             ${effectiveLayout === "both"
@@ -330,6 +332,17 @@ export class ESPHomeDeviceEditor extends LitElement {
         composed: true,
       })
     );
+  }
+
+  /**
+   * Called when a "Show YAML editor" CTA bubbles up from the section
+   * editor (e.g. for substitutions/globals). Switches the layout to
+   * the split view so both panes are visible — keeps the section
+   * editor in context while exposing the YAML pane the user needs.
+   */
+  private _onShowYamlEditor(e: Event) {
+    e.stopPropagation();
+    this._setLayout("both");
   }
 
   private _onYamlChange(e: CustomEvent) {

@@ -297,6 +297,7 @@
     "unknown_section": "Onbekende sectie: {key}",
     "load_config_error": "Laden van sectieconfiguratie mislukt",
     "yaml_only_section": "Deze sectie heeft geen gestructureerde editor — bewerk het rechts in de YAML-editor.",
+    "show_yaml_editor": "YAML-editor tonen",
     "save_error": "Opslaan mislukt",
     "section_saved_toast": "\"{title}\" opgeslagen",
     "add_component_error": "Toevoegen van component mislukt",
