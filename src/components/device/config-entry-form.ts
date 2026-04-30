@@ -563,7 +563,19 @@ export class ESPHomeConfigEntryForm extends LitElement {
       const key = field.getAttribute("data-field-key");
       if (!key) continue;
       const path = key.split(".");
-      const desired = String(this._getAt(path) ?? "");
+      const raw = String(this._getAt(path) ?? "");
+      // wa-select filters its `value` against the exact string of an
+      // option's `value`; case mismatches between YAML and catalog
+      // would silently drop the value. Look up the matching option
+      // case-insensitively and feed wa-select the option's verbatim
+      // value so the lookup succeeds.
+      const options = Array.from(
+        select.querySelectorAll<HTMLElement & { value: string }>("wa-option"),
+      );
+      const matched = raw
+        ? options.find((o) => o.value?.toLowerCase() === raw.toLowerCase())
+        : null;
+      const desired = matched?.value ?? raw;
       const current = Array.isArray(select.value)
         ? select.value[0] ?? ""
         : select.value ?? "";
@@ -760,6 +772,13 @@ export class ESPHomeConfigEntryForm extends LitElement {
         </div>
       `;
     }
+    // Catalog option values are sometimes stored in a different case
+    // than the actual YAML uses (e.g. options return `ESP32C6` but
+    // ESPHome configs use `esp32c6`). Compare case-insensitively so
+    // the matching option still flags as selected — without a match
+    // the dropdown would render blank even though the YAML value is
+    // valid. Worth filing a backend issue to align the catalog cases.
+    const valueLower = value.toLowerCase();
     return html`
       <div class="field" data-field-key=${path.join(".")}>
         ${this._renderLabel(entry)}
@@ -771,7 +790,9 @@ export class ESPHomeConfigEntryForm extends LitElement {
         >
           ${(entry.options ?? []).map(
             (opt) =>
-              html`<wa-option value=${opt.value} ?selected=${opt.value === value}
+              html`<wa-option
+                value=${opt.value}
+                ?selected=${opt.value.toLowerCase() === valueLower}
                 >${opt.label}</wa-option
               >`
           )}
