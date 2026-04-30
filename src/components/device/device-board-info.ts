@@ -20,6 +20,7 @@ import { espHomeStyles } from "../../styles/shared.js";
 // Automation add-flow is gated on a backend that doesn't yet exist;
 // the navigator still shows the section but disables its action
 // button. See `feature-flags.ts` and the README "Status" section.
+import { renderMarkdown } from "../../util/markdown.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import type { ESPHomeAddAutomationDialog } from "./add-automation-dialog.js";
 import type { ESPHomeAddComponentDialog } from "./add-component-dialog.js";
@@ -355,7 +356,9 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
                     <wa-icon library="mdi" name="open-in-new"></wa-icon>
                   </a>
                 </div>
-                <p class="board-description">${board.description}</p>
+                <p class="board-description">
+                  ${renderMarkdown(board.description)}
+                </p>
               </div>
               <div class="board-image">
                 <img

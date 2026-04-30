@@ -16,6 +16,7 @@ import {
   validateEntries,
   type ValidationError,
 } from "../../util/config-validation.js";
+import { renderMarkdown } from "../../util/markdown.js";
 import { setIn } from "../../util/nested-values.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import {
@@ -316,7 +317,7 @@ export class ESPHomeAddComponentForm extends LitElement {
 
     return html`
       <div class="form">
-        <p class="form-desc">${this.component.description}</p>
+        <p class="form-desc">${renderMarkdown(this.component.description)}</p>
         ${missingDeps.length > 0
           ? this._renderMissingDeps(missingDeps)
           : nothing}

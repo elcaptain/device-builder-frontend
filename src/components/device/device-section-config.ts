@@ -21,6 +21,7 @@ import {
   validateEntries,
   type ValidationError,
 } from "../../util/config-validation.js";
+import { renderMarkdown } from "../../util/markdown.js";
 import { setIn } from "../../util/nested-values.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import {
@@ -274,7 +275,9 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
                 </a>`
               : nothing}
           </div>
-          <p class="section-desc">${this._config.description}</p>
+          <p class="section-desc">
+            ${renderMarkdown(this._config.description)}
+          </p>
         </div>
         <div class="section-image">
           <img

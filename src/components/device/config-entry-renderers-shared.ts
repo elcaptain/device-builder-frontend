@@ -10,6 +10,7 @@ import { html, nothing } from "lit";
 import type { BoardCatalogEntry, ConfigEntry } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import type { ValidationError } from "../../util/config-validation.js";
+import { renderMarkdown } from "../../util/markdown.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
 registerMdiIcons({
@@ -100,7 +101,9 @@ export function renderLabel(
       ${includeHelpLink && entry.help_link ? renderHelpLink(entry, ctx) : nothing}
     </label>
     ${entry.description
-      ? html`<p class="field-description">${entry.description}</p>`
+      ? html`<p class="field-description">
+          ${renderMarkdown(entry.description)}
+        </p>`
       : nothing}
   `;
 }

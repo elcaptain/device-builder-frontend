@@ -52,6 +52,29 @@ export const espHomeStyles = css`
   wa-button[variant="light"]::part(base):hover {
     background-color: color-mix(in srgb, var(--esphome-primary-light), black 5%);
   }
+
+  /* ─── Inline markdown rendering ─── */
+  /* Used by util/markdown.ts for links and inline code inside any
+     description (config field, board, component, section). */
+  .md-link {
+    color: var(--esphome-primary);
+    text-decoration: underline;
+  }
+
+  .md-link:hover {
+    text-decoration: none;
+  }
+
+  .md-code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.92em;
+    padding: 0 var(--wa-space-2xs);
+    border-radius: var(--wa-border-radius-s);
+    background: var(--wa-color-surface-lowered);
+    color: var(--wa-color-text-normal);
+    /* Keep long path-like code from breaking the line awkwardly. */
+    word-break: break-word;
+  }
 `;
 
 /** Common layout helpers. */

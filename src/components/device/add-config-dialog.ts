@@ -7,6 +7,7 @@ import type { ConfigEntry } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { apiContext, localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import { renderMarkdown } from "../../util/markdown.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { CORE_KEYS } from "../../util/yaml-sections.js";
 
@@ -475,7 +476,7 @@ export class ESPHomeAddConfigDialog extends LitElement {
             <wa-icon library="mdi" name="cog"></wa-icon>
           </div>
           <div class="form-header-text">
-            <p class="form-desc">${section.description}</p>
+            <p class="form-desc">${renderMarkdown(section.description)}</p>
             ${section.docs_url
               ? html`<a
                   class="form-docs-link"

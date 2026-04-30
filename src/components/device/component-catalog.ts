@@ -10,6 +10,7 @@ import { localizeContext, apiContext } from "../../context/index.js";
 import { inputStyles } from "../../styles/inputs.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { debounce } from "../../util/debounce.js";
+import { renderMarkdown } from "../../util/markdown.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
 import "@home-assistant/webawesome/dist/components/badge/badge.js";
@@ -523,7 +524,7 @@ export class ESPHomeComponentCatalog extends LitElement {
           </button>
         </div>
         <p class="component-description ${expanded ? "" : "component-description--clamp"}">
-          ${component.description}
+          ${renderMarkdown(component.description)}
         </p>
         <div class="card-footer">
           <a class="more-info" href=${component.docs_url} target="_blank" rel="noreferrer">

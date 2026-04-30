@@ -15,6 +15,7 @@ import type { LocalizeFunc } from "../../common/localize.js";
 import { apiContext, localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { debounce } from "../../util/debounce.js";
+import { renderMarkdown } from "../../util/markdown.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { detectChip, disconnect, isWebSerialSupported } from "../../util/web-serial.js";
 
@@ -472,7 +473,7 @@ export class ESPHomeWizardStepBoard extends LitElement {
         <img class="featured-image" src=${imageUrl} alt=${board.name} />
         <div class="featured-body">
           <h3 class="featured-title">${board.name}</h3>
-          <p class="featured-desc">${board.description}</p>
+          <p class="featured-desc">${renderMarkdown(board.description)}</p>
           <div class="tags">
             <wa-badge variant="neutral" pill style="font-size: var(--wa-font-size-s);"
               >${this._localizeTag(
@@ -529,7 +530,7 @@ export class ESPHomeWizardStepBoard extends LitElement {
         </div>
 
         <p class="board-description ${expanded ? "" : "board-description--clamp"}">
-          ${board.description}
+          ${renderMarkdown(board.description)}
         </p>
 
         <div class="tags">
