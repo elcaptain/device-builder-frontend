@@ -24,6 +24,7 @@ import {
 } from "@mdi/js";
 import { css, html, LitElement, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import { live } from "lit/directives/live.js";
 import type { BoardCatalogEntry, BoardPin, ConfigEntry } from "../../api/types.js";
 import { ConfigEntryType, PinFeature, PinMode } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
@@ -708,6 +709,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
         ${this._renderLabel(entry)}
         <wa-select
           class=${invalid ? "invalid" : ""}
+          .value=${live(value)}
           ?disabled=${this.disabled}
           @change=${(e: Event) =>
             this._emitChange(path, (e.target as HTMLSelectElement).value)}
