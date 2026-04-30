@@ -22,6 +22,7 @@ import type { ESPHomeAddConfigDialog } from "./add-config-dialog.js";
 import type { ESPHomeDeviceSectionConfig } from "./device-section-config.js";
 
 import "@home-assistant/webawesome/dist/components/badge/badge.js";
+import "@home-assistant/webawesome/dist/components/callout/callout.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "./add-automation-dialog.js";
 import "./add-component-dialog.js";
@@ -98,7 +99,7 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
     // dialog deep-linked to the requested domain.
     this.addEventListener(
       "request-add-component",
-      this._onRequestAddComponent as EventListener,
+      this._onRequestAddComponent as EventListener
     );
   }
 
@@ -107,7 +108,7 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
     if (this._reloadTimer) clearTimeout(this._reloadTimer);
     this.removeEventListener(
       "request-add-component",
-      this._onRequestAddComponent as EventListener,
+      this._onRequestAddComponent as EventListener
     );
   }
 
@@ -202,35 +203,11 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
       /* ─── Just-created welcome banner ─── */
 
       .welcome-banner {
-        display: flex;
-        align-items: flex-start;
-        gap: var(--wa-space-m);
-        padding: var(--wa-space-m);
         margin-top: var(--wa-space-m);
-        background: color-mix(
-          in srgb,
-          var(--esphome-primary),
-          transparent 92%
-        );
-        border-left: 4px solid var(--esphome-primary);
-        border-radius: var(--wa-border-radius-m);
-        position: relative;
-      }
-
-      .welcome-banner-icon {
-        flex-shrink: 0;
-        font-size: 28px;
-        color: var(--esphome-primary);
-        line-height: 1;
-      }
-
-      .welcome-banner-body {
-        flex: 1;
-        min-width: 0;
       }
 
       .welcome-banner-title {
-        margin: 0 0 var(--wa-space-2xs);
+        margin: var(--wa-space-xs) 0 var(--wa-space-2xs);
         font-size: var(--wa-font-size-m);
         font-weight: var(--wa-font-weight-bold);
         color: var(--wa-color-text-normal);
@@ -244,22 +221,22 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
       }
 
       .welcome-banner-close {
-        flex-shrink: 0;
+        position: absolute;
+        top: var(--wa-space-2xs);
+        right: var(--wa-space-2xs);
         background: transparent;
         border: none;
         padding: 4px;
         cursor: pointer;
         color: var(--wa-color-text-quiet);
         border-radius: var(--wa-border-radius-s);
-        transition: background 0.12s, color 0.12s;
+        transition:
+          background 0.12s,
+          color 0.12s;
       }
 
       .welcome-banner-close:hover {
-        background: color-mix(
-          in srgb,
-          var(--esphome-primary),
-          transparent 80%
-        );
+        background: color-mix(in srgb, var(--esphome-primary), transparent 80%);
         color: var(--wa-color-text-normal);
       }
 
@@ -355,7 +332,7 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
                 <h3 class="board-name">${this.board.name}</h3>
                 <div class="board-tags">
                   ${this.board.tags.map(
-                    (tag) => html`<wa-badge variant="brand" pill>${tag}</wa-badge>`,
+                    (tag) => html`<wa-badge variant="brand" pill>${tag}</wa-badge>`
                   )}
                   <a
                     class="board-info-link"
@@ -381,7 +358,6 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
             <div class="board-separator"></div>
           `
         : nothing}
-
       ${this.selectedSection
         ? html`
             <esphome-device-section-config
@@ -480,7 +456,7 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
         detail: { section },
         bubbles: true,
         composed: true,
-      }),
+      })
     );
   }
 
@@ -493,22 +469,14 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
   private _renderWelcomeBanner() {
     if (!this.board) return nothing;
     return html`
-      <div class="welcome-banner" role="status">
-        <wa-icon
-          class="welcome-banner-icon"
-          library="mdi"
-          name="party-popper"
-        ></wa-icon>
-        <div class="welcome-banner-body">
-          <p class="welcome-banner-title">
-            ${this._localize("device.welcome_banner_title", {
-              name: this.board.name,
-            })}
-          </p>
-          <p class="welcome-banner-text">
-            ${this._localize("device.welcome_banner_body")}
-          </p>
-        </div>
+      <wa-callout class="welcome-banner" variant="brand" role="status">
+        <wa-icon slot="icon" library="mdi" name="party-popper"></wa-icon>
+        <p class="welcome-banner-title">
+          ${this._localize("device.welcome_banner_title", {
+            name: this.board.name,
+          })}
+        </p>
+        <p class="welcome-banner-text">${this._localize("device.welcome_banner_body")}</p>
         <button
           type="button"
           class="welcome-banner-close"
@@ -517,7 +485,7 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
         >
           <wa-icon library="mdi" name="close"></wa-icon>
         </button>
-      </div>
+      </wa-callout>
     `;
   }
 
@@ -526,7 +494,7 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
       new CustomEvent("just-created-dismiss", {
         bubbles: true,
         composed: true,
-      }),
+      })
     );
   }
 
