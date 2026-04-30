@@ -8,6 +8,7 @@ import type { LocalizeFunc } from "../../common/localize.js";
 import { apiContext, localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import { CORE_KEYS } from "../../util/yaml-sections.js";
 
 // Types for config section catalog — not yet available in the WebSocket backend
 interface ConfigSection {
@@ -386,21 +387,32 @@ export class ESPHomeAddConfigDialog extends LitElement {
   private async _loadCatalog() {
     this._loading = true;
     try {
-      // Fetch core infrastructure components from the component catalog
-      const response = await this._api.getComponents({
-        category: "core",
-        platform: this.platform || undefined,
-        limit: 100,
-      });
-      this._sections = response.components.map((c) => ({
-        id: c.id,
-        name: c.name,
-        description: c.description,
-        docs_url: c.docs_url,
-        icon: "",
-        yaml_template: `${c.id}:\n`,
-        fields: c.config_entries,
-      }));
+      // Filtering by `category: "core"` only returns the 9 components
+      // the backend tags with that category (api, captive_portal,
+      // esphome, logger, mqtt, network, safe_mode, web_server, wifi),
+      // but the frontend's notion of "core" is broader (ota, time,
+      // mdns, substitutions, packages, ...). Fetch each id from
+      // CORE_KEYS instead so the dialog matches the navigator's
+      // "Core" group exactly. Missing ids (the catalog hasn't grown
+      // a definition yet) come back as null and drop out.
+      const platform = this.platform || undefined;
+      const ids = [...CORE_KEYS];
+      const fetched = await Promise.all(
+        ids.map((id) =>
+          this._api.getComponent(id, platform).catch(() => null),
+        ),
+      );
+      this._sections = fetched
+        .filter((c): c is NonNullable<typeof c> => c != null)
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          description: c.description,
+          docs_url: c.docs_url,
+          icon: "",
+          yaml_template: `${c.id}:\n`,
+          fields: c.config_entries,
+        }));
     } catch (e) {
       console.error("Failed to load config catalog:", e);
     } finally {

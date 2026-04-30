@@ -5,10 +5,34 @@
  * barrel.
  */
 
+import { mdiKeyVariant } from "@mdi/js";
 import { html, nothing } from "lit";
 import type { BoardCatalogEntry, ConfigEntry } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import type { ValidationError } from "../../util/config-validation.js";
+import { registerMdiIcons } from "../../util/register-icons.js";
+
+registerMdiIcons({
+  "key-variant": mdiKeyVariant,
+});
+
+/** ESPHome stores secret references as `!secret <key>` literal strings
+ *  in the YAML — match that shape so any string-shaped field can flag
+ *  values that point at the secrets store. */
+const SECRET_REF_RE = /^!secret\s+(\S+)\s*$/;
+
+/** Render a small "Using stored secret: <name>" hint when the value
+ *  is a `!secret <key>` reference. Returns `nothing` otherwise so
+ *  callers can drop it inline without conditional wrapping. */
+export function renderSecretHint(value: string, ctx: RenderCtx) {
+  const match = value.match(SECRET_REF_RE);
+  if (!match) return nothing;
+  return html`<span class="secret-note">
+    <wa-icon library="mdi" name="key-variant"></wa-icon>
+    <span>${ctx.localize("device.value_from_secret")}</span>
+    <code>${match[1]}</code>
+  </span>`;
+}
 
 export interface RenderCtx {
   localize: LocalizeFunc;
@@ -98,6 +122,26 @@ export function renderStringField(
 ) {
   const value = String(ctx.getAt(path) ?? "");
   const invalid = ctx.errorAt(path) !== null;
+  const placeholder = String(entry.default_value ?? "");
+  // Password inputs render the dedicated component so they get a
+  // reveal/hide toggle. Keeping the show-state inside the component
+  // means the form's re-renders don't blow it away.
+  if (inputType === "password") {
+    return html`
+      <div class="field" data-field-key=${path.join(".")}>
+        ${renderLabel(entry, ctx)}
+        <esphome-password-input
+          .value=${value}
+          .invalid=${invalid}
+          .disabled=${ctx.disabled}
+          .placeholder=${placeholder}
+          @input=${(e: CustomEvent<{ value: string }>) =>
+            ctx.emitChange(path, e.detail.value)}
+        ></esphome-password-input>
+        ${renderSecretHint(value, ctx)} ${renderFieldError(path, ctx)}
+      </div>
+    `;
+  }
   return html`
     <div class="field" data-field-key=${path.join(".")}>
       ${renderLabel(entry, ctx)}
@@ -106,10 +150,10 @@ export function renderStringField(
         class=${invalid ? "invalid" : ""}
         .value=${value}
         ?disabled=${ctx.disabled}
-        placeholder=${String(entry.default_value ?? "")}
+        placeholder=${placeholder}
         @input=${(e: Event) => ctx.emitChange(path, (e.target as HTMLInputElement).value)}
       />
-      ${renderFieldError(path, ctx)}
+      ${renderSecretHint(value, ctx)} ${renderFieldError(path, ctx)}
     </div>
   `;
 }

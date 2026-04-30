@@ -14,7 +14,12 @@ import { customElement, property, query, state } from "lit/decorators.js";
 import type { BoardCatalogEntry } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
+import { AUTOMATIONS_ENABLED } from "../../feature-flags.js";
 import { espHomeStyles } from "../../styles/shared.js";
+
+// Automation add-flow is gated on a backend that doesn't yet exist;
+// the navigator still shows the section but disables its action
+// button. See `feature-flags.ts` and the README "Status" section.
 import { registerMdiIcons } from "../../util/register-icons.js";
 import type { ESPHomeAddAutomationDialog } from "./add-automation-dialog.js";
 import type { ESPHomeAddComponentDialog } from "./add-component-dialog.js";
@@ -411,10 +416,12 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
         .board=${board}
         .yaml=${this.yaml}
       ></esphome-add-component-dialog>
-      <esphome-add-automation-dialog
-        .boardName=${board?.name ?? ""}
-        .configuration=${this.configuration}
-      ></esphome-add-automation-dialog>
+      ${AUTOMATIONS_ENABLED
+        ? html`<esphome-add-automation-dialog
+            .boardName=${board?.name ?? ""}
+            .configuration=${this.configuration}
+          ></esphome-add-automation-dialog>`
+        : nothing}
     `;
   }
 

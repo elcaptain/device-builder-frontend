@@ -254,6 +254,7 @@ export class ESPHomeAddComponentDialog extends LitElement {
         <esphome-component-catalog
           ?hidden=${isForm}
           .platform=${this.platform}
+          .boardId=${this.board?.id ?? ""}
         ></esphome-component-catalog>
         ${isForm
           ? html`<esphome-add-component-form

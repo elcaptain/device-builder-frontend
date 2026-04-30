@@ -13,6 +13,7 @@ import { customElement, property, query, state } from "lit/decorators.js";
 import type { BoardCatalogEntry } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
+import { AUTOMATIONS_ENABLED } from "../../feature-flags.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import {
@@ -251,6 +252,21 @@ export class ESPHomeDeviceNavigator extends LitElement {
         opacity: 0.9;
       }
 
+      /* Disabled action: greyed out, no hover, no pointer. The wrapper
+         drops its click handler so the underlying dialog is never
+         opened — this is purely visual confirmation. */
+      .action-item--disabled,
+      .action-item--disabled:hover {
+        background: var(--wa-color-surface-lowered);
+        color: var(--wa-color-text-quiet);
+        cursor: not-allowed;
+        opacity: 0.65;
+      }
+
+      .action-item--disabled wa-icon {
+        color: var(--wa-color-text-quiet);
+      }
+
       .action-item p {
         margin: var(--wa-space-xs) 0;
         font-size: var(--wa-font-size-s);
@@ -328,12 +344,26 @@ export class ESPHomeDeviceNavigator extends LitElement {
       (a, b) => a.fromLine - b.fromLine
     );
 
-    const sections = [
+    interface NavAction {
+      label: string;
+      icon: string;
+      onClick: () => void;
+      disabled?: boolean;
+      disabledReason?: string;
+    }
+    interface NavSection {
+      label: string;
+      desc: string;
+      items: YamlSection[];
+      category: "core" | "component" | "automation";
+      action: NavAction;
+    }
+    const sections: NavSection[] = [
       {
         label: this._localize("device.section_core"),
         desc: this._localize("device.section_core_desc"),
         items: core,
-        category: "core" as const,
+        category: "core",
         action: {
           label: this._localize("device.add_config"),
           icon: "cog",
@@ -344,7 +374,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
         label: this._localize("device.section_components"),
         desc: this._localize("device.section_components_desc"),
         items: components,
-        category: "component" as const,
+        category: "component",
         action: {
           label: this._localize("device.add_component"),
           icon: "memory",
@@ -355,11 +385,17 @@ export class ESPHomeDeviceNavigator extends LitElement {
         label: this._localize("device.section_automations"),
         desc: this._localize("device.section_automations_desc"),
         items: automations,
-        category: "automation" as const,
+        category: "automation",
+        // Add-automation is gated on a backend that doesn't yet exist
+        // — see `feature-flags.ts` and the README "Status" section.
+        // The list still renders existing automations parsed from
+        // YAML; only the action button is disabled.
         action: {
           label: this._localize("device.add_automation"),
           icon: "arrow-decision-outline",
           onClick: () => this._addAutomationDialog.open(),
+          disabled: !AUTOMATIONS_ENABLED,
+          disabledReason: this._localize("device.add_automation_unavailable"),
         },
       },
     ];
@@ -378,10 +414,12 @@ export class ESPHomeDeviceNavigator extends LitElement {
           .board=${this.board}
           .yaml=${this.yaml}
         ></esphome-add-component-dialog>
-        <esphome-add-automation-dialog
-          .boardName=${this.boardName}
-          .configuration=${this.configuration}
-        ></esphome-add-automation-dialog>
+        ${AUTOMATIONS_ENABLED
+          ? html`<esphome-add-automation-dialog
+              .boardName=${this.boardName}
+              .configuration=${this.configuration}
+            ></esphome-add-automation-dialog>`
+          : nothing}
         <header class="card-header">
           <h2 class="card-title">${this._localize("device.navigator_title")}</h2>
         </header>
@@ -435,8 +473,21 @@ export class ESPHomeDeviceNavigator extends LitElement {
                           </div>
                         `
                       : nothing}
-                    <div class="nav-items" @click=${() => action.onClick()}>
-                      <div class="action-item">
+                    <div
+                      class="nav-items"
+                      @click=${action.disabled
+                        ? undefined
+                        : () => action.onClick()}
+                    >
+                      <div
+                        class="action-item ${action.disabled
+                          ? "action-item--disabled"
+                          : ""}"
+                        title=${action.disabled
+                          ? action.disabledReason ?? ""
+                          : ""}
+                        aria-disabled=${action.disabled ? "true" : "false"}
+                      >
                         <div>
                           <wa-icon library="mdi" name=${action.icon}></wa-icon>
                           <p>${action.label}</p>

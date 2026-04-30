@@ -44,6 +44,32 @@ export const configEntryFormStyles = css`
     margin-top: 8px;
   }
 
+  /* Hint shown below a string/password input when the value is a
+     !secret reference — clarifies that the field points into
+     secrets.yaml instead of holding a literal value. */
+  .secret-note {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wa-space-2xs);
+    margin-top: var(--wa-space-2xs);
+    font-size: var(--wa-font-size-2xs);
+    color: var(--wa-color-text-quiet);
+  }
+
+  .secret-note wa-icon {
+    font-size: 14px;
+    color: var(--esphome-primary);
+  }
+
+  .secret-note code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: var(--wa-font-size-2xs);
+    padding: 1px 4px;
+    border-radius: var(--wa-border-radius-s);
+    background: var(--wa-color-surface-lowered);
+    color: var(--wa-color-text-normal);
+  }
+
   .help-button {
     display: inline-flex;
     align-items: center;

@@ -367,11 +367,7 @@ export class ESPHomeAPI {
 
   /** Rename a device via the ESPHome CLI (renames YAML file + hostname). */
   async renameDevice(configuration: string, newName: string): Promise<void> {
-    await this.sendCommand(
-      "devices/rename",
-      { configuration, new_name: newName },
-      60000,
-    );
+    await this.sendCommand("devices/rename", { configuration, new_name: newName }, 60000);
   }
 
   /** Delete a device and all associated files. */
@@ -381,7 +377,9 @@ export class ESPHomeAPI {
 
   /** Delete multiple devices at once. Returns per-device results. */
   async deleteBulkDevices(configurations: string[]): Promise<BulkDeleteResult[]> {
-    return this.sendCommand<BulkDeleteResult[]>("devices/delete_bulk", { configurations });
+    return this.sendCommand<BulkDeleteResult[]>("devices/delete_bulk", {
+      configurations,
+    });
   }
 
   /** Get device YAML config. */
@@ -474,8 +472,14 @@ export class ESPHomeAPI {
   }
 
   /** Queue install for multiple devices. */
-  async firmwareInstallBulk(configurations: string[], port = "OTA"): Promise<FirmwareJob[]> {
-    return this.sendCommand<FirmwareJob[]>("firmware/install_bulk", { configurations, port });
+  async firmwareInstallBulk(
+    configurations: string[],
+    port = "OTA"
+  ): Promise<FirmwareJob[]> {
+    return this.sendCommand<FirmwareJob[]>("firmware/install_bulk", {
+      configurations,
+      port,
+    });
   }
 
   /** List jobs, optionally filtered. */
@@ -510,7 +514,7 @@ export class ESPHomeAPI {
   async firmwareDownload(
     configuration: string,
     file: string,
-    compressed = false,
+    compressed = false
   ): Promise<FirmwareDownload> {
     return this.sendCommand<FirmwareDownload>("firmware/download", {
       configuration,
@@ -550,7 +554,7 @@ export class ESPHomeAPI {
    */
   async getComponent(
     componentId: string,
-    platform?: string,
+    platform?: string
   ): Promise<ComponentCatalogEntry | null> {
     return this.sendCommand("components/get_component", {
       component_id: componentId,
@@ -568,6 +572,7 @@ export class ESPHomeAPI {
     query?: string;
     category?: string;
     platform?: string;
+    board_id?: string;
     offset?: number;
     limit?: number;
   }): Promise<PagedComponentsResponse> {
@@ -623,12 +628,12 @@ export class ESPHomeAPI {
    */
   async validateYaml(
     configuration: string,
-    content: string,
+    content: string
   ): Promise<EditorValidateResponse> {
     return this.sendCommand<EditorValidateResponse>(
       "editor/validate_yaml",
       { configuration, content },
-      30000,
+      30000
     );
   }
 }

@@ -14,8 +14,12 @@ export interface CategorizedSections {
   automations: YamlSection[];
 }
 
-// ESPHome system/platform keys → Core configuration
-const CORE_KEYS = new Set([
+// ESPHome system/platform keys → Core configuration. Exported so the
+// add-config dialog can fetch exactly this set from the catalog —
+// the backend's `category: "core"` is narrower than what the
+// frontend treats as core, so filtering by category alone misses
+// half the list (ota, time, mdns, ...).
+export const CORE_KEYS = new Set([
   "esphome", "esp32", "esp8266", "rp2040", "bk72xx", "rtl87xx",
   "logger", "api", "ota", "wifi", "ethernet", "mqtt", "mdns",
   "network", "web_server", "captive_portal", "improv_serial",

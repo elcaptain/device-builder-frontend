@@ -82,18 +82,15 @@ export class ESPHomePageDevice extends LitElement {
     return this._devices.find((d) => d.configuration === this.id) ?? null;
   }
 
+  /** Catalog entry for the current device's board. Loaded lazily when
+   *  the device's `board_id` resolves — see `_loadBoard`. */
   @state()
-  private _boards: BoardCatalogEntry[] = [];
+  private _board: BoardCatalogEntry | null = null;
 
-  private get _board(): BoardCatalogEntry | null {
-    // Prefer explicit board_id from metadata
-    const boardId = this._device?.board_id;
-    if (boardId) return this._boards.find((b) => b.id === boardId) ?? null;
-    // Fallback: extract `board:` value from the YAML and match by hardware board ID
-    const match = this._yaml.match(/^\s{2}board:\s*(\S+)/m);
-    if (match) return this._boards.find((b) => b.esphome.board === match[1]) ?? null;
-    return null;
-  }
+  /** Last `board_id` we kicked off a fetch for. Used to dedupe so a
+   *  re-render doesn't refetch the same board, and to detect board
+   *  changes (rename / wizard re-run) and refetch when needed. */
+  private _loadedBoardId: string | null = null;
 
   @state()
   private _highlightRange: HighlightRange | null = null;
@@ -209,7 +206,6 @@ export class ESPHomePageDevice extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
-    this._loadBoardCatalog();
     this._loadPreferences();
     setLeaveGuard(this._confirmLeave);
     window.addEventListener("beforeunload", this._onBeforeUnload);
@@ -230,7 +226,23 @@ export class ESPHomePageDevice extends LitElement {
       // call to consumeJustCreated atomically reads + clears the flag,
       // so a refresh or back-nav won't re-show the banner.
       this._justCreated = consumeJustCreated(this.id);
+      // New device id ⇒ different board; drop the cached one so the
+      // next fetch can repopulate.
+      this._loadedBoardId = null;
+      this._board = null;
       this._loadYaml();
+    }
+    // Devices context arrives async after connect; kick off the board
+    // fetch as soon as we have a `board_id` (and re-fetch only when it
+    // actually changes).
+    const boardId = this._device?.board_id ?? null;
+    if (boardId && boardId !== this._loadedBoardId) {
+      this._loadedBoardId = boardId;
+      this._loadBoard(boardId);
+    } else if (!boardId && this._loadedBoardId !== null && this._board) {
+      // Device dropped its board_id (rare — wizard re-run cleared it).
+      this._loadedBoardId = null;
+      this._board = null;
     }
   }
 
@@ -254,13 +266,22 @@ export class ESPHomePageDevice extends LitElement {
     }
   }
 
-  private async _loadBoardCatalog() {
+  private async _loadBoard(boardId: string) {
     try {
-      // Load a reasonable set of boards for matching the current device's board
-      const response = await this._api.getBoards({ limit: 200 });
-      this._boards = response.boards;
+      // Single-board lookup keyed off the BE-resolved `board_id` —
+      // avoids paging the full catalog when we only ever consume one
+      // board on the device editor. The BE handles deriving board_id
+      // from YAML on its side (see `_resolve_board_id`), so we don't
+      // need a YAML-regex fallback here.
+      const board = await this._api.getBoard(boardId);
+      // Guard against late responses overwriting a newer fetch — if
+      // the user navigated to another device while this was in flight,
+      // `_loadedBoardId` will already point at the new id.
+      if (this._loadedBoardId === boardId) {
+        this._board = board;
+      }
     } catch (e) {
-      console.error("Failed to load board catalog:", e);
+      console.error("Failed to load board:", e);
     }
   }
 
