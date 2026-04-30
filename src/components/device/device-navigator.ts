@@ -333,6 +333,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
         label: this._localize("device.section_core"),
         desc: this._localize("device.section_core_desc"),
         items: core,
+        category: "core" as const,
         action: {
           label: this._localize("device.add_config"),
           icon: "cog",
@@ -343,6 +344,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
         label: this._localize("device.section_components"),
         desc: this._localize("device.section_components_desc"),
         items: components,
+        category: "component" as const,
         action: {
           label: this._localize("device.add_component"),
           icon: "memory",
@@ -353,6 +355,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
         label: this._localize("device.section_automations"),
         desc: this._localize("device.section_automations_desc"),
         items: automations,
+        category: "automation" as const,
         action: {
           label: this._localize("device.add_automation"),
           icon: "arrow-decision-outline",
@@ -385,7 +388,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
         <div class="card-body">
           <p class="italic">${this._localize("device.navigator_desc")}</p>
           <div class="separator"></div>
-          ${sections.map(({ label, desc, items, action }, i) => {
+          ${sections.map(({ label, desc, items, category, action }, i) => {
             const open = this.openSections.has(i);
             return html`
               <div class="nav-content" @click=${() => this._toggleSection(i)}>
@@ -404,7 +407,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
                           <div class="nav-items">
                             ${items.map((item) => {
                               const { primary, secondary } =
-                                this._navItemLabels(item);
+                                this._navItemLabels(item, category);
                               return html`
                                 <div
                                   class="nav-item ${this._selectedLine === item.fromLine
@@ -462,20 +465,31 @@ export class ESPHomeDeviceNavigator extends LitElement {
   }
 
   /**
-   * Decide what to show on the two lines of a nav item:
-   *  - Primary: the most descriptive label we have — the user-set
-   *    `name`, falling back through `id`, `platform`, `key`.
-   *  - Secondary: `<parent>.<platform>` (e.g. `switch.gpio`,
-   *    `sensor.template`) so the user can tell at a glance what kind
-   *    of component the entry is, regardless of how it was named. We
-   *    deliberately don't fetch the catalog's friendly name here —
-   *    keeping the rendering purely YAML-driven means no per-item API
-   *    round-trips.
+   * Decide what to show on the two lines of a nav item.
+   *
+   * Core sections (`wifi`, `api`, `ota`, ...) are identified by their
+   * domain key — even when the user gives them an `id:` or `name:`,
+   * we keep the bare key as the primary label so the navigator stays
+   * predictable ("there's the wifi section"). The id is so synonymous
+   * with the section that surfacing it on top would just confuse.
+   *
+   * For components and automations the user-set `name`/`id` is more
+   * meaningful than the parent key, so we prefer those, with the
+   * secondary line showing `<parent>.<platform>` for context.
    */
-  private _navItemLabels(item: YamlSection): {
-    primary: string;
-    secondary?: string;
-  } {
+  private _navItemLabels(
+    item: YamlSection,
+    category: "core" | "component" | "automation",
+  ): { primary: string; secondary?: string } {
+    if (category === "core") {
+      // Use the section's domain as the primary; surface a custom id
+      // (when present) as a quiet hint on the secondary line.
+      const primary = item.key;
+      const secondary =
+        item.id && item.id !== primary ? item.id : undefined;
+      return { primary, secondary };
+    }
+
     const primary = item.name || item.id || item.platform || item.key;
 
     let secondary: string | undefined;
