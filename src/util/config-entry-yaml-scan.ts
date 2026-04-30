@@ -25,7 +25,11 @@ export function findUsedPins(
   let currentDomain = "";
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const topMatch = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*):/);
+    // Allow `.` in the key — see the rationale in
+    // `parseYamlTopLevelSections` (yaml-sections.ts). A line like
+    // `time.homeassistant:` should be treated as its own top-level
+    // section even though ESPHome wouldn't normally accept it.
+    const topMatch = line.match(/^([a-zA-Z_][a-zA-Z0-9_.]*):/);
     if (topMatch) {
       currentDomain = topMatch[1];
       continue;
@@ -91,7 +95,11 @@ export function findReferencedComponents(
   };
 
   for (const line of lines) {
-    const topMatch = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*):/);
+    // Allow `.` in the key — see the rationale in
+    // `parseYamlTopLevelSections` (yaml-sections.ts). A line like
+    // `time.homeassistant:` should be treated as its own top-level
+    // section even though ESPHome wouldn't normally accept it.
+    const topMatch = line.match(/^([a-zA-Z_][a-zA-Z0-9_.]*):/);
     if (topMatch) {
       flush();
       inSection = topMatch[1] === domain;

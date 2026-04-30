@@ -56,7 +56,11 @@ export function serializeYamlValues(
 export function parseTopLevelComponents(yaml: string): Set<string> {
   const present = new Set<string>();
   for (const line of yaml.split("\n")) {
-    const match = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/);
+    // Accept `.` in the key so we recognize legacy / mis-written
+    // platform variants (`time.homeassistant:`) — the catalog filter
+    // wants to hide both forms when working out what's already
+    // configured.
+    const match = line.match(/^([a-zA-Z_][a-zA-Z0-9_.]*):\s*(.*)$/);
     if (match) present.add(match[1]);
   }
   return present;
@@ -87,9 +91,19 @@ export function parseConfiguredPlatforms(yaml: string): Set<string> {
   const lines = yaml.split("\n");
   let currentDomain: string | null = null;
   for (const line of lines) {
-    const top = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*):\s*(?:#.*)?$/);
+    // Two shapes count as "this platform is configured":
+    //   1. The proper umbrella form: `time:` followed by `- platform:`
+    //   2. The legacy flat form: `time.homeassistant:` written
+    //      directly as a top-level key (a bug we've since fixed in
+    //      the backend, but old YAML may still have these). When the
+    //      key itself contains a dot we treat it as already-claiming
+    //      that <domain>.<platform>.
+    const top = line.match(/^([a-zA-Z_][a-zA-Z0-9_.]*):\s*(?:#.*)?$/);
     if (top) {
       currentDomain = top[1];
+      if (currentDomain.includes(".")) {
+        out.add(currentDomain);
+      }
       continue;
     }
     if (!currentDomain) continue;
