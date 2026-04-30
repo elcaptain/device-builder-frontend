@@ -82,8 +82,7 @@ export const inputStyles = css`
   wa-select:focus-within::part(combobox) {
     border-color: var(--esphome-primary);
     outline: none;
-    box-shadow: 0 0 0 3px
-      color-mix(in srgb, var(--esphome-primary), transparent 80%);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--esphome-primary), transparent 80%);
   }
 
   wa-select[disabled]::part(combobox) {
@@ -96,7 +95,26 @@ export const inputStyles = css`
   }
 
   wa-select.invalid:focus-within::part(combobox) {
-    box-shadow: 0 0 0 3px
-      color-mix(in srgb, var(--esphome-error), transparent 80%);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--esphome-error), transparent 80%);
+  }
+
+  wa-select::part(listbox) {
+    padding-block: 0;
+  }
+
+  @media (hover: hover) {
+    /* Tint hover with the text colour so it darkens in light mode and
+       lightens in dark mode — --wa-color-surface-lowered goes the
+       wrong way in dark mode (darker than the listbox bg). */
+    wa-option:not([disabled]):is(:hover, :state(hover)):not(:state(current)) {
+      background-color: color-mix(in srgb, var(--wa-color-text-normal), transparent 92%);
+      color: var(--wa-color-text-normal);
+    }
+  }
+
+  wa-option:state(current),
+  wa-option[disabled]:state(current) {
+    background-color: color-mix(in srgb, var(--esphome-primary), transparent 88%);
+    color: var(--wa-color-text-normal);
   }
 `;

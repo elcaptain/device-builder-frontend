@@ -349,7 +349,11 @@ export class ESPHomeApp extends LitElement {
       >
         ${this._router.outlet()}
       </esphome-layout>
-      <esphome-command-palette></esphome-command-palette>
+      <esphome-command-palette
+        @set-theme=${this._onSetTheme}
+        @set-yaml-diff-button=${this._onSetYamlDiffButton}
+        @set-language=${this._onSetLanguage}
+      ></esphome-command-palette>
       <esphome-settings-dialog
         @set-theme=${this._onSetTheme}
         @set-yaml-diff-button=${this._onSetYamlDiffButton}

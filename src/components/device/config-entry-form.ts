@@ -411,13 +411,11 @@ export class ESPHomeConfigEntryForm extends LitElement {
       .id-option-add {
         border-top: var(--wa-border-width-s) solid var(--wa-color-surface-border);
         margin-top: var(--wa-space-2xs);
-        padding-top: var(--wa-space-2xs);
       }
 
       .id-option-add--solo {
         border-top: none;
         margin-top: 0;
-        padding-top: 0.5em;
       }
 
       .id-option-primary-add {

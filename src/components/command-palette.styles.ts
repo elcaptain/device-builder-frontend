@@ -4,7 +4,10 @@ export const commandPaletteStyles = css`
   :host {
     position: fixed;
     inset: 0;
-    z-index: 1000;
+    /* Above WA component overlays (wa-popup is 899, wa-select is 900).
+       Note: top-layer popovers are above any z-index — open() also
+       force-closes them so this matters mainly for non-popover layers. */
+    z-index: 10000;
     pointer-events: none;
   }
 
