@@ -23,6 +23,7 @@ import {
   localizeContext,
 } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
+import { consumeJustCreated } from "../util/just-created.js";
 import { setLeaveGuard } from "../util/navigation.js";
 import { registerMdiIcons } from "../util/register-icons.js";
 import { devicePageStyles } from "./device-styles.js";
@@ -59,6 +60,13 @@ export class ESPHomePageDevice extends LitElement {
 
   @property()
   id = "";
+
+  /** True for the brief window between the wizard finishing and the
+   *  user dismissing / leaving — drives the "Congratulations!" banner
+   *  in the content pane. Sourced from a one-shot sessionStorage flag
+   *  set by the wizard, consumed once on first matching id load. */
+  @state()
+  private _justCreated = false;
 
   @state()
   private _layout: DeviceLayoutMode = "both";
@@ -214,9 +222,18 @@ export class ESPHomePageDevice extends LitElement {
 
   updated(changedProperties: Map<string, unknown>) {
     if (changedProperties.has("id") && this.id) {
+      // Consume the wizard's "just-created" handoff once per id. Each
+      // call to consumeJustCreated atomically reads + clears the flag,
+      // so a refresh or back-nav won't re-show the banner.
+      this._justCreated = consumeJustCreated(this.id);
       this._loadYaml();
     }
   }
+
+  /** Lets the user dismiss the welcome banner without leaving the page. */
+  private _dismissJustCreated = () => {
+    this._justCreated = false;
+  };
 
   private async _loadPreferences() {
     // Editor layout stored locally (not in backend preferences)
@@ -338,6 +355,8 @@ export class ESPHomePageDevice extends LitElement {
             .configuration=${this.id}
             .selectedSection=${this._selectedSection}
             .selectedFromLine=${this._selectedFromLine}
+            .justCreated=${this._justCreated}
+            @just-created-dismiss=${this._dismissJustCreated}
             ?hasPendingChanges=${this._device?.has_pending_changes === true}
             ?hasUpdateAvailable=${this._device?.update_available === true}
             ?busy=${this._activeJobs.has(this.id)}

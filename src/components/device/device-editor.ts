@@ -52,6 +52,11 @@ export class ESPHomeDeviceEditor extends LitElement {
   @property({ attribute: false })
   board: BoardCatalogEntry | null = null;
 
+  /** Forwarded from the page — when true, the content pane shows a
+   *  "just created" welcome banner above the next-step panels. */
+  @property({ type: Boolean })
+  justCreated = false;
+
   @state()
   private _isMobile = false;
 
@@ -244,6 +249,7 @@ export class ESPHomeDeviceEditor extends LitElement {
                 .configuration=${this.configuration}
                 .selectedSection=${this.selectedSection}
                 .selectedFromLine=${this.selectedFromLine}
+                .justCreated=${this.justCreated}
               ></esphome-device-board-info>
             </div>
             ${effectiveLayout === "both"

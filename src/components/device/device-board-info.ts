@@ -1,9 +1,11 @@
 import { consume } from "@lit/context";
 import {
   mdiArrowDecisionOutline,
+  mdiClose,
   mdiCogOutline,
   mdiMemory,
   mdiOpenInNew,
+  mdiPartyPopper,
   mdiPlusCircleOutline,
 } from "@mdi/js";
 import { css, html, LitElement, nothing } from "lit";
@@ -30,6 +32,8 @@ registerMdiIcons({
   memory: mdiMemory,
   "arrow-decision-outline": mdiArrowDecisionOutline,
   "cog-outline": mdiCogOutline,
+  close: mdiClose,
+  "party-popper": mdiPartyPopper,
   "plus-circle-outline": mdiPlusCircleOutline,
 });
 
@@ -47,6 +51,12 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
 
   @property()
   configuration = "";
+
+  /** Show the "Congratulations!" banner above the step panels.
+   *  Driven by a one-shot signal from the wizard so it only appears
+   *  for the user who just created this device, this session. */
+  @property({ type: Boolean })
+  justCreated = false;
 
   @property({ attribute: false })
   selectedSection: string | null = null;
@@ -184,6 +194,75 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
         margin-top: var(--wa-space-m);
       }
 
+      /* ─── Just-created welcome banner ─── */
+
+      .welcome-banner {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--wa-space-m);
+        padding: var(--wa-space-m);
+        margin-top: var(--wa-space-m);
+        background: color-mix(
+          in srgb,
+          var(--esphome-primary),
+          transparent 92%
+        );
+        border-left: 4px solid var(--esphome-primary);
+        border-radius: var(--wa-border-radius-m);
+        position: relative;
+      }
+
+      .welcome-banner-icon {
+        flex-shrink: 0;
+        font-size: 28px;
+        color: var(--esphome-primary);
+        line-height: 1;
+      }
+
+      .welcome-banner-body {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .welcome-banner-title {
+        margin: 0 0 var(--wa-space-2xs);
+        font-size: var(--wa-font-size-m);
+        font-weight: var(--wa-font-weight-bold);
+        color: var(--wa-color-text-normal);
+      }
+
+      .welcome-banner-text {
+        margin: 0;
+        font-size: var(--wa-font-size-s);
+        color: var(--wa-color-text-normal);
+        line-height: 1.5;
+      }
+
+      .welcome-banner-close {
+        flex-shrink: 0;
+        background: transparent;
+        border: none;
+        padding: 4px;
+        cursor: pointer;
+        color: var(--wa-color-text-quiet);
+        border-radius: var(--wa-border-radius-s);
+        transition: background 0.12s, color 0.12s;
+      }
+
+      .welcome-banner-close:hover {
+        background: color-mix(
+          in srgb,
+          var(--esphome-primary),
+          transparent 80%
+        );
+        color: var(--wa-color-text-normal);
+      }
+
+      .welcome-banner-close wa-icon {
+        font-size: 18px;
+        display: block;
+      }
+
       /* ─── Step CTA ─── */
 
       .step-section {
@@ -293,6 +372,7 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
             ></esphome-device-section-config>
           `
         : html`
+            ${this.justCreated ? this._renderWelcomeBanner() : nothing}
             ${this._renderStepSection({
               title: this._localize("device.step_core"),
               desc: this._localize("device.step_core_desc"),
@@ -361,6 +441,52 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  /**
+   * Welcome banner shown the first time the user lands on a freshly
+   * created device. Tells them the wizard wrote a sensible default
+   * configuration and points them at the next-step panels below.
+   * Dismissible — emits an event the page handler clears the flag on.
+   */
+  private _renderWelcomeBanner() {
+    if (!this.board) return nothing;
+    return html`
+      <div class="welcome-banner" role="status">
+        <wa-icon
+          class="welcome-banner-icon"
+          library="mdi"
+          name="party-popper"
+        ></wa-icon>
+        <div class="welcome-banner-body">
+          <p class="welcome-banner-title">
+            ${this._localize("device.welcome_banner_title", {
+              name: this.board.name,
+            })}
+          </p>
+          <p class="welcome-banner-text">
+            ${this._localize("device.welcome_banner_body")}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="welcome-banner-close"
+          aria-label=${this._localize("device.welcome_banner_dismiss")}
+          @click=${this._onDismissWelcome}
+        >
+          <wa-icon library="mdi" name="close"></wa-icon>
+        </button>
+      </div>
+    `;
+  }
+
+  private _onDismissWelcome() {
+    this.dispatchEvent(
+      new CustomEvent("just-created-dismiss", {
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   private _boardImageUrl(board: BoardCatalogEntry): string {

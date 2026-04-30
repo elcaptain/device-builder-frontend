@@ -7,6 +7,7 @@ import type { ESPHomeAPI } from "../../api/index.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext, apiContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import { markJustCreated } from "../../util/just-created.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
 import "@home-assistant/webawesome/dist/components/dialog/dialog.js";
@@ -265,6 +266,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
         board_id: this._selectedBoard?.id ?? "",
         config_type: "empty",
       });
+      markJustCreated(configuration);
       this.close();
       window.history.pushState({}, "", `/device/${configuration}`);
       window.dispatchEvent(new PopStateEvent("popstate"));
@@ -299,6 +301,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
         config_type: "upload",
         file_content: fileContent,
       });
+      markJustCreated(configuration);
       this.close();
       window.history.pushState({}, "", `/device/${configuration}`);
       window.dispatchEvent(new PopStateEvent("popstate"));
@@ -333,6 +336,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
         ssid: wifiSsid,
         psk: wifiPassword,
       });
+      markJustCreated(configuration);
       this.close();
       window.history.pushState({}, "", `/device/${configuration}`);
       window.dispatchEvent(new PopStateEvent("popstate"));
