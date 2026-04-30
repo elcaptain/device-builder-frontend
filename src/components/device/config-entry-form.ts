@@ -342,6 +342,35 @@ export class ESPHomeConfigEntryForm extends LitElement {
         margin-top: var(--wa-space-2xs);
       }
 
+      /* ─── Map (key/value) rows ──────────────────────────────── */
+      .map-row {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--wa-space-2xs);
+      }
+
+      .map-row .map-key-input {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .map-row .map-value {
+        flex: 1.5;
+        min-width: 0;
+      }
+
+      /* Inside a map row the value's label and description are
+         redundant (the map itself has those at the top) — suppress
+         them so each row stays compact. */
+      .map-row .map-value > .field > label,
+      .map-row .map-value > .field > p.field-description {
+        display: none;
+      }
+
+      .map-row .map-value > .field {
+        gap: 0;
+      }
+
       .textarea-field {
         font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
         font-size: var(--wa-font-size-xs);
@@ -600,6 +629,9 @@ export class ESPHomeConfigEntryForm extends LitElement {
     if (entry.type === ConfigEntryType.NESTED) {
       return this._renderNestedField(entry, path);
     }
+    if (entry.type === ConfigEntryType.MAP) {
+      return this._renderMapField(entry, path);
+    }
     if (entry.multi_value) {
       return this._renderMultiValueField(entry, path);
     }
@@ -675,6 +707,100 @@ export class ESPHomeConfigEntryForm extends LitElement {
               )}
             </div>`
           : nothing}
+      </div>
+    `;
+  }
+
+  /**
+   * Render a free-form map field. The user types each key (e.g. a
+   * component domain like `sensor`, a substitution name, etc.) and
+   * picks a value matching the template defined by
+   * `entry.config_entries[0]`. Used for `logger.logs:`,
+   * `substitutions:`, `globals:`, `api.actions:`, ... — schemas where
+   * enumerating every possible key on the backend would explode the
+   * config tree.
+   *
+   * Storage: `_values[mapKey] = { userKey: userValue, ... }` — a plain
+   * object preserving insertion order. Renames rebuild the object so
+   * the row stays in place; deletes remove the entry. Adds inject a
+   * placeholder key (`new_1`, `new_2`, ...) the user is expected to
+   * rename.
+   */
+  private _renderMapField(entry: ConfigEntry, path: string[]) {
+    const valueTemplate = (entry.config_entries ?? [])[0];
+    const raw = this._getAt(path);
+    const map: Record<string, unknown> =
+      raw && typeof raw === "object" && !Array.isArray(raw)
+        ? (raw as Record<string, unknown>)
+        : {};
+    const keys = Object.keys(map);
+
+    return html`
+      <div class="field" data-field-key=${path.join(".")}>
+        ${this._renderLabel(entry)}
+        ${keys.length === 0
+          ? html`<p class="field-description">
+              ${this._localize("device.map_empty")}
+            </p>`
+          : nothing}
+        ${keys.map((k) => this._renderMapRow(path, k, valueTemplate))}
+        <button
+          type="button"
+          class="multi-btn multi-add"
+          ?disabled=${this.disabled}
+          @click=${() => this._addMapEntry(path)}
+        >
+          <wa-icon library="mdi" name="plus"></wa-icon>
+          ${this._localize("device.map_add")}
+        </button>
+        ${this._fieldErrorAt(path)}
+      </div>
+    `;
+  }
+
+  /**
+   * One (key, value) row in a MAP field. The key is a free-form text
+   * input bound on `change` (commit on blur — committing on every
+   * keystroke would re-key the row mid-edit and steal focus). The
+   * value renders via the template entry through the standard
+   * dispatch, so it picks up the right control type (select for log
+   * levels, input for substitutions, etc.). The value template's
+   * label is suppressed inside rows to keep the row compact.
+   */
+  private _renderMapRow(
+    mapPath: string[],
+    rowKey: string,
+    valueTemplate: ConfigEntry | undefined,
+  ) {
+    const valuePath = [...mapPath, rowKey];
+    return html`
+      <div class="map-row">
+        <input
+          type="text"
+          class="multi-input map-key-input"
+          .value=${rowKey}
+          ?disabled=${this.disabled}
+          @change=${(e: Event) =>
+            this._renameMapKey(
+              mapPath,
+              rowKey,
+              (e.target as HTMLInputElement).value,
+            )}
+        />
+        <div class="map-value">
+          ${valueTemplate
+            ? this._renderEntry(valueTemplate, valuePath)
+            : nothing}
+        </div>
+        <button
+          type="button"
+          class="multi-btn"
+          ?disabled=${this.disabled}
+          aria-label=${this._localize("device.map_remove")}
+          @click=${() => this._removeMapEntry(mapPath, rowKey)}
+        >
+          <wa-icon library="mdi" name="close"></wa-icon>
+        </button>
       </div>
     `;
   }
@@ -1186,6 +1312,53 @@ export class ESPHomeConfigEntryForm extends LitElement {
     const current = Array.isArray(cur) ? [...cur] : [];
     current[idx] = value;
     this._emitChange(path, current);
+  }
+
+  // ─── Map helpers ────────────────────────────────────────────────
+
+  /** Read the map at `path` as a plain object, defaulting to `{}`. */
+  private _readMap(path: string[]): Record<string, unknown> {
+    const cur = this._getAt(path);
+    return cur && typeof cur === "object" && !Array.isArray(cur)
+      ? { ...(cur as Record<string, unknown>) }
+      : {};
+  }
+
+  /** Add a new (placeholder-key) → "" row to the map. */
+  private _addMapEntry(path: string[]) {
+    const map = this._readMap(path);
+    let n = 1;
+    while (`new_${n}` in map) n++;
+    map[`new_${n}`] = "";
+    this._emitChange(path, map);
+  }
+
+  /** Remove a row by key. */
+  private _removeMapEntry(path: string[], key: string) {
+    const map = this._readMap(path);
+    if (!(key in map)) return;
+    delete map[key];
+    this._emitChange(path, map);
+  }
+
+  /**
+   * Rename a row's key, preserving insertion order. Refuses the
+   * rename if `newKey` already exists (would silently merge two
+   * rows). Empty new keys are also refused — a map with `"" → value`
+   * round-trips badly through YAML.
+   */
+  private _renameMapKey(path: string[], oldKey: string, newKey: string) {
+    if (oldKey === newKey) return;
+    if (!newKey) return;
+    const cur = this._getAt(path);
+    if (!cur || typeof cur !== "object" || Array.isArray(cur)) return;
+    const map = cur as Record<string, unknown>;
+    if (newKey in map) return;
+    const next: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(map)) {
+      next[k === oldKey ? newKey : k] = v;
+    }
+    this._emitChange(path, next);
   }
 
   // ─── Nested expand/collapse ─────────────────────────────────────

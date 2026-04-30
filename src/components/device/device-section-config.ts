@@ -58,17 +58,15 @@ interface SectionConfigResponse {
 }
 
 /**
- * Top-level keys whose structure doesn't map cleanly to a form
- * (free-form dicts, lists of typed variables, package imports, ...).
- * For these we always render the "edit via YAML" notice instead of
- * trying to coerce the schema into fields. The backend may still
- * return a schema but the form would be either empty or misleading.
+ * Top-level keys we always treat as YAML-only regardless of what the
+ * backend returns. `packages` is the remaining holdout — its YAML
+ * shape (dict-of-dicts referencing remote files) doesn't fit the
+ * MAP-of-typed-values pattern. Everything else (substitutions,
+ * globals, ...) now relies on the backend describing it as a MAP
+ * entry, and falls back to the YAML notice automatically when the
+ * schema returns no entries.
  */
-const YAML_ONLY_SECTIONS = new Set([
-  "substitutions",
-  "globals",
-  "packages",
-]);
+const YAML_ONLY_SECTIONS = new Set(["packages"]);
 
 @customElement("esphome-device-section-config")
 export class ESPHomeDeviceSectionConfig extends LitElement {

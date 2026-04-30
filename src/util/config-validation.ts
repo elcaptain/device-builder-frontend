@@ -150,6 +150,28 @@ function _validateEntriesRecursive(
       continue;
     }
 
+    // MAP entries have user-defined keys, not schema-defined ones, so
+    // we can't recurse into config_entries the way NESTED does.
+    // Required-ness is enforced by checking the map has at least one
+    // entry; per-value validation is a future refinement.
+    if (entry.type === ConfigEntryType.MAP) {
+      if (entry.required) {
+        const raw = values[entry.key];
+        const map =
+          raw !== null && typeof raw === "object" && !Array.isArray(raw)
+            ? (raw as Record<string, unknown>)
+            : null;
+        if (!map || Object.keys(map).length === 0) {
+          const fullPath = [...pathPrefix, entry.key].join(".");
+          errors.set(fullPath, {
+            key: fullPath,
+            code: "validation.required",
+          });
+        }
+      }
+      continue;
+    }
+
     const raw = values[entry.key] ?? entry.default_value;
     const err = validateEntry(entry, raw);
     if (err) {

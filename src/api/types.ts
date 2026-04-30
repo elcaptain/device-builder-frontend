@@ -400,6 +400,12 @@ export enum ConfigEntryType {
   // array (recursive) and an optional `platform_type` indicating which
   // ESPHome platform's base entity fields should be applied on top.
   NESTED = "nested",
+  // Free-form map of (string key) → (typed value). The user names the
+  // keys themselves; `config_entries[0]` describes what each value
+  // looks like. Used for things like `logger.logs:`,
+  // `substitutions:`, `globals:`, `api.actions:`, etc. — places where
+  // the schema would otherwise need to enumerate every possible key.
+  MAP = "map",
   // Fallback for fields whose type couldn't be determined
   UNKNOWN = "unknown",
   /** @deprecated Backend signals dropdown via populated `options` instead. Kept for legacy callers. */
