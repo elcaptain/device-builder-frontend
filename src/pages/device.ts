@@ -435,9 +435,11 @@ export class ESPHomePageDevice extends LitElement {
   /**
    * The board-info "Show core / components / automations" buttons
    * fire this. We make the matching section the only one expanded
-   * in the navigator and, on mobile, slide the drawer open so the
-   * user can actually see it. The navigator's three top-level groups
-   * are rendered in order (core = 0, components = 1, automations = 2).
+   * in the navigator, un-collapse the desktop nav pane (in case the
+   * user hid the whole sidebar earlier — they explicitly asked to
+   * see something now), and on mobile slide the drawer open. The
+   * navigator's three top-level groups are rendered in order
+   * (core = 0, components = 1, automations = 2).
    */
   private _onNavSectionShow(
     e: CustomEvent<{ section: NavSectionName }>,
@@ -449,6 +451,14 @@ export class ESPHomePageDevice extends LitElement {
     this._openSections = next;
     this._updateUrl();
     this._drawerOpen = true;
+    if (this._navCollapsed) {
+      this._navCollapsed = false;
+      // Persist so the nav stays open across reloads — same path the
+      // toggle button takes when the user un-hides manually.
+      this._api
+        .updatePreferences({ navigator_visible: true })
+        .catch(() => {});
+    }
   }
 
   private _onLayoutChange(e: CustomEvent<DeviceLayoutMode>) {
