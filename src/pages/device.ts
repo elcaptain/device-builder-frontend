@@ -11,6 +11,7 @@ import type {
 } from "../api/types.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import type { ESPHomeCommandDialog } from "../components/command-dialog.js";
+import type { NavSectionName } from "../components/device/device-board-info.js";
 import type { DeviceLayoutMode } from "../components/device/device-editor.js";
 import { DeviceInstallController } from "../components/device/device-install-controller.js";
 import type { ESPHomeFirmwareInstallDialog } from "../components/firmware-install-dialog.js";
@@ -293,6 +294,15 @@ export class ESPHomePageDevice extends LitElement {
       this.id ||
       this._localize("dashboard.create_device");
 
+    // Map navigator open-section indices (0/1/2) to the named set the
+    // board-info "Show <section>" CTAs use to decide which buttons
+    // need rendering. Indices match the order the navigator emits
+    // (core / components / automations).
+    const expandedNavSections = new Set<NavSectionName>();
+    if (this._openSections.has(0)) expandedNavSections.add("core");
+    if (this._openSections.has(1)) expandedNavSections.add("components");
+    if (this._openSections.has(2)) expandedNavSections.add("automations");
+
     return html`
       <!-- Mobile drawer -->
       <div
@@ -357,6 +367,7 @@ export class ESPHomePageDevice extends LitElement {
             .selectedSection=${this._selectedSection}
             .selectedFromLine=${this._selectedFromLine}
             .justCreated=${this._justCreated}
+            .expandedNavSections=${expandedNavSections}
             @just-created-dismiss=${this._dismissJustCreated}
             ?hasPendingChanges=${this._device?.has_pending_changes === true}
             ?hasUpdateAvailable=${this._device?.update_available === true}
@@ -404,12 +415,18 @@ export class ESPHomePageDevice extends LitElement {
     }
   }
 
+  /**
+   * Accordion behaviour: clicking a closed section opens it and
+   * closes all others; clicking an open section closes it. Keeping
+   * exactly one (or zero) section visible at a time avoids piling
+   * three long lists on top of each other in the navigator.
+   */
   private _onSectionToggle(e: CustomEvent<{ index: number }>) {
-    const next = new Set(this._openSections);
-    if (next.has(e.detail.index)) {
-      next.delete(e.detail.index);
-    } else {
-      next.add(e.detail.index);
+    const { index } = e.detail;
+    const next = new Set<number>();
+    if (!this._openSections.has(index)) {
+      // Closed → open. Wipe any other open sections first.
+      next.add(index);
     }
     this._openSections = next;
     this._updateUrl();
@@ -417,24 +434,20 @@ export class ESPHomePageDevice extends LitElement {
 
   /**
    * The board-info "Show core / components / automations" buttons
-   * fire this. We expand the matching section in the navigator and,
-   * on mobile, slide the drawer open so the user can actually see it.
-   * The navigator's three top-level groups are rendered in order
-   * (core = 0, components = 1, automations = 2), matching the array
-   * built inside `device-navigator.ts`.
+   * fire this. We make the matching section the only one expanded
+   * in the navigator and, on mobile, slide the drawer open so the
+   * user can actually see it. The navigator's three top-level groups
+   * are rendered in order (core = 0, components = 1, automations = 2).
    */
   private _onNavSectionShow(
-    e: CustomEvent<{ section: "core" | "components" | "automations" }>,
+    e: CustomEvent<{ section: NavSectionName }>,
   ) {
     const indexBySection = { core: 0, components: 1, automations: 2 };
     const idx = indexBySection[e.detail.section];
     if (idx === undefined) return;
-    if (!this._openSections.has(idx)) {
-      const next = new Set(this._openSections);
-      next.add(idx);
-      this._openSections = next;
-      this._updateUrl();
-    }
+    const next = new Set<number>([idx]);
+    this._openSections = next;
+    this._updateUrl();
     this._drawerOpen = true;
   }
 

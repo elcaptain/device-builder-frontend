@@ -63,6 +63,14 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
   @property({ type: Boolean })
   justCreated = false;
 
+  /** Which navigator sections are currently expanded. Used to hide
+   *  the matching "Show <section>" CTA when the section is already
+   *  open in the navigator — the button has nothing to add at that
+   *  point, so showing it just nudges the user to click for no
+   *  effect. */
+  @property({ attribute: false })
+  expandedNavSections: Set<NavSectionName> = new Set();
+
   @property({ attribute: false })
   selectedSection: string | null = null;
 
@@ -292,22 +300,38 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
       }
 
       .action-item {
-        padding: 0 var(--wa-space-s);
+        padding: var(--wa-space-2xs) var(--wa-space-m);
         border-radius: var(--wa-border-radius-m);
         display: flex;
         align-items: center;
-        background: var(--esphome-primary);
-        color: var(--esphome-on-primary);
+        justify-content: space-between;
+        background: transparent;
+        color: var(--esphome-primary);
+        border: var(--wa-border-width-s) solid var(--esphome-primary);
         gap: var(--wa-space-s);
         cursor: pointer;
         user-select: none;
-        transition: background 0.1s;
+        font-family: inherit;
+        font-size: inherit;
+        transition:
+          background 0.12s,
+          color 0.12s;
         align-self: flex-start;
+        /* Equal width across the three step CTAs so they line up
+           visually no matter how long the longest label is. */
+        width: 280px;
+        max-width: 100%;
         margin-top: var(--wa-space-s);
       }
 
       .action-item:hover {
-        opacity: 0.9;
+        background: var(--esphome-primary);
+        color: var(--esphome-on-primary);
+      }
+
+      .action-item:focus-visible {
+        outline: 2px solid var(--esphome-primary);
+        outline-offset: 2px;
       }
 
       .action-item p {
@@ -434,20 +458,26 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
     action: string;
     section: NavSectionName;
   }) {
+    const alreadyExpanded = this.expandedNavSections.has(opts.section);
     return html`
       <div class="step-section">
         <h4 class="step-title">${opts.title}</h4>
         <p class="step-desc">${opts.desc}</p>
-        <div
-          class="action-item"
-          @click=${() => this._onShowNavSection(opts.section)}
-        >
-          <div>
-            <wa-icon library="mdi" name=${opts.icon}></wa-icon>
-            <p>${opts.action}</p>
-          </div>
-          <wa-icon library="mdi" name="arrow-left"></wa-icon>
-        </div>
+        ${alreadyExpanded
+          ? nothing
+          : html`
+              <button
+                type="button"
+                class="action-item"
+                @click=${() => this._onShowNavSection(opts.section)}
+              >
+                <div>
+                  <wa-icon library="mdi" name=${opts.icon}></wa-icon>
+                  <p>${opts.action}</p>
+                </div>
+                <wa-icon library="mdi" name="arrow-left"></wa-icon>
+              </button>
+            `}
       </div>
     `;
   }

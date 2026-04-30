@@ -14,6 +14,7 @@ import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext, yamlDiffButtonContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import type { NavSectionName } from "./device-board-info.js";
 import { deviceEditorStyles } from "./device-editor.styles.js";
 import type { HighlightRange } from "../yaml-editor.js";
 
@@ -56,6 +57,12 @@ export class ESPHomeDeviceEditor extends LitElement {
    *  "just created" welcome banner above the next-step panels. */
   @property({ type: Boolean })
   justCreated = false;
+
+  /** Forwarded from the page — drives which "Show <section>" CTAs
+   *  the board-info content pane hides (because the navigator's
+   *  matching section is already expanded). */
+  @property({ attribute: false })
+  expandedNavSections: Set<NavSectionName> = new Set();
 
   @state()
   private _isMobile = false;
@@ -250,6 +257,7 @@ export class ESPHomeDeviceEditor extends LitElement {
                 .selectedSection=${this.selectedSection}
                 .selectedFromLine=${this.selectedFromLine}
                 .justCreated=${this.justCreated}
+                .expandedNavSections=${this.expandedNavSections}
               ></esphome-device-board-info>
             </div>
             ${effectiveLayout === "both"
