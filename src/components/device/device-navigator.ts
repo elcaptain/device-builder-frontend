@@ -402,8 +402,10 @@ export class ESPHomeDeviceNavigator extends LitElement {
                     ${items.length > 0
                       ? html`
                           <div class="nav-items">
-                            ${items.map(
-                              (item) => html`
+                            ${items.map((item) => {
+                              const { primary, secondary } =
+                                this._navItemLabels(item);
+                              return html`
                                 <div
                                   class="nav-item ${this._selectedLine === item.fromLine
                                     ? "nav-item--selected"
@@ -416,17 +418,17 @@ export class ESPHomeDeviceNavigator extends LitElement {
                                   @click=${() => this._onItemClick(item)}
                                 >
                                   <div class="nav-item-content">
-                                    <p>${item.name
-                                      ? `${item.name} - ${item.platform || item.key}`
-                                      : item.platform || item.key}</p>
-                                    ${item.parentKey && (item.name || item.platform)
-                                      ? html`<span class="nav-item-subtitle">${item.parentKey}</span>`
+                                    <p>${primary}</p>
+                                    ${secondary
+                                      ? html`<span class="nav-item-subtitle"
+                                          >${secondary}</span
+                                        >`
                                       : nothing}
                                   </div>
                                   <wa-icon library="mdi" name="chevron-right"></wa-icon>
                                 </div>
-                              `
-                            )}
+                              `;
+                            })}
                           </div>
                         `
                       : nothing}
@@ -457,6 +459,32 @@ export class ESPHomeDeviceNavigator extends LitElement {
         composed: true,
       })
     );
+  }
+
+  /**
+   * Decide what to show on the two lines of a nav item:
+   *  - Primary: the most descriptive label we have — the user-set
+   *    `name`, falling back through `id`, `platform`, `key`.
+   *  - Secondary: when a `name` is the primary, the technical `id`
+   *    is more useful as the secondary (it's what other components
+   *    reference and what the user picked themselves). Otherwise
+   *    show the parent block (e.g. `sensor`, `switch`) so the user
+   *    still sees what kind of thing this is.
+   */
+  private _navItemLabels(item: YamlSection): {
+    primary: string;
+    secondary?: string;
+  } {
+    const primary = item.name || item.id || item.platform || item.key;
+
+    let secondary: string | undefined;
+    if (item.name && item.id) {
+      secondary = item.id;
+    } else if (item.parentKey && item.parentKey !== primary) {
+      secondary = item.parentKey;
+    }
+
+    return { primary, secondary };
   }
 
   private _onItemHover(line: number, fromLine: number, toLine: number) {

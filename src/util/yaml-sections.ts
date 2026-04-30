@@ -3,6 +3,7 @@ export interface YamlSection {
   fromLine: number; // 1-indexed (CodeMirror convention)
   toLine: number; // 1-indexed, inclusive
   name?: string; // "name:" value from a YAML list item
+  id?: string; // "id:" value from a YAML list item
   platform?: string; // "platform:" value from a YAML list item
   parentKey?: string; // top-level key when this is an expanded list item
 }
@@ -116,10 +117,13 @@ function _expandListItems(
       idx + 1 < listStarts.length ? listStarts[idx + 1] - 1 : endIdx;
 
     let name = "";
+    let id = "";
     let platform = "";
     for (let j = itemStart; j <= itemEnd; j++) {
       const nameMatch = lines[j].match(/^\s+(?:-\s+)?name:\s*["']?(.+?)["']?\s*$/);
       if (nameMatch) name = nameMatch[1];
+      const idMatch = lines[j].match(/^\s+(?:-\s+)?id:\s*["']?(\S+?)["']?\s*$/);
+      if (idMatch) id = idMatch[1];
       const platformMatch = lines[j].match(
         /^\s+(?:-\s+)?platform:\s*["']?(\S+?)["']?\s*$/,
       );
@@ -131,6 +135,7 @@ function _expandListItems(
       fromLine: itemStart + 1, // 1-indexed
       toLine: itemEnd + 1, // 1-indexed
       name: name || undefined,
+      id: id || undefined,
       platform: platform || undefined,
       parentKey: section.key,
     });
