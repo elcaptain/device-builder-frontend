@@ -518,49 +518,38 @@ export class ESPHomeDeviceNavigator extends LitElement {
   }
 
   /**
-   * Decide what to show on the two lines of a nav item.
+   * Decide what to show on the two lines of a nav item. Same shape
+   * for core, components, and automations:
    *
-   * Core sections (`wifi`, `api`, `ota`, ...) are identified by their
-   * domain key — even when the user gives them an `id:` or `name:`,
-   * we keep the bare key as the primary label so the navigator stays
-   * predictable ("there's the wifi section"). The id is so synonymous
-   * with the section that surfacing it on top would just confuse.
+   *   line 1 (primary)   <domain>.<platform> when this is a list
+   *                      item under a platform domain (e.g.
+   *                      `sensor.dht`, `time.homeassistant`),
+   *                      otherwise just the domain key (`wifi`,
+   *                      `api`, `uart`).
+   *   line 2 (secondary) the user-supplied `name:` if present, else
+   *                      the `id:`. Hidden when neither is set or
+   *                      when it's identical to the primary.
    *
-   * For components and automations the user-set `name`/`id` is more
-   * meaningful than the parent key, so we prefer those, with the
-   * secondary line showing `<parent>.<platform>` for context.
+   * Putting the domain on the first line keeps the navigator scanable
+   * — you can tell at a glance what kind of thing each entry is —
+   * while the user-friendly label sits underneath as the personal
+   * identifier.
    */
   private _navItemLabels(
     item: YamlSection,
-    category: "core" | "component" | "automation",
+    _category: "core" | "component" | "automation",
   ): { primary: string; secondary?: string } {
-    if (category === "core") {
-      // Use the section's domain as the primary; surface a custom id
-      // (when present) as a quiet hint on the secondary line.
-      const primary = item.key;
-      const secondary =
-        item.id && item.id !== primary ? item.id : undefined;
-      return { primary, secondary };
-    }
-
-    const primary = item.name || item.id || item.platform || item.key;
-
-    let secondary: string | undefined;
-    if (item.parentKey && item.platform) {
-      secondary = item.platform.startsWith(`${item.parentKey}.`)
+    let primary: string;
+    if (item.platform) {
+      primary = item.platform.startsWith(`${item.key}.`)
         ? item.platform
-        : `${item.parentKey}.${item.platform}`;
-    } else if (item.parentKey && item.parentKey !== primary) {
-      // Platform-less list item (rare) or top-level group child —
-      // show just the parent so the user still has context.
-      secondary = item.parentKey;
-    } else if (!item.parentKey && item.key !== primary) {
-      // Top-level single-instance section that has its own id/name
-      // (e.g. `uart:` with `id: modbus_uart`) — surface the section
-      // key (the component domain) so the user still sees what kind
-      // of thing this is.
-      secondary = item.key;
+        : `${item.key}.${item.platform}`;
+    } else {
+      primary = item.key;
     }
+
+    const named = item.name || item.id;
+    const secondary = named && named !== primary ? named : undefined;
 
     return { primary, secondary };
   }
