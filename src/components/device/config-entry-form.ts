@@ -524,18 +524,42 @@ export class ESPHomeConfigEntryForm extends LitElement {
    * value before the slotted options are connected. Each field div
    * carries a `data-field-key` (the dotted path) so we can look up
    * the right value for its select.
+   *
+   * We wait for each select's `updateComplete` (and one frame after
+   * that) to make sure wa-select's own first-render bookkeeping —
+   * `handleDefaultSlotChange`, `setSelectedOptions`, etc. — has run
+   * before we set `.value`. Otherwise our imperative set fights with
+   * wa-select's own initial value resolution and the displayed label
+   * stays blank.
    */
   protected updated(changed: PropertyValues) {
     super.updated(changed);
+    void this._syncSelectValues();
+  }
+
+  private async _syncSelectValues() {
     if (!this.shadowRoot) return;
     const fields = this.shadowRoot.querySelectorAll<HTMLElement>(
       "[data-field-key]",
     );
     for (const field of fields) {
       const select = field.querySelector("wa-select") as
-        | (HTMLElement & { value: string | string[] | null })
+        | (HTMLElement & {
+            value: string | string[] | null;
+            updateComplete?: Promise<unknown>;
+          })
         | null;
       if (!select) continue;
+      // Let wa-select finish its own initial update before we set
+      // anything — otherwise its post-render selectionChanged
+      // overwrites whatever we wrote.
+      if (select.updateComplete) {
+        try {
+          await select.updateComplete;
+        } catch {
+          // ignore
+        }
+      }
       const key = field.getAttribute("data-field-key");
       if (!key) continue;
       const path = key.split(".");
