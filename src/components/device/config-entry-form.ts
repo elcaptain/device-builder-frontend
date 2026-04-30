@@ -30,10 +30,7 @@ import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
 import { inputStyles } from "../../styles/inputs.js";
 import { espHomeStyles } from "../../styles/shared.js";
-import {
-  isEntryVisible,
-  type ValidationError,
-} from "../../util/config-validation.js";
+import { isEntryVisible, type ValidationError } from "../../util/config-validation.js";
 import { getIn } from "../../util/nested-values.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
@@ -264,13 +261,14 @@ export class ESPHomeConfigEntryForm extends LitElement {
         color: var(--wa-color-text-normal);
         outline: none;
         box-sizing: border-box;
-        transition: border-color 0.12s, box-shadow 0.12s;
+        transition:
+          border-color 0.12s,
+          box-shadow 0.12s;
       }
 
       .multi-row .multi-input:focus {
         border-color: var(--esphome-primary);
-        box-shadow: 0 0 0 3px
-          color-mix(in srgb, var(--esphome-primary), transparent 80%);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--esphome-primary), transparent 80%);
       }
 
       .multi-row .multi-input.invalid {
@@ -292,13 +290,14 @@ export class ESPHomeConfigEntryForm extends LitElement {
         color: var(--wa-color-text-normal);
         outline: none;
         box-sizing: border-box;
-        transition: border-color 0.12s, box-shadow 0.12s;
+        transition:
+          border-color 0.12s,
+          box-shadow 0.12s;
       }
 
       .combobox-input:focus {
         border-color: var(--esphome-primary);
-        box-shadow: 0 0 0 3px
-          color-mix(in srgb, var(--esphome-primary), transparent 80%);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--esphome-primary), transparent 80%);
       }
 
       .combobox-input.invalid {
@@ -410,10 +409,15 @@ export class ESPHomeConfigEntryForm extends LitElement {
          the dropdown — same pattern as Home Assistant's entity
          pickers. Coloured to read as an action, not a value. */
       .id-option-add {
-        border-top: var(--wa-border-width-s) solid
-          var(--wa-color-surface-border);
+        border-top: var(--wa-border-width-s) solid var(--wa-color-surface-border);
         margin-top: var(--wa-space-2xs);
         padding-top: var(--wa-space-2xs);
+      }
+
+      .id-option-add--solo {
+        border-top: none;
+        margin-top: 0;
+        padding-top: 0.5em;
       }
 
       .id-option-primary-add {
@@ -483,7 +487,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
    */
   private _filterRenderable(
     entries: ConfigEntry[],
-    values: Record<string, unknown>,
+    values: Record<string, unknown>
   ): ConfigEntry[] {
     const out: ConfigEntry[] = [];
     for (const entry of entries) {
@@ -582,7 +586,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
     const isOpen = this.requiredOnly ? !inSet : inSet;
     const renderableChildren = this._filterRenderable(
       entry.config_entries ?? [],
-      this._scopeValues(path),
+      this._scopeValues(path)
     );
     return html`
       <div class="nested-group" data-field-key=${path.join(".")}>
@@ -591,10 +595,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
           class="nested-toggle"
           @click=${() => this._toggleNested(path.join("."))}
         >
-          <wa-icon
-            library="mdi"
-            name=${isOpen ? "chevron-up" : "chevron-down"}
-          ></wa-icon>
+          <wa-icon library="mdi" name=${isOpen ? "chevron-up" : "chevron-down"}></wa-icon>
           <span class="nested-title">${this._labelFor(entry)}</span>
           ${entry.platform_type
             ? html`<span class="nested-platform">${entry.platform_type}</span>`
@@ -603,7 +604,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
         ${isOpen
           ? html`<div class="nested-fields">
               ${renderableChildren.map((child) =>
-                this._renderEntry(child, [...path, child.key]),
+                this._renderEntry(child, [...path, child.key])
               )}
             </div>`
           : nothing}
@@ -611,11 +612,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
     `;
   }
 
-  private _renderStringField(
-    entry: ConfigEntry,
-    inputType: string,
-    path: string[],
-  ) {
+  private _renderStringField(entry: ConfigEntry, inputType: string, path: string[]) {
     const value = String(this._getAt(path) ?? "");
     const invalid = this._errorAt(path) !== null;
     return html`
@@ -674,7 +671,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
           @change=${(e: Event) =>
             this._emitChange(
               path,
-              (e.target as HTMLInputElement & { checked: boolean }).checked,
+              (e.target as HTMLInputElement & { checked: boolean }).checked
             )}
         ></wa-switch>
       </div>
@@ -701,7 +698,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
           />
           <datalist id=${listId}>
             ${entry.options.map(
-              (opt) => html`<option value=${opt.value}>${opt.label}</option>`,
+              (opt) => html`<option value=${opt.value}>${opt.label}</option>`
             )}
           </datalist>
           ${this._fieldErrorAt(path)}
@@ -718,11 +715,10 @@ export class ESPHomeConfigEntryForm extends LitElement {
             this._emitChange(path, (e.target as HTMLSelectElement).value)}
         >
           ${(entry.options ?? []).map(
-            (opt) => html`<wa-option
-              value=${opt.value}
-              ?selected=${opt.value === value}
-              >${opt.label}</wa-option
-            >`,
+            (opt) =>
+              html`<wa-option value=${opt.value} ?selected=${opt.value === value}
+                >${opt.label}</wa-option
+              >`
           )}
         </wa-select>
         ${this._fieldErrorAt(path)}
@@ -751,11 +747,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
                 .value=${item}
                 ?disabled=${this.disabled}
                 @input=${(e: Event) =>
-                  this._updateMultiItem(
-                    path,
-                    i,
-                    (e.target as HTMLInputElement).value,
-                  )}
+                  this._updateMultiItem(path, i, (e.target as HTMLInputElement).value)}
               />
               <button
                 type="button"
@@ -767,7 +759,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
                 <wa-icon library="mdi" name="close"></wa-icon>
               </button>
             </div>
-          `,
+          `
         )}
         <button
           type="button"
@@ -795,11 +787,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
       required.every((f) => pin.features.includes(f));
     const visible = this.board.pins.filter(matchesFeatures);
 
-    const usedPins = this._findUsedPins(
-      this.yaml,
-      this.fromLine,
-      this._sectionEndLine(),
-    );
+    const usedPins = this._findUsedPins(this.yaml, this.fromLine, this._sectionEndLine());
 
     return html`
       <div class="field" data-field-key=${path.join(".")}>
@@ -831,18 +819,14 @@ export class ESPHomeConfigEntryForm extends LitElement {
             const baseSupporting = inputOnlyConflict
               ? this._localize("device.pin_input_only")
               : pin.notes ||
-                (pin.available === false
-                  ? this._localize("device.pin_unavailable")
-                  : "");
+                (pin.available === false ? this._localize("device.pin_unavailable") : "");
 
             const secondaryParts: string[] = [];
             if (pin.label && pin.label !== optValue) secondaryParts.push(optValue);
             if (inUseText) secondaryParts.push(inUseText);
             if (baseSupporting) secondaryParts.push(baseSupporting);
             const secondary = secondaryParts.join(" • ");
-            const titleText = [inUseText, baseSupporting]
-              .filter(Boolean)
-              .join(" — ");
+            const titleText = [inUseText, baseSupporting].filter(Boolean).join(" — ");
 
             return html`<wa-option
               class="pin-option ${inUse ? "pin-option--warn" : ""}"
@@ -911,7 +895,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
     // a single-call-to-action.
     const addOption = html`
       <wa-option
-        class="id-option id-option-add"
+        class="id-option id-option-add ${empty ? "id-option-add--solo" : ""}"
         value=${ESPHomeConfigEntryForm.ADD_NEW_SENTINEL}
       >
         <span class="id-option-stack">
@@ -951,19 +935,20 @@ export class ESPHomeConfigEntryForm extends LitElement {
           @change=${onChange}
         >
           ${candidates.map(
-            (c) => html`<wa-option
-              class="id-option"
-              value=${c.id}
-              .label=${c.name || c.id}
-              ?selected=${c.id === value}
-            >
-              <span class="id-option-stack">
-                <span class="id-option-primary">${c.name || c.id}</span>
-                <span class="id-option-secondary"
-                  >${c.name ? `${c.id} · ${domain}` : domain}</span
-                >
-              </span>
-            </wa-option>`,
+            (c) =>
+              html`<wa-option
+                class="id-option"
+                value=${c.id}
+                .label=${c.name || c.id}
+                ?selected=${c.id === value}
+              >
+                <span class="id-option-stack">
+                  <span class="id-option-primary">${c.name || c.id}</span>
+                  <span class="id-option-secondary"
+                    >${c.name ? `${c.id} · ${domain}` : domain}</span
+                  >
+                </span>
+              </wa-option>`
           )}
           ${addOption}
         </wa-select>
@@ -984,7 +969,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
         detail: { domain },
         bubbles: true,
         composed: true,
-      }),
+      })
     );
   }
 
@@ -1089,7 +1074,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
         detail: { path, value },
         bubbles: true,
         composed: true,
-      }),
+      })
     );
   }
 
@@ -1100,9 +1085,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
   private _fieldErrorAt(path: string[]) {
     const err = this._errorAt(path);
     if (!err) return nothing;
-    return html`<span class="field-error"
-      >${this._localize(err.code, err.params)}</span
-    >`;
+    return html`<span class="field-error">${this._localize(err.code, err.params)}</span>`;
   }
 
   // ─── Multi-value helpers ────────────────────────────────────────
@@ -1118,7 +1101,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
     const current = Array.isArray(cur) ? cur : [];
     this._emitChange(
       path,
-      current.filter((_, i) => i !== idx),
+      current.filter((_, i) => i !== idx)
     );
   }
 
@@ -1163,7 +1146,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
   private _findUsedPins(
     yaml: string,
     excludeFromLine?: number,
-    excludeToLine?: number,
+    excludeToLine?: number
   ): Map<number, string> {
     const used = new Map<number, string>();
     if (!yaml) return used;
@@ -1209,7 +1192,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
 
   private _findReferencedComponents(
     yaml: string,
-    domain: string,
+    domain: string
   ): Array<{ id: string; name: string }> {
     if (!domain) return [];
     const lines = yaml.split("\n");

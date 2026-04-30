@@ -1,15 +1,18 @@
 import { consume } from "@lit/context";
 import { mdiContentSave, mdiOpenInNew } from "@mdi/js";
-import { css, html, LitElement, nothing } from "lit";
+import { html, LitElement, nothing } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import toast from "sonner-js";
 import type { ESPHomeAPI } from "../../api/index.js";
 import type { BoardCatalogEntry, ConfigEntry } from "../../api/types.js";
-import { ConfigEntryType } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { apiContext, localizeContext } from "../../context/index.js";
 import { inputStyles } from "../../styles/inputs.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import {
+  anyAdvancedEntry,
+  findFirstErrorTarget,
+} from "../../util/config-entry-tree.js";
 import {
   validateEntries,
   type ValidationError,
@@ -17,9 +20,10 @@ import {
 import { setIn } from "../../util/nested-values.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import {
-  parseTopLevelComponents,
-  serializeYamlValues,
-} from "../../util/yaml-serialize.js";
+  parseYamlSectionValues,
+  updateSectionInYaml,
+} from "../../util/yaml-section-values.js";
+import { parseTopLevelComponents } from "../../util/yaml-serialize.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
@@ -29,6 +33,7 @@ import type {
   ConfigEntryValueChange,
   ESPHomeConfigEntryForm,
 } from "./config-entry-form.js";
+import { deviceSectionConfigStyles } from "./device-section-config.styles.js";
 
 registerMdiIcons({
   "content-save": mdiContentSave,
@@ -120,161 +125,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
   @query("esphome-config-entry-form")
   private _form?: ESPHomeConfigEntryForm;
 
-  static styles = [
-    espHomeStyles,
-    inputStyles,
-    css`
-      :host {
-        display: flex;
-        flex-direction: column;
-        gap: var(--wa-space-m);
-        margin-top: var(--wa-space-m);
-      }
-
-      .section-header {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        width: 100%;
-        gap: var(--wa-space-l);
-        padding-bottom: var(--wa-space-m);
-        margin-bottom: var(--wa-space-m);
-        border-bottom: 1px solid var(--wa-color-surface-lowered);
-      }
-
-      .section-header-info {
-        display: flex;
-        flex-direction: column;
-        flex: 1;
-        gap: var(--wa-space-s);
-        min-width: 0;
-      }
-
-      .section-header-title-row {
-        display: flex;
-        align-items: center;
-        gap: var(--wa-space-m);
-        flex-wrap: wrap;
-      }
-
-      .section-image {
-        flex-shrink: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 140px;
-        height: 100px;
-        padding: var(--wa-space-s);
-        background: var(--wa-color-surface-lowered);
-        border-radius: var(--wa-border-radius-l);
-        box-sizing: border-box;
-      }
-
-      .section-image img {
-        width: 100%;
-        height: 100%;
-        object-fit: contain;
-      }
-
-      .section-title {
-        margin: 0;
-        font-size: var(--wa-font-size-l);
-        font-weight: var(--wa-font-weight-bold);
-        color: var(--wa-color-text-normal);
-      }
-
-      .section-desc {
-        margin: 0;
-        font-size: var(--wa-font-size-xs);
-        color: var(--wa-color-text-quiet);
-        line-height: 1.5;
-      }
-
-      .docs-link {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--wa-space-2xs);
-        font-size: var(--wa-font-size-xs);
-        color: var(--esphome-primary);
-        text-decoration: underline;
-      }
-
-      .docs-link:hover {
-        text-decoration: none;
-      }
-
-      .docs-link wa-icon {
-        font-size: 14px;
-      }
-
-      esphome-config-entry-form {
-        display: flex;
-        flex-direction: column;
-        gap: var(--wa-space-m);
-      }
-
-      /* "Show advanced settings" toggle row, shown below the form when
-         the section has any advanced entries (at any depth). */
-      .advanced-toggle-row {
-        display: flex;
-        justify-content: flex-start;
-        margin-top: var(--wa-space-s);
-        font-size: var(--wa-font-size-s);
-      }
-
-      .advanced-toggle-row wa-switch {
-        font-weight: var(--wa-font-weight-semibold);
-        color: var(--wa-color-text-quiet);
-      }
-
-      .actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: var(--wa-space-s);
-        padding-top: var(--wa-space-s);
-      }
-
-      .save-button {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        border: none;
-        background: var(--esphome-primary);
-        color: var(--esphome-on-primary);
-        padding: var(--wa-space-xs) var(--wa-space-m);
-        border-radius: var(--wa-border-radius-m);
-        cursor: pointer;
-        font-size: var(--wa-font-size-s);
-        font-weight: var(--wa-font-weight-bold);
-        font-family: inherit;
-      }
-
-      .save-button:hover:not(:disabled) {
-        opacity: 0.9;
-      }
-
-      .save-button:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-
-      .save-button wa-icon {
-        font-size: 16px;
-      }
-
-      .error {
-        color: var(--esphome-error);
-        font-size: var(--wa-font-size-s);
-      }
-
-      .loading {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: var(--wa-space-xl);
-      }
-    `,
-  ];
+  static styles = [espHomeStyles, inputStyles, deviceSectionConfigStyles];
 
   updated(changedProperties: Map<string, unknown>) {
     if (
@@ -330,7 +181,11 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         image_url: component.image_url,
         entries: component.config_entries,
       };
-      this._values = this._parseYamlSectionValues(yaml);
+      this._values = parseYamlSectionValues(
+        yaml,
+        this.sectionKey,
+        this.fromLine,
+      );
       this._presentComponents = parseTopLevelComponents(yaml);
       this._yaml = yaml;
     } catch (e) {
@@ -344,244 +199,6 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         this._loading = false;
       }
     }
-  }
-
-  /**
-   * Parse simple key: value pairs from the YAML section at the current
-   * fromLine. Recurses into nested objects and handles block lists.
-   */
-  private _parseYamlSectionValues(yaml: string): Record<string, unknown> {
-    const lines = yaml.split("\n");
-    const values: Record<string, unknown> = {};
-
-    let startIdx = -1;
-    if (this.fromLine !== undefined) {
-      startIdx = this.fromLine - 1;
-    } else {
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].startsWith(`${this.sectionKey}:`)) {
-          startIdx = i;
-          break;
-        }
-      }
-    }
-    if (startIdx < 0) return values;
-
-    const isListItem = /^\s+-\s/.test(lines[startIdx]);
-    const childIndent = isListItem ? "    " : "  ";
-    const childRegex = new RegExp(
-      `^${childIndent}([a-zA-Z_][a-zA-Z0-9_]*):\\s*(.*)$`,
-    );
-
-    if (isListItem) {
-      const firstMatch = lines[startIdx].match(
-        /^\s+-\s+([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/,
-      );
-      if (firstMatch) {
-        const key = firstMatch[1];
-        let raw = firstMatch[2].trim();
-        if (raw !== "") {
-          if (
-            (raw.startsWith('"') && raw.endsWith('"')) ||
-            (raw.startsWith("'") && raw.endsWith("'"))
-          ) {
-            raw = raw.slice(1, -1);
-          }
-          if (raw === "true") values[key] = true;
-          else if (raw === "false") values[key] = false;
-          else values[key] = raw;
-        }
-      }
-    }
-
-    const listItemIndent = `${childIndent}  - `;
-    const listItemRegex = new RegExp(`^${childIndent}  -\\s+(.*)$`);
-
-    for (let i = startIdx + 1; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.trim() === "") continue;
-      if (isListItem) {
-        if (/^\s+-\s/.test(line) || /^[a-zA-Z]/.test(line)) break;
-      } else {
-        if (/^[a-zA-Z]/.test(line)) break;
-      }
-
-      const match = line.match(childRegex);
-      if (!match) continue;
-
-      const key = match[1];
-      let raw = match[2].trim();
-
-      if (raw === "") {
-        let peek = i + 1;
-        while (peek < lines.length && lines[peek].trim() === "") peek++;
-        if (peek >= lines.length) continue;
-        const peekLine = lines[peek];
-
-        if (peekLine.startsWith(listItemIndent)) {
-          const items: string[] = [];
-          let j = i + 1;
-          for (; j < lines.length; j++) {
-            const next = lines[j];
-            if (next.trim() === "") continue;
-            if (!next.startsWith(listItemIndent)) break;
-            const m = next.match(listItemRegex);
-            if (!m) break;
-            let item = m[1].trim();
-            if (
-              (item.startsWith('"') && item.endsWith('"')) ||
-              (item.startsWith("'") && item.endsWith("'"))
-            ) {
-              item = item.slice(1, -1);
-            }
-            items.push(item);
-          }
-          if (items.length > 0) {
-            values[key] = items;
-            i = j - 1;
-          }
-          continue;
-        }
-
-        const nestedIndent = `${childIndent}  `;
-        if (peekLine.startsWith(nestedIndent)) {
-          const result = this._parseNestedBlock(lines, i + 1, nestedIndent);
-          if (Object.keys(result.values).length > 0) {
-            values[key] = result.values;
-          }
-          i = result.endIdx - 1;
-          continue;
-        }
-        continue;
-      }
-
-      if (raw.startsWith("[") && raw.endsWith("]")) {
-        const inner = raw.slice(1, -1).trim();
-        const items =
-          inner === ""
-            ? []
-            : inner.split(",").map((p) => {
-                let v = p.trim();
-                if (
-                  (v.startsWith('"') && v.endsWith('"')) ||
-                  (v.startsWith("'") && v.endsWith("'"))
-                ) {
-                  v = v.slice(1, -1);
-                }
-                return v;
-              });
-        values[key] = items;
-        continue;
-      }
-
-      if (
-        (raw.startsWith('"') && raw.endsWith('"')) ||
-        (raw.startsWith("'") && raw.endsWith("'"))
-      ) {
-        raw = raw.slice(1, -1);
-      }
-      if (raw === "true") values[key] = true;
-      else if (raw === "false") values[key] = false;
-      else values[key] = raw;
-    }
-
-    return values;
-  }
-
-  /** Recursively parse a nested YAML block at the given indent. */
-  private _parseNestedBlock(
-    lines: string[],
-    startIdx: number,
-    indent: string,
-  ): { values: Record<string, unknown>; endIdx: number } {
-    const childRegex = new RegExp(
-      `^${indent}([a-zA-Z_][a-zA-Z0-9_]*):\\s*(.*)$`,
-    );
-    const listItemPrefix = `${indent}  - `;
-    const listItemRegex = new RegExp(`^${indent}  -\\s+(.*)$`);
-    const values: Record<string, unknown> = {};
-    let i = startIdx;
-    while (i < lines.length) {
-      const line = lines[i];
-      if (line.trim() === "") {
-        i++;
-        continue;
-      }
-      if (!line.startsWith(indent)) break;
-      const match = line.match(childRegex);
-      if (!match) {
-        i++;
-        continue;
-      }
-      const key = match[1];
-      let raw = match[2].trim();
-
-      if (raw === "") {
-        let peek = i + 1;
-        while (peek < lines.length && lines[peek].trim() === "") peek++;
-        if (peek < lines.length && lines[peek].startsWith(listItemPrefix)) {
-          const items: string[] = [];
-          let j = i + 1;
-          for (; j < lines.length; j++) {
-            if (lines[j].trim() === "") continue;
-            if (!lines[j].startsWith(listItemPrefix)) break;
-            const m = lines[j].match(listItemRegex);
-            if (!m) break;
-            let item = m[1].trim();
-            if (
-              (item.startsWith('"') && item.endsWith('"')) ||
-              (item.startsWith("'") && item.endsWith("'"))
-            ) {
-              item = item.slice(1, -1);
-            }
-            items.push(item);
-          }
-          values[key] = items;
-          i = j;
-          continue;
-        }
-        const deeper = `${indent}  `;
-        if (peek < lines.length && lines[peek].startsWith(deeper)) {
-          const sub = this._parseNestedBlock(lines, i + 1, deeper);
-          if (Object.keys(sub.values).length > 0) values[key] = sub.values;
-          i = sub.endIdx;
-          continue;
-        }
-        i++;
-        continue;
-      }
-
-      if (raw.startsWith("[") && raw.endsWith("]")) {
-        const inner = raw.slice(1, -1).trim();
-        values[key] =
-          inner === ""
-            ? []
-            : inner.split(",").map((p) => {
-                let v = p.trim();
-                if (
-                  (v.startsWith('"') && v.endsWith('"')) ||
-                  (v.startsWith("'") && v.endsWith("'"))
-                ) {
-                  v = v.slice(1, -1);
-                }
-                return v;
-              });
-        i++;
-        continue;
-      }
-
-      if (
-        (raw.startsWith('"') && raw.endsWith('"')) ||
-        (raw.startsWith("'") && raw.endsWith("'"))
-      ) {
-        raw = raw.slice(1, -1);
-      }
-      if (raw === "true") values[key] = true;
-      else if (raw === "false") values[key] = false;
-      else values[key] = raw;
-      i++;
-    }
-    return { values, endIdx: i };
   }
 
   private _onImageError(e: Event) {
@@ -607,7 +224,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     if (!this._config) return nothing;
 
     const showAdvanced = this._showAdvanced;
-    const hasAdvanced = this._anyAdvancedEntry(this._config.entries);
+    const hasAdvanced = anyAdvancedEntry(this._config.entries);
 
     return html`
       <div class="section-header">
@@ -678,17 +295,6 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     `;
   }
 
-  /** True when `entries` contains any advanced entry, recursively. */
-  private _anyAdvancedEntry(entries: ConfigEntry[]): boolean {
-    for (const entry of entries) {
-      if (entry.advanced) return true;
-      if (entry.type === ConfigEntryType.NESTED) {
-        if (this._anyAdvancedEntry(entry.config_entries ?? [])) return true;
-      }
-    }
-    return false;
-  }
-
   private _onValueChange(e: CustomEvent<ConfigEntryValueChange>) {
     const { path, value } = e.detail;
     this._values = setIn(this._values, path, value);
@@ -706,7 +312,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
   ) {
     if (!this._config) return;
 
-    const firstHit = this._findFirstErrorTarget(this._config.entries, errors, []);
+    const firstHit = findFirstErrorTarget(this._config.entries, errors);
     if (!firstHit) return;
     const { path, hasAdvancedAncestor } = firstHit;
 
@@ -739,38 +345,6 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     focusable?.focus({ preventScroll: true });
   }
 
-  /**
-   * Walk the entries in render order and return the first error target.
-   * `path` is the dotted path of the failing leaf field;
-   * `hasAdvancedAncestor` is true when the leaf itself or any
-   * NESTED entry along the way is `advanced`.
-   */
-  private _findFirstErrorTarget(
-    entries: ConfigEntry[],
-    errors: Map<string, ValidationError>,
-    pathPrefix: string[],
-    ancestorAdvanced = false,
-  ): { path: string[]; hasAdvancedAncestor: boolean } | null {
-    for (const entry of entries) {
-      const path = [...pathPrefix, entry.key];
-      const advancedHere = ancestorAdvanced || entry.advanced;
-      if (entry.type === ConfigEntryType.NESTED) {
-        const found = this._findFirstErrorTarget(
-          entry.config_entries ?? [],
-          errors,
-          path,
-          advancedHere,
-        );
-        if (found) return found;
-        continue;
-      }
-      if (errors.has(path.join("."))) {
-        return { path, hasAdvancedAncestor: advancedHere };
-      }
-    }
-    return null;
-  }
-
   private async _onSave() {
     if (!this._config) return;
     const errors = validateEntries(
@@ -789,7 +363,12 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     this._error = "";
     try {
       const yaml = await this._api.getConfig(this.configuration);
-      const newYaml = this._updateSectionInYaml(yaml);
+      const newYaml = updateSectionInYaml(
+        yaml,
+        this.sectionKey,
+        this._values,
+        this.fromLine,
+      );
       const title = this._config.title;
       this._api.updateConfig(this.configuration, newYaml).catch((e) => {
         this._error =
@@ -812,57 +391,6 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     } finally {
       this._saving = false;
     }
-  }
-
-  /** Replace the section's child values in the YAML with the form values. */
-  private _updateSectionInYaml(yaml: string): string {
-    const lines = yaml.split("\n");
-    const { start, end } = this._findSectionRange(lines);
-    if (start < 0) return yaml;
-
-    const isListItem = /^\s+-\s/.test(lines[start]);
-    const childIndent = isListItem ? "    " : "  ";
-
-    const sectionHeader = lines[start];
-    const newLines = [sectionHeader];
-    newLines.push(...serializeYamlValues(this._values, childIndent));
-
-    lines.splice(start, end - start, ...newLines);
-    return lines.join("\n");
-  }
-
-  /** Find the 0-indexed line range [start, end) for the current section. */
-  private _findSectionRange(lines: string[]): { start: number; end: number } {
-    let start = -1;
-    if (this.fromLine !== undefined) {
-      start = this.fromLine - 1;
-    } else {
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].startsWith(`${this.sectionKey}:`)) {
-          start = i;
-          break;
-        }
-      }
-    }
-    if (start < 0) return { start: -1, end: -1 };
-
-    const isListItem = /^\s+-\s/.test(lines[start]);
-
-    let end = lines.length;
-    for (let i = start + 1; i < lines.length; i++) {
-      if (isListItem) {
-        if (/^\s+-\s/.test(lines[i]) || /^[a-zA-Z]/.test(lines[i])) {
-          end = i;
-          break;
-        }
-      } else {
-        if (/^[a-zA-Z]/.test(lines[i])) {
-          end = i;
-          break;
-        }
-      }
-    }
-    return { start, end };
   }
 }
 
