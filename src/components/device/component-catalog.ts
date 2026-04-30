@@ -61,6 +61,12 @@ export class ESPHomeComponentCatalog extends LitElement {
   @state()
   private _expandedId: string | null = null;
 
+  /** Component IDs whose `image_url` errored out — those fall back to
+   *  the memory-icon placeholder. Tracked per-id so a single broken
+   *  image doesn't pull every other card down. */
+  @state()
+  private _imageFailed: Set<string> = new Set();
+
   private _debouncedSearch = debounce(() => this._fetchComponents(), 300);
 
   connectedCallback(): void {
@@ -292,17 +298,29 @@ export class ESPHomeComponentCatalog extends LitElement {
         gap: 8px;
       }
 
+      .component-image,
       .component-image--placeholder {
-        width: 32px;
-        height: 32px;
+        width: 56px;
+        height: 56px;
         display: flex;
         align-items: center;
         justify-content: center;
-        border-radius: var(--wa-border-radius-s);
+        border-radius: var(--wa-border-radius-m);
         background: var(--wa-color-surface-subtle);
         flex-shrink: 0;
         color: var(--esphome-primary);
-        font-size: 18px;
+        font-size: 28px;
+        box-sizing: border-box;
+      }
+
+      .component-image {
+        padding: 4px;
+      }
+
+      .component-image img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
       }
 
       .component-card-header-text {
@@ -455,12 +473,24 @@ export class ESPHomeComponentCatalog extends LitElement {
   }
 
   private _renderCard(component: ComponentCatalogEntry, expanded: boolean) {
+    const hasImage =
+      !!component.image_url && !this._imageFailed.has(component.id);
     return html`
       <article class="component-card ${expanded ? "component-card--expanded" : ""}">
         <div class="component-card-header">
-          <div class="component-image--placeholder">
-            <wa-icon library="mdi" name="memory"></wa-icon>
-          </div>
+          ${hasImage
+            ? html`<div class="component-image">
+                <img
+                  src=${component.image_url}
+                  alt=${component.name}
+                  referrerpolicy="no-referrer"
+                  loading="lazy"
+                  @error=${() => this._onImageError(component.id)}
+                />
+              </div>`
+            : html`<div class="component-image--placeholder">
+                <wa-icon library="mdi" name="memory"></wa-icon>
+              </div>`}
           <div class="component-card-header-text">
             <h3 class="component-title">${component.name}</h3>
           </div>
@@ -496,6 +526,13 @@ export class ESPHomeComponentCatalog extends LitElement {
 
   private _onToggleExpand(component: ComponentCatalogEntry) {
     this._expandedId = this._expandedId === component.id ? null : component.id;
+  }
+
+  private _onImageError(id: string) {
+    if (this._imageFailed.has(id)) return;
+    const next = new Set(this._imageFailed);
+    next.add(id);
+    this._imageFailed = next;
   }
 
   private _onSearchInput(ev: Event) {
