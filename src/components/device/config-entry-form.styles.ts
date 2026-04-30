@@ -362,16 +362,36 @@ export const configEntryFormStyles = css`
   }
 
   .switch-field {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    column-gap: var(--wa-space-m);
+    row-gap: var(--wa-space-2xs);
     align-items: center;
-    justify-content: space-between;
-    gap: var(--wa-space-m);
   }
 
   .switch-field .field-info {
+    grid-column: 1;
+    grid-row: 1 / span 2;
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+
+  .switch-field > .help-button {
+    grid-column: 2;
+    grid-row: 1;
+    margin-left: 0;
+    align-self: start;
+  }
+
+  .switch-field > wa-switch {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: end;
+  }
+
+  .switch-field:not(:has(> .help-button)) > wa-switch {
+    grid-row: 1 / span 2;
   }
 
   wa-select {

@@ -17,6 +17,7 @@ import { ConfigEntryType } from "../../api/types.js";
 import {
   labelFor,
   renderFieldError,
+  renderHelpLink,
   renderLabel,
   renderStringField,
   type RenderCtx,
@@ -74,7 +75,10 @@ export function renderBooleanField(
   const checked = raw === true || raw === "true";
   return html`
     <div class="switch-field" data-field-key=${path.join(".")}>
-      <div class="field-info">${renderLabel(entry, ctx)}</div>
+      <div class="field-info">
+        ${renderLabel(entry, ctx, { includeHelpLink: false })}
+      </div>
+      ${renderHelpLink(entry, ctx)}
       <wa-switch
         ?checked=${checked}
         ?disabled=${ctx.disabled}

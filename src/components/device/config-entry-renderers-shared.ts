@@ -6,10 +6,7 @@
  */
 
 import { html, nothing } from "lit";
-import type {
-  BoardCatalogEntry,
-  ConfigEntry,
-} from "../../api/types.js";
+import type { BoardCatalogEntry, ConfigEntry } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import type { ValidationError } from "../../util/config-validation.js";
 
@@ -29,7 +26,7 @@ export interface RenderCtx {
   scopeValues: (path: string[]) => Record<string, unknown>;
   filterRenderable: (
     entries: ConfigEntry[],
-    values: Record<string, unknown>,
+    values: Record<string, unknown>
   ) => ConfigEntry[];
   renderEntry: (entry: ConfigEntry, path: string[]) => unknown;
 }
@@ -49,7 +46,7 @@ export function labelFor(entry: ConfigEntry, ctx: RenderCtx): string {
     .join(" ");
 }
 
-function renderHelpLink(entry: ConfigEntry, ctx: RenderCtx) {
+export function renderHelpLink(entry: ConfigEntry, ctx: RenderCtx) {
   if (!entry.help_link) return nothing;
   return html`<a
     class="help-button"
@@ -62,12 +59,21 @@ function renderHelpLink(entry: ConfigEntry, ctx: RenderCtx) {
   </a>`;
 }
 
-export function renderLabel(entry: ConfigEntry, ctx: RenderCtx) {
+export interface RenderLabelOptions {
+  includeHelpLink?: boolean;
+}
+
+export function renderLabel(
+  entry: ConfigEntry,
+  ctx: RenderCtx,
+  options: RenderLabelOptions = {}
+) {
+  const { includeHelpLink = true } = options;
   return html`
     <label class="field-label">
       ${labelFor(entry, ctx)}
       ${entry.required ? html`<span class="required">*</span>` : nothing}
-      ${entry.help_link ? renderHelpLink(entry, ctx) : nothing}
+      ${includeHelpLink && entry.help_link ? renderHelpLink(entry, ctx) : nothing}
     </label>
     ${entry.description
       ? html`<p class="field-description">${entry.description}</p>`
@@ -78,9 +84,7 @@ export function renderLabel(entry: ConfigEntry, ctx: RenderCtx) {
 export function renderFieldError(path: string[], ctx: RenderCtx) {
   const err = ctx.errorAt(path);
   if (!err) return nothing;
-  return html`<span class="field-error"
-    >${ctx.localize(err.code, err.params)}</span
-  >`;
+  return html`<span class="field-error">${ctx.localize(err.code, err.params)}</span>`;
 }
 
 // Re-exported by `config-entry-renderers.ts`; placed here so the pin
@@ -90,7 +94,7 @@ export function renderStringField(
   entry: ConfigEntry,
   inputType: string,
   path: string[],
-  ctx: RenderCtx,
+  ctx: RenderCtx
 ) {
   const value = String(ctx.getAt(path) ?? "");
   const invalid = ctx.errorAt(path) !== null;
@@ -103,8 +107,7 @@ export function renderStringField(
         .value=${value}
         ?disabled=${ctx.disabled}
         placeholder=${String(entry.default_value ?? "")}
-        @input=${(e: Event) =>
-          ctx.emitChange(path, (e.target as HTMLInputElement).value)}
+        @input=${(e: Event) => ctx.emitChange(path, (e.target as HTMLInputElement).value)}
       />
       ${renderFieldError(path, ctx)}
     </div>
