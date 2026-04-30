@@ -329,6 +329,7 @@ export class ESPHomePageDevice extends LitElement {
           @yaml-highlight=${this._onYamlHighlight}
           @yaml-updated=${this._onYamlUpdated}
           @section-select=${this._onSectionSelect}
+          @nav-section-show=${this._onNavSectionShow}
           @save-yaml=${this._saveYaml}
           @install-device=${this._installCtrl.onInstall}
           @update-device=${this._installCtrl.onUpdate}
@@ -412,6 +413,29 @@ export class ESPHomePageDevice extends LitElement {
     }
     this._openSections = next;
     this._updateUrl();
+  }
+
+  /**
+   * The board-info "Show core / components / automations" buttons
+   * fire this. We expand the matching section in the navigator and,
+   * on mobile, slide the drawer open so the user can actually see it.
+   * The navigator's three top-level groups are rendered in order
+   * (core = 0, components = 1, automations = 2), matching the array
+   * built inside `device-navigator.ts`.
+   */
+  private _onNavSectionShow(
+    e: CustomEvent<{ section: "core" | "components" | "automations" }>,
+  ) {
+    const indexBySection = { core: 0, components: 1, automations: 2 };
+    const idx = indexBySection[e.detail.section];
+    if (idx === undefined) return;
+    if (!this._openSections.has(idx)) {
+      const next = new Set(this._openSections);
+      next.add(idx);
+      this._openSections = next;
+      this._updateUrl();
+    }
+    this._drawerOpen = true;
   }
 
   private _onLayoutChange(e: CustomEvent<DeviceLayoutMode>) {

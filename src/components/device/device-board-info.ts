@@ -1,6 +1,7 @@
 import { consume } from "@lit/context";
 import {
   mdiArrowDecisionOutline,
+  mdiArrowLeft,
   mdiClose,
   mdiCogOutline,
   mdiMemory,
@@ -31,11 +32,15 @@ registerMdiIcons({
   "open-in-new": mdiOpenInNew,
   memory: mdiMemory,
   "arrow-decision-outline": mdiArrowDecisionOutline,
+  "arrow-left": mdiArrowLeft,
   "cog-outline": mdiCogOutline,
   close: mdiClose,
   "party-popper": mdiPartyPopper,
   "plus-circle-outline": mdiPlusCircleOutline,
 });
+
+/** The three top-level section groups the navigator can expand. */
+export type NavSectionName = "core" | "components" | "automations";
 
 @customElement("esphome-device-board-info")
 export class ESPHomeDeviceBoardInfo extends LitElement {
@@ -287,19 +292,18 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
       }
 
       .action-item {
-        padding: 0 var(--wa-space-2xs);
+        padding: 0 var(--wa-space-s);
         border-radius: var(--wa-border-radius-m);
         display: flex;
         align-items: center;
         background: var(--esphome-primary);
         color: var(--esphome-on-primary);
-        justify-content: space-between;
+        gap: var(--wa-space-s);
         cursor: pointer;
         user-select: none;
         transition: background 0.1s;
-        width: 220px;
-        align-self: center;
-        margin-top: var(--wa-space-m);
+        align-self: flex-start;
+        margin-top: var(--wa-space-s);
       }
 
       .action-item:hover {
@@ -377,22 +381,22 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
               title: this._localize("device.step_core"),
               desc: this._localize("device.step_core_desc"),
               icon: "cog-outline",
-              action: this._localize("device.add_core_configuration"),
-              onClick: () => this._addConfigDialog?.open(),
+              action: this._localize("device.show_core_configuration"),
+              section: "core",
             })}
             ${this._renderStepSection({
               title: this._localize("device.step_components"),
               desc: this._localize("device.step_components_desc"),
               icon: "memory",
-              action: this._localize("device.add_component"),
-              onClick: () => this._addComponentDialog?.open(),
+              action: this._localize("device.show_components"),
+              section: "components",
             })}
             ${this._renderStepSection({
               title: this._localize("device.step_automations"),
               desc: this._localize("device.step_automations_desc"),
               icon: "arrow-decision-outline",
-              action: this._localize("device.add_automation"),
-              onClick: () => this._addAutomationDialog?.open(),
+              action: this._localize("device.show_automations"),
+              section: "automations",
             })}
           `}
 
@@ -417,30 +421,50 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
 
   /**
    * Render one of the three numbered "next steps" panels in the
-   * unselected content pane (Core / Components / Automations).
-   * Each renders a heading, longer description, and a primary CTA
-   * that opens the matching add-* dialog.
+   * unselected content pane (Core / Components / Automations). Each
+   * has a heading, a longer description, and a CTA that expands the
+   * matching section in the device navigator on the left — the goal
+   * is to teach the user that the navigator is where you manage
+   * these things, rather than handing them an add-button right here.
    */
   private _renderStepSection(opts: {
     title: string;
     desc: string;
     icon: string;
     action: string;
-    onClick: () => void;
+    section: NavSectionName;
   }) {
     return html`
       <div class="step-section">
         <h4 class="step-title">${opts.title}</h4>
         <p class="step-desc">${opts.desc}</p>
-        <div class="action-item" @click=${opts.onClick}>
+        <div
+          class="action-item"
+          @click=${() => this._onShowNavSection(opts.section)}
+        >
           <div>
             <wa-icon library="mdi" name=${opts.icon}></wa-icon>
             <p>${opts.action}</p>
           </div>
-          <wa-icon library="mdi" name="plus-circle-outline"></wa-icon>
+          <wa-icon library="mdi" name="arrow-left"></wa-icon>
         </div>
       </div>
     `;
+  }
+
+  /**
+   * Ask the page to open the navigator drawer (mobile) and expand
+   * the matching section. Bubbles up so we don't have to know the
+   * page's state shape from in here.
+   */
+  private _onShowNavSection(section: NavSectionName) {
+    this.dispatchEvent(
+      new CustomEvent("nav-section-show", {
+        detail: { section },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   /**
