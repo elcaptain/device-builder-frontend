@@ -129,12 +129,25 @@ export function renderSelectField(
   // matching option still flags as selected — without a match the
   // dropdown would render blank even though the YAML value is valid.
   const valueLower = value.toLowerCase();
+  // Surface the entry's default value as the wa-select placeholder
+  // when nothing is picked yet — same pattern the string/number
+  // fields already use. Resolve to the matching option's friendly
+  // label when possible (so e.g. an option `{label: "Debug", value:
+  // "DEBUG"}` reads as "Debug" rather than "DEBUG"), and fall back
+  // to the raw default string otherwise.
+  const defaultStr =
+    entry.default_value != null ? String(entry.default_value) : "";
+  const defaultOption = entry.options?.find(
+    (o) => o.value.toLowerCase() === defaultStr.toLowerCase(),
+  );
+  const placeholder = defaultOption?.label ?? defaultStr;
   return html`
     <div class="field" data-field-key=${path.join(".")}>
       ${renderLabel(entry, ctx)}
       <wa-select
         class=${invalid ? "invalid" : ""}
         ?disabled=${ctx.disabled}
+        placeholder=${placeholder}
         @change=${(e: Event) =>
           ctx.emitChange(path, (e.target as HTMLSelectElement).value)}
       >
