@@ -54,6 +54,13 @@ export class ESPHomeAddConfigDialog extends LitElement {
   @property()
   platform = "";
 
+  /** Device's board id (e.g. "generic-esp32c3"). Forwarded to the
+   *  backend so board-level filtering applies — keeps platform-only
+   *  components like `esp8266:` out of the dialog when the device is
+   *  on an ESP32 board. */
+  @property({ attribute: "board-id" })
+  boardId = "";
+
   /** Current device YAML. Used to hide core components that are
    *  already configured — every core component (`esphome:`, `wifi:`,
    *  `api:`, ...) is single-instance, so once one is in the YAML it
@@ -405,10 +412,11 @@ export class ESPHomeAddConfigDialog extends LitElement {
       // "Core" group exactly. Missing ids (the catalog hasn't grown
       // a definition yet) come back as null and drop out.
       const platform = this.platform || undefined;
+      const boardId = this.boardId || undefined;
       const ids = [...CORE_KEYS];
       const fetched = await Promise.all(
         ids.map((id) =>
-          this._api.getComponent(id, platform).catch(() => null),
+          this._api.getComponent(id, platform, boardId).catch(() => null),
         ),
       );
       this._sections = fetched

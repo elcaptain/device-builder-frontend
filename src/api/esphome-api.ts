@@ -549,16 +549,19 @@ export class ESPHomeAPI {
    *
    * Pass `platform` (the device's target platform, e.g. "esp32",
    * "esp8266") to have the backend resolve any per-platform
-   * `cv.SplitDefault` fields into a single `default_value`. Omit it
-   * when querying the generic catalog.
+   * `cv.SplitDefault` fields into a single `default_value`. Pass
+   * `boardId` to additionally narrow board-level constraints. Omit
+   * both when querying the generic catalog.
    */
   async getComponent(
     componentId: string,
-    platform?: string
+    platform?: string,
+    boardId?: string
   ): Promise<ComponentCatalogEntry | null> {
     return this.sendCommand("components/get_component", {
       component_id: componentId,
       ...(platform ? { platform } : {}),
+      ...(boardId ? { board_id: boardId } : {}),
     });
   }
 

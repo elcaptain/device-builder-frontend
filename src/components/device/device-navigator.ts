@@ -406,6 +406,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
           .boardName=${this.boardName}
           .configuration=${this.configuration}
           .platform=${this.platform}
+          .boardId=${this.board?.id ?? ""}
           .yaml=${this.yaml}
         ></esphome-add-config-dialog>
         <esphome-add-component-dialog
