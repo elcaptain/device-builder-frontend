@@ -129,12 +129,13 @@ export class ESPHomeDeviceEditor extends LitElement {
   static styles = [espHomeStyles, deviceEditorStyles];
 
   protected render() {
-    const hasBoard = !!this.board;
-    const effectiveLayout = !hasBoard
-      ? "right"
-      : this._isMobile && this.layout === "both"
-        ? "right"
-        : this.layout;
+    // On mobile we collapse the split view down to a single pane to
+    // keep things readable; otherwise honour whatever layout the user
+    // last chose. We deliberately do NOT force "right" when there's
+    // no board — a missing board catalog entry shouldn't make the
+    // navigator + section editor disappear.
+    const effectiveLayout =
+      this._isMobile && this.layout === "both" ? "right" : this.layout;
     const layoutClass =
       effectiveLayout === "both"
         ? "editor-layout--both"
@@ -178,7 +179,6 @@ export class ESPHomeDeviceEditor extends LitElement {
               <button
                 type="button"
                 aria-pressed=${effectiveLayout === "left"}
-                ?disabled=${!hasBoard}
                 @click=${() => this._setLayout("left")}
                 title=${this._localize("device.layout_components_only")}
               >
@@ -188,7 +188,6 @@ export class ESPHomeDeviceEditor extends LitElement {
                 class="split-btn"
                 type="button"
                 aria-pressed=${effectiveLayout === "both"}
-                ?disabled=${!hasBoard}
                 @click=${() => this._setLayout("both")}
                 title=${this._localize("device.layout_split")}
               >

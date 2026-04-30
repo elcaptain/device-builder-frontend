@@ -328,21 +328,21 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
   ];
 
   protected render() {
-    if (!this.board) return nothing;
+    const board = this.board;
 
     return html`
-      ${!this.selectedSection
+      ${!this.selectedSection && board
         ? html`
             <div class="board-header">
               <div class="board-info">
-                <h3 class="board-name">${this.board.name}</h3>
+                <h3 class="board-name">${board.name}</h3>
                 <div class="board-tags">
-                  ${this.board.tags.map(
+                  ${board.tags.map(
                     (tag) => html`<wa-badge variant="brand" pill>${tag}</wa-badge>`
                   )}
                   <a
                     class="board-info-link"
-                    href=${this.board.docs_url}
+                    href=${board.docs_url}
                     target="_blank"
                     rel="noreferrer"
                   >
@@ -350,12 +350,12 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
                     <wa-icon library="mdi" name="open-in-new"></wa-icon>
                   </a>
                 </div>
-                <p class="board-description">${this.board.description}</p>
+                <p class="board-description">${board.description}</p>
               </div>
               <div class="board-image">
                 <img
-                  src=${this._boardImageUrl(this.board)}
-                  alt=${this.board.name}
+                  src=${this._boardImageUrl(board)}
+                  alt=${board.name}
                   referrerpolicy="no-referrer"
                   @error=${this._onImageError}
                 />
@@ -400,19 +400,19 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
           `}
 
       <esphome-add-config-dialog
-        .boardName=${this.board.name}
+        .boardName=${board?.name ?? ""}
         .configuration=${this.configuration}
-        .platform=${this.board.esphome.platform}
+        .platform=${board?.esphome.platform ?? ""}
       ></esphome-add-config-dialog>
       <esphome-add-component-dialog
-        .boardName=${this.board.name}
+        .boardName=${board?.name ?? ""}
         .configuration=${this.configuration}
-        .platform=${this.board.esphome.platform}
-        .board=${this.board}
+        .platform=${board?.esphome.platform ?? ""}
+        .board=${board}
         .yaml=${this.yaml}
       ></esphome-add-component-dialog>
       <esphome-add-automation-dialog
-        .boardName=${this.board.name}
+        .boardName=${board?.name ?? ""}
         .configuration=${this.configuration}
       ></esphome-add-automation-dialog>
     `;
