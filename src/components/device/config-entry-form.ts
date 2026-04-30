@@ -22,9 +22,8 @@ import {
   mdiOpenInNew,
   mdiPlus,
 } from "@mdi/js";
-import { css, html, LitElement, nothing } from "lit";
+import { css, html, LitElement, nothing, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { live } from "lit/directives/live.js";
 import type { BoardCatalogEntry, BoardPin, ConfigEntry } from "../../api/types.js";
 import { ConfigEntryType, PinFeature, PinMode } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
@@ -517,6 +516,39 @@ export class ESPHomeConfigEntryForm extends LitElement {
     return html`${visible.map((entry) => this._renderEntry(entry, [entry.key]))}`;
   }
 
+  /**
+   * After every render, push the current value onto each <wa-select>
+   * imperatively. This is a workaround for a wa-select quirk where
+   * the value/selected wiring through Lit's template doesn't always
+   * land — especially on the first paint, when wa-select reads its
+   * value before the slotted options are connected. Each field div
+   * carries a `data-field-key` (the dotted path) so we can look up
+   * the right value for its select.
+   */
+  protected updated(changed: PropertyValues) {
+    super.updated(changed);
+    if (!this.shadowRoot) return;
+    const fields = this.shadowRoot.querySelectorAll<HTMLElement>(
+      "[data-field-key]",
+    );
+    for (const field of fields) {
+      const select = field.querySelector("wa-select") as
+        | (HTMLElement & { value: string | string[] | null })
+        | null;
+      if (!select) continue;
+      const key = field.getAttribute("data-field-key");
+      if (!key) continue;
+      const path = key.split(".");
+      const desired = String(this._getAt(path) ?? "");
+      const current = Array.isArray(select.value)
+        ? select.value[0] ?? ""
+        : select.value ?? "";
+      if (current !== desired) {
+        select.value = desired;
+      }
+    }
+  }
+
   // ─── Entry dispatch ─────────────────────────────────────────────
 
   private _renderEntry(entry: ConfigEntry, path: string[]) {
@@ -709,7 +741,6 @@ export class ESPHomeConfigEntryForm extends LitElement {
         ${this._renderLabel(entry)}
         <wa-select
           class=${invalid ? "invalid" : ""}
-          .value=${live(value)}
           ?disabled=${this.disabled}
           @change=${(e: Event) =>
             this._emitChange(path, (e.target as HTMLSelectElement).value)}
