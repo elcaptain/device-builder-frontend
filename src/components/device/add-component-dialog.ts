@@ -218,6 +218,12 @@ export class ESPHomeAddComponentDialog extends LitElement {
 
   protected render() {
     const isForm = this._selected !== null;
+    // TEMP debug — confirm dialog is receiving board/platform props.
+    // eslint-disable-next-line no-console
+    console.debug(
+      "[add-component-dialog] render",
+      { platform: this.platform, boardId: this.board?.id, hasBoard: !!this.board },
+    );
     // Keep the catalog mounted permanently so its state (search query, scroll
     // position, expanded card) survives the round trip into the form view —
     // hide it with `hidden` rather than swapping it out of the DOM. The form

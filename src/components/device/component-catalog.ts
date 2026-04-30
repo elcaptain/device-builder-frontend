@@ -172,6 +172,14 @@ export class ESPHomeComponentCatalog extends LitElement {
       const category = this._category !== "all" ? this._category : undefined;
       const platform = this.platform || undefined;
       const board_id = this.boardId || undefined;
+      // TEMP debug — remove once we've confirmed prop wiring.
+      // eslint-disable-next-line no-console
+      console.debug(
+        "[catalog] fetch",
+        { platform, board_id, query, category },
+        "from props",
+        { thisPlatform: this.platform, thisBoardId: this.boardId },
+      );
       const response = await this._api.getComponents({
         query,
         category,

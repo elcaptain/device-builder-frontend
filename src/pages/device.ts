@@ -273,7 +273,11 @@ export class ESPHomePageDevice extends LitElement {
       // board on the device editor. The BE handles deriving board_id
       // from YAML on its side (see `_resolve_board_id`), so we don't
       // need a YAML-regex fallback here.
+      // eslint-disable-next-line no-console
+      console.debug("[device-page] _loadBoard start", boardId);
       const board = await this._api.getBoard(boardId);
+      // eslint-disable-next-line no-console
+      console.debug("[device-page] _loadBoard result", boardId, board);
       // Guard against late responses overwriting a newer fetch — if
       // the user navigated to another device while this was in flight,
       // `_loadedBoardId` will already point at the new id.
