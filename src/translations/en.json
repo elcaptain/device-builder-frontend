@@ -362,6 +362,7 @@
     "map_remove": "Remove entry",
     "password_reveal": "Show password",
     "password_hide": "Hide password",
+    "value_from_secret": "Using stored secret:",
     "pin_unavailable": "Unavailable",
     "pin_occupied_by": "Reserved for {name}",
     "pin_used_by": "Already used by {name}",
