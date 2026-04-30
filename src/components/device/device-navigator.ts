@@ -465,11 +465,12 @@ export class ESPHomeDeviceNavigator extends LitElement {
    * Decide what to show on the two lines of a nav item:
    *  - Primary: the most descriptive label we have — the user-set
    *    `name`, falling back through `id`, `platform`, `key`.
-   *  - Secondary: when a `name` is the primary, the technical `id`
-   *    is more useful as the secondary (it's what other components
-   *    reference and what the user picked themselves). Otherwise
-   *    show the parent block (e.g. `sensor`, `switch`) so the user
-   *    still sees what kind of thing this is.
+   *  - Secondary: `<parent>.<platform>` (e.g. `switch.gpio`,
+   *    `sensor.template`) so the user can tell at a glance what kind
+   *    of component the entry is, regardless of how it was named. We
+   *    deliberately don't fetch the catalog's friendly name here —
+   *    keeping the rendering purely YAML-driven means no per-item API
+   *    round-trips.
    */
   private _navItemLabels(item: YamlSection): {
     primary: string;
@@ -478,9 +479,13 @@ export class ESPHomeDeviceNavigator extends LitElement {
     const primary = item.name || item.id || item.platform || item.key;
 
     let secondary: string | undefined;
-    if (item.name && item.id) {
-      secondary = item.id;
+    if (item.parentKey && item.platform) {
+      secondary = item.platform.startsWith(`${item.parentKey}.`)
+        ? item.platform
+        : `${item.parentKey}.${item.platform}`;
     } else if (item.parentKey && item.parentKey !== primary) {
+      // Platform-less list item (rare) or top-level group child —
+      // show just the parent so the user still has context.
       secondary = item.parentKey;
     }
 
