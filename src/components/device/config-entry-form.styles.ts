@@ -1,0 +1,380 @@
+import { css } from "lit";
+
+export const configEntryFormStyles = css`
+  :host {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wa-space-m);
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wa-space-2xs);
+  }
+
+  .field-label {
+    font-size: var(--wa-font-size-s);
+    font-weight: var(--wa-font-weight-semibold);
+    color: var(--wa-color-text-normal);
+    display: flex;
+    align-items: center;
+    gap: var(--wa-space-2xs);
+  }
+
+  .field-label .required {
+    color: var(--esphome-error);
+  }
+
+  .field-error {
+    color: var(--esphome-error);
+    font-size: var(--wa-font-size-2xs);
+    margin-top: var(--wa-space-2xs);
+  }
+
+  .field-description {
+    font-size: var(--wa-font-size-2xs);
+    color: var(--wa-color-text-quiet);
+    margin: 0;
+  }
+
+  .field-description + input,
+  .field-description + textarea,
+  .field-description + wa-select {
+    margin-top: 8px;
+  }
+
+  .help-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: var(--wa-color-text-quiet);
+    font-size: 16px;
+    transition: color 0.12s;
+    margin-left: auto;
+  }
+
+  .help-button:hover {
+    color: var(--esphome-primary);
+  }
+
+  /* ─── Nested group ──────────────────────────────────────── */
+  .nested-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wa-space-s);
+    padding: var(--wa-space-s) var(--wa-space-m);
+    background: var(--wa-color-surface-lowered);
+    border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    border-radius: var(--wa-border-radius-m);
+  }
+
+  .nested-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wa-space-2xs);
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: inherit;
+    font-size: var(--wa-font-size-s);
+    font-weight: var(--wa-font-weight-bold);
+    color: var(--wa-color-text-normal);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .nested-toggle:hover {
+    color: var(--esphome-primary);
+  }
+
+  .nested-toggle wa-icon {
+    font-size: 18px;
+  }
+
+  .nested-title {
+    flex: 1;
+  }
+
+  .nested-platform {
+    font-size: var(--wa-font-size-2xs);
+    font-weight: var(--wa-font-weight-normal);
+    color: var(--wa-color-text-quiet);
+    background: var(--wa-color-surface-default);
+    border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    border-radius: var(--wa-border-radius-s);
+    padding: 1px 6px;
+    margin-left: var(--wa-space-xs);
+  }
+
+  .nested-fields {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wa-space-m);
+    padding-top: var(--wa-space-xs);
+  }
+
+  /* ─── multi-value rows ──────────────────────────────────── */
+  .multi-row {
+    display: flex;
+    align-items: center;
+    gap: var(--wa-space-2xs);
+  }
+
+  .multi-row .multi-input {
+    flex: 1;
+    font-family: inherit;
+    font-size: var(--wa-font-size-s);
+    padding: 6px 12px;
+    border-radius: var(--wa-border-radius-m);
+    border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    background: var(--wa-color-surface-default);
+    color: var(--wa-color-text-normal);
+    outline: none;
+    box-sizing: border-box;
+    transition:
+      border-color 0.12s,
+      box-shadow 0.12s;
+  }
+
+  .multi-row .multi-input:focus {
+    border-color: var(--esphome-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--esphome-primary), transparent 80%);
+  }
+
+  .multi-row .multi-input.invalid {
+    border-color: var(--esphome-error);
+  }
+
+  .multi-row .multi-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .combobox-input {
+    font-family: inherit;
+    font-size: var(--wa-font-size-s);
+    padding: 6px 12px;
+    border-radius: var(--wa-border-radius-m);
+    border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    background: var(--wa-color-surface-default);
+    color: var(--wa-color-text-normal);
+    outline: none;
+    box-sizing: border-box;
+    transition:
+      border-color 0.12s,
+      box-shadow 0.12s;
+  }
+
+  .combobox-input:focus {
+    border-color: var(--esphome-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--esphome-primary), transparent 80%);
+  }
+
+  .combobox-input.invalid {
+    border-color: var(--esphome-error);
+  }
+
+  .combobox-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .multi-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background: transparent;
+    border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    border-radius: var(--wa-border-radius-m);
+    color: var(--wa-color-text-quiet);
+    font-family: inherit;
+    font-size: var(--wa-font-size-xs);
+    cursor: pointer;
+    transition:
+      background 0.12s,
+      border-color 0.12s,
+      color 0.12s;
+  }
+
+  .multi-btn:hover {
+    background: var(--wa-color-surface-lowered);
+    color: var(--wa-color-text-normal);
+  }
+
+  .multi-btn wa-icon {
+    font-size: 14px;
+  }
+
+  .multi-add {
+    align-self: flex-start;
+    margin-top: var(--wa-space-2xs);
+  }
+
+  /* ─── Map (key/value) rows ──────────────────────────────── */
+  .map-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--wa-space-2xs);
+  }
+
+  .map-row .map-key-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .map-row .map-value {
+    flex: 1.5;
+    min-width: 0;
+  }
+
+  /* Inside a map row the value's label and description are
+     redundant (the map itself has those at the top) — suppress
+     them so each row stays compact. */
+  .map-row .map-value > .field > label,
+  .map-row .map-value > .field > p.field-description {
+    display: none;
+  }
+
+  .map-row .map-value > .field {
+    gap: 0;
+  }
+
+  .textarea-field {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: var(--wa-font-size-xs);
+    padding: var(--wa-space-s);
+    border-radius: var(--wa-border-radius-m);
+    border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    background: var(--wa-color-surface-default);
+    color: var(--wa-color-text-normal);
+    resize: vertical;
+    min-height: 80px;
+  }
+
+  .textarea-field.invalid {
+    border-color: var(--esphome-error);
+  }
+
+  /* ─── Pin selector option layout ─────────────────────────── */
+  .pin-option-stack {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 1px;
+    line-height: 1.25;
+  }
+
+  .pin-option-primary {
+    font-size: var(--wa-font-size-s);
+    font-weight: var(--wa-font-weight-semibold);
+    color: var(--wa-color-text-normal);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .pin-option-secondary {
+    font-size: var(--wa-font-size-2xs);
+    color: var(--wa-color-text-quiet);
+    font-style: italic;
+  }
+
+  .pin-option[disabled] .pin-option-primary,
+  .pin-option[disabled] .pin-option-secondary {
+    color: var(--wa-color-text-quiet);
+  }
+
+  .pin-warn-icon {
+    color: var(--esphome-warning, #d97706);
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .pin-option--warn .pin-option-secondary {
+    color: var(--esphome-warning, #d97706);
+    font-style: normal;
+  }
+
+  /* ─── ID reference picker option layout ──────────────────── */
+  .id-option-stack {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 1px;
+    line-height: 1.25;
+  }
+
+  /* Visually distinguish the "Add new …" entry at the bottom of
+     the dropdown — same pattern as Home Assistant's entity
+     pickers. Coloured to read as an action, not a value. */
+  .id-option-add {
+    border-top: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    margin-top: var(--wa-space-2xs);
+  }
+
+  .id-option-add--solo {
+    border-top: none;
+    margin-top: 0;
+  }
+
+  .id-option-primary-add {
+    color: var(--esphome-primary);
+    font-weight: var(--wa-font-weight-bold);
+  }
+
+  .id-option-primary-add wa-icon {
+    font-size: 14px;
+  }
+
+  .id-option-primary {
+    font-size: var(--wa-font-size-s);
+    font-weight: var(--wa-font-weight-semibold);
+    color: var(--wa-color-text-normal);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .id-option-secondary {
+    font-size: var(--wa-font-size-2xs);
+    color: var(--wa-color-text-quiet);
+    font-style: italic;
+  }
+
+  .alert-entry {
+    padding: var(--wa-space-s) var(--wa-space-m);
+    background: var(--wa-color-surface-lowered);
+    border-radius: var(--wa-border-radius-m);
+    font-size: var(--wa-font-size-xs);
+    color: var(--wa-color-text-quiet);
+    line-height: 1.5;
+  }
+
+  .label-entry {
+    font-size: var(--wa-font-size-xs);
+    color: var(--wa-color-text-subtle);
+    font-style: italic;
+  }
+
+  .switch-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--wa-space-m);
+  }
+
+  .switch-field .field-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  wa-select {
+    width: 100%;
+  }
+`;

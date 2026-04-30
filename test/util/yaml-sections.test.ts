@@ -55,9 +55,7 @@ wifi:
   name: test
   platform: ESP32
 `;
-    expect(parseYamlTopLevelSections(yaml).map((s) => s.key)).toEqual([
-      "esphome",
-    ]);
+    expect(parseYamlTopLevelSections(yaml).map((s) => s.key)).toEqual(["esphome"]);
   });
 
   it("keeps non-list sections as a single entry", () => {
@@ -85,17 +83,14 @@ describe("categorizeSections", () => {
     expect(automations).toEqual([]);
   });
 
-  it("puts script/globals/interval into automations", () => {
-    const { automations } = categorizeSections([
+  it("puts script/interval into automations and globals into core", () => {
+    const { core, automations } = categorizeSections([
       mk("script"),
-      mk("globals"),
       mk("interval"),
+      mk("globals"),
     ]);
-    expect(automations.map((s) => s.key)).toEqual([
-      "script",
-      "globals",
-      "interval",
-    ]);
+    expect(automations.map((s) => s.key)).toEqual(["script", "interval"]);
+    expect(core.map((s) => s.key)).toEqual(["globals"]);
   });
 
   it("routes unknown keys to components", () => {
@@ -104,11 +99,7 @@ describe("categorizeSections", () => {
   });
 
   it("splits a mixed list across all three buckets", () => {
-    const result = categorizeSections([
-      mk("esphome"),
-      mk("sensor"),
-      mk("script"),
-    ]);
+    const result = categorizeSections([mk("esphome"), mk("sensor"), mk("script")]);
     expect(result.core.map((s) => s.key)).toEqual(["esphome"]);
     expect(result.components.map((s) => s.key)).toEqual(["sensor"]);
     expect(result.automations.map((s) => s.key)).toEqual(["script"]);

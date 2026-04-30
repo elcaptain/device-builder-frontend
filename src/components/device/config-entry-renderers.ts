@@ -1,0 +1,437 @@
+/**
+ * Field renderers for the ConfigEntry form. The complex pin and
+ * id-reference renderers live in their own modules; this file owns
+ * the simple field shapes (string/number/boolean/select/textarea/
+ * icon/multi-value/nested) and re-exports the rest so the form can
+ * import everything from one place.
+ *
+ * Every renderer is a pure function — it takes a `RenderCtx`
+ * (props/values/callbacks closed over the host element) plus the
+ * entry + path it's rendering, and returns Lit `html`. The form
+ * splices the result into its shadow DOM.
+ */
+
+import { html, nothing } from "lit";
+import type { ConfigEntry } from "../../api/types.js";
+import { ConfigEntryType } from "../../api/types.js";
+import {
+  labelFor,
+  renderFieldError,
+  renderLabel,
+  renderStringField,
+  type RenderCtx,
+} from "./config-entry-renderers-shared.js";
+
+export {
+  labelFor,
+  renderLabel,
+  renderStringField,
+  type RenderCtx,
+} from "./config-entry-renderers-shared.js";
+export {
+  ADD_NEW_SENTINEL,
+  renderIdReferenceField,
+} from "./config-entry-id-reference-renderer.js";
+export { renderPinField } from "./config-entry-pin-renderer.js";
+
+export function renderNumberField(
+  entry: ConfigEntry,
+  path: string[],
+  ctx: RenderCtx,
+) {
+  const value = String(ctx.getAt(path) ?? "");
+  const invalid = ctx.errorAt(path) !== null;
+  const min = entry.range ? String(entry.range[0]) : undefined;
+  const max = entry.range ? String(entry.range[1]) : undefined;
+  return html`
+    <div class="field" data-field-key=${path.join(".")}>
+      ${renderLabel(entry, ctx)}
+      <input
+        type="number"
+        class=${invalid ? "invalid" : ""}
+        .value=${value}
+        ?disabled=${ctx.disabled}
+        min=${min ?? ""}
+        max=${max ?? ""}
+        step=${entry.type === ConfigEntryType.FLOAT ? "any" : "1"}
+        placeholder=${String(entry.default_value ?? "")}
+        @input=${(e: Event) => {
+          const raw = (e.target as HTMLInputElement).value;
+          ctx.emitChange(path, raw === "" ? "" : Number(raw));
+        }}
+      />
+      ${renderFieldError(path, ctx)}
+    </div>
+  `;
+}
+
+export function renderBooleanField(
+  entry: ConfigEntry,
+  path: string[],
+  ctx: RenderCtx,
+) {
+  const raw = ctx.getAt(path);
+  const checked = raw === true || raw === "true";
+  return html`
+    <div class="switch-field" data-field-key=${path.join(".")}>
+      <div class="field-info">${renderLabel(entry, ctx)}</div>
+      <wa-switch
+        ?checked=${checked}
+        ?disabled=${ctx.disabled}
+        @change=${(e: Event) =>
+          ctx.emitChange(
+            path,
+            (e.target as HTMLInputElement & { checked: boolean }).checked,
+          )}
+      ></wa-switch>
+    </div>
+  `;
+}
+
+export function renderSelectField(
+  entry: ConfigEntry,
+  path: string[],
+  ctx: RenderCtx,
+) {
+  const value = String(ctx.getAt(path) ?? "");
+  const invalid = ctx.errorAt(path) !== null;
+  if (entry.allow_custom_value && entry.options && entry.options.length > 0) {
+    const listId = `combobox-${path.join("-")}`;
+    return html`
+      <div class="field" data-field-key=${path.join(".")}>
+        ${renderLabel(entry, ctx)}
+        <input
+          type="text"
+          class="combobox-input ${invalid ? "invalid" : ""}"
+          list=${listId}
+          .value=${value}
+          ?disabled=${ctx.disabled}
+          placeholder=${String(entry.default_value ?? "")}
+          @input=${(e: Event) =>
+            ctx.emitChange(path, (e.target as HTMLInputElement).value)}
+        />
+        <datalist id=${listId}>
+          ${entry.options.map(
+            (opt) => html`<option value=${opt.value}>${opt.label}</option>`,
+          )}
+        </datalist>
+        ${renderFieldError(path, ctx)}
+      </div>
+    `;
+  }
+  // Catalog option values are sometimes stored in a different case
+  // than the actual YAML uses (e.g. options return `ESP32C6` but
+  // ESPHome configs use `esp32c6`). Compare case-insensitively so the
+  // matching option still flags as selected — without a match the
+  // dropdown would render blank even though the YAML value is valid.
+  const valueLower = value.toLowerCase();
+  return html`
+    <div class="field" data-field-key=${path.join(".")}>
+      ${renderLabel(entry, ctx)}
+      <wa-select
+        class=${invalid ? "invalid" : ""}
+        ?disabled=${ctx.disabled}
+        @change=${(e: Event) =>
+          ctx.emitChange(path, (e.target as HTMLSelectElement).value)}
+      >
+        ${(entry.options ?? []).map(
+          (opt) =>
+            html`<wa-option
+              value=${opt.value}
+              ?selected=${opt.value.toLowerCase() === valueLower}
+              >${opt.label}</wa-option
+            >`,
+        )}
+      </wa-select>
+      ${renderFieldError(path, ctx)}
+    </div>
+  `;
+}
+
+export function renderTextareaField(
+  entry: ConfigEntry,
+  path: string[],
+  ctx: RenderCtx,
+) {
+  const value = String(ctx.getAt(path) ?? "");
+  const invalid = ctx.errorAt(path) !== null;
+  return html`
+    <div class="field" data-field-key=${path.join(".")}>
+      ${renderLabel(entry, ctx)}
+      <textarea
+        class="textarea-field ${invalid ? "invalid" : ""}"
+        rows="4"
+        ?disabled=${ctx.disabled}
+        .value=${value}
+        placeholder=${String(entry.default_value ?? "")}
+        @input=${(e: Event) =>
+          ctx.emitChange(path, (e.target as HTMLTextAreaElement).value)}
+      ></textarea>
+      ${renderFieldError(path, ctx)}
+    </div>
+  `;
+}
+
+export function renderIconField(
+  entry: ConfigEntry,
+  path: string[],
+  ctx: RenderCtx,
+) {
+  const value = String(ctx.getAt(path) ?? "");
+  const invalid = ctx.errorAt(path) !== null;
+  return html`
+    <div class="field" data-field-key=${path.join(".")}>
+      ${renderLabel(entry, ctx)}
+      <esphome-mdi-icon-picker
+        .value=${value}
+        .invalid=${invalid}
+        .disabled=${ctx.disabled}
+        .placeholder=${String(entry.default_value ?? "Choose an icon…")}
+        @change=${(e: CustomEvent<{ value: string }>) =>
+          ctx.emitChange(path, e.detail.value)}
+      ></esphome-mdi-icon-picker>
+      ${renderFieldError(path, ctx)}
+    </div>
+  `;
+}
+
+export function renderMultiValueField(
+  entry: ConfigEntry,
+  path: string[],
+  ctx: RenderCtx,
+) {
+  const raw = ctx.getAt(path);
+  const items: string[] = Array.isArray(raw) ? raw.map((v) => String(v)) : [];
+  const invalid = ctx.errorAt(path) !== null;
+
+  const updateAt = (idx: number, value: string) => {
+    const cur = ctx.getAt(path);
+    const current = Array.isArray(cur) ? [...cur] : [];
+    current[idx] = value;
+    ctx.emitChange(path, current);
+  };
+  const removeAt = (idx: number) => {
+    const cur = ctx.getAt(path);
+    const current = Array.isArray(cur) ? cur : [];
+    ctx.emitChange(
+      path,
+      current.filter((_, i) => i !== idx),
+    );
+  };
+  const addItem = () => {
+    const cur = ctx.getAt(path);
+    const current = Array.isArray(cur) ? cur : [];
+    ctx.emitChange(path, [...current, ""]);
+  };
+
+  return html`
+    <div class="field" data-field-key=${path.join(".")}>
+      ${renderLabel(entry, ctx)}
+      ${items.length === 0
+        ? html`<p class="field-description">
+            ${ctx.localize("device.multi_value_empty")}
+          </p>`
+        : nothing}
+      ${items.map(
+        (item, i) => html`
+          <div class="multi-row">
+            <input
+              type="text"
+              class="multi-input ${invalid ? "invalid" : ""}"
+              .value=${item}
+              ?disabled=${ctx.disabled}
+              @input=${(e: Event) =>
+                updateAt(i, (e.target as HTMLInputElement).value)}
+            />
+            <button
+              type="button"
+              class="multi-btn"
+              ?disabled=${ctx.disabled}
+              aria-label=${ctx.localize("device.multi_value_remove")}
+              @click=${() => removeAt(i)}
+            >
+              <wa-icon library="mdi" name="close"></wa-icon>
+            </button>
+          </div>
+        `,
+      )}
+      <button
+        type="button"
+        class="multi-btn multi-add"
+        ?disabled=${ctx.disabled}
+        @click=${addItem}
+      >
+        <wa-icon library="mdi" name="plus"></wa-icon>
+        ${ctx.localize("device.multi_value_add")}
+      </button>
+      ${renderFieldError(path, ctx)}
+    </div>
+  `;
+}
+
+/**
+ * Render a free-form map field. The user types each key (e.g. a
+ * component domain like `sensor`, a substitution name, etc.) and
+ * picks a value matching the template defined by
+ * `entry.config_entries[0]`. Used for `logger.logs:`,
+ * `substitutions:`, `globals:`, `api.actions:`, ... — schemas where
+ * enumerating every possible key on the backend would explode the
+ * config tree.
+ *
+ * Storage: `values[mapKey] = { userKey: userValue, ... }` — a plain
+ * object preserving insertion order. Renames rebuild the object so
+ * the row stays in place; deletes remove the entry. Adds inject a
+ * placeholder key (`new_1`, `new_2`, ...) the user is expected to
+ * rename.
+ */
+export function renderMapField(
+  entry: ConfigEntry,
+  path: string[],
+  ctx: RenderCtx,
+) {
+  const valueTemplate = (entry.config_entries ?? [])[0];
+  const raw = ctx.getAt(path);
+  const map: Record<string, unknown> =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  const keys = Object.keys(map);
+
+  const readMap = (): Record<string, unknown> => {
+    const cur = ctx.getAt(path);
+    return cur && typeof cur === "object" && !Array.isArray(cur)
+      ? { ...(cur as Record<string, unknown>) }
+      : {};
+  };
+
+  const addEntry = () => {
+    const m = readMap();
+    let n = 1;
+    while (`new_${n}` in m) n++;
+    m[`new_${n}`] = "";
+    ctx.emitChange(path, m);
+  };
+
+  const removeEntry = (key: string) => {
+    const m = readMap();
+    if (!(key in m)) return;
+    delete m[key];
+    ctx.emitChange(path, m);
+  };
+
+  // Rename preserves insertion order; refuses if the new key already
+  // exists (would silently merge two rows) or is empty (round-trips
+  // badly through YAML).
+  const renameKey = (oldKey: string, newKey: string) => {
+    if (oldKey === newKey || !newKey) return;
+    const cur = ctx.getAt(path);
+    if (!cur || typeof cur !== "object" || Array.isArray(cur)) return;
+    const m = cur as Record<string, unknown>;
+    if (newKey in m) return;
+    const next: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(m)) {
+      next[k === oldKey ? newKey : k] = v;
+    }
+    ctx.emitChange(path, next);
+  };
+
+  // The key is a free-form text input bound on `change` (commit on
+  // blur — committing on every keystroke would re-key the row
+  // mid-edit and steal focus). The value renders via the template
+  // entry through the standard dispatch, so it picks up the right
+  // control type. The value template's label is suppressed inside
+  // rows by the .map-row CSS.
+  const renderRow = (rowKey: string) => {
+    const valuePath = [...path, rowKey];
+    return html`
+      <div class="map-row">
+        <input
+          type="text"
+          class="multi-input map-key-input"
+          .value=${rowKey}
+          ?disabled=${ctx.disabled}
+          @change=${(e: Event) =>
+            renameKey(rowKey, (e.target as HTMLInputElement).value)}
+        />
+        <div class="map-value">
+          ${valueTemplate ? ctx.renderEntry(valueTemplate, valuePath) : nothing}
+        </div>
+        <button
+          type="button"
+          class="multi-btn"
+          ?disabled=${ctx.disabled}
+          aria-label=${ctx.localize("device.map_remove")}
+          @click=${() => removeEntry(rowKey)}
+        >
+          <wa-icon library="mdi" name="close"></wa-icon>
+        </button>
+      </div>
+    `;
+  };
+
+  return html`
+    <div class="field" data-field-key=${path.join(".")}>
+      ${renderLabel(entry, ctx)}
+      ${keys.length === 0
+        ? html`<p class="field-description">
+            ${ctx.localize("device.map_empty")}
+          </p>`
+        : nothing}
+      ${keys.map((k) => renderRow(k))}
+      <button
+        type="button"
+        class="multi-btn multi-add"
+        ?disabled=${ctx.disabled}
+        @click=${addEntry}
+      >
+        <wa-icon library="mdi" name="plus"></wa-icon>
+        ${ctx.localize("device.map_add")}
+      </button>
+      ${renderFieldError(path, ctx)}
+    </div>
+  `;
+}
+
+export function renderNestedField(
+  entry: ConfigEntry,
+  path: string[],
+  ctx: RenderCtx,
+) {
+  const key = path.join(".");
+  // In `requiredOnly` mode (the add-component dialog) groups default
+  // open so the user sees the required fields immediately, and the set
+  // tracks groups they've explicitly *collapsed*. In normal mode
+  // groups default closed and the set tracks groups they've explicitly
+  // *opened*.
+  const inSet = ctx.nestedOpenSections.has(key);
+  const isOpen = ctx.requiredOnly ? !inSet : inSet;
+  const renderableChildren = ctx.filterRenderable(
+    entry.config_entries ?? [],
+    ctx.scopeValues(path),
+  );
+  return html`
+    <div class="nested-group" data-field-key=${path.join(".")}>
+      <button
+        type="button"
+        class="nested-toggle"
+        @click=${() => ctx.toggleNested(key)}
+      >
+        <wa-icon
+          library="mdi"
+          name=${isOpen ? "chevron-up" : "chevron-down"}
+        ></wa-icon>
+        <span class="nested-title">${labelFor(entry, ctx)}</span>
+        ${entry.platform_type
+          ? html`<span class="nested-platform">${entry.platform_type}</span>`
+          : nothing}
+      </button>
+      ${isOpen
+        ? html`<div class="nested-fields">
+            ${renderableChildren.map((child) =>
+              ctx.renderEntry(child, [...path, child.key]),
+            )}
+          </div>`
+        : nothing}
+    </div>
+  `;
+}
