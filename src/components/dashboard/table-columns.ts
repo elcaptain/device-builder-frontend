@@ -1,7 +1,7 @@
 import { html, nothing } from "lit";
 import type { ColumnDef } from "@tanstack/lit-table";
-import { DeviceState } from "../../api/types.js";
-import type { ConfiguredDevice } from "../../api/types.js";
+import { DeviceState, JobStatus } from "../../api/types.js";
+import type { ConfiguredDevice, FirmwareJob } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 
 export interface DeviceRow {
@@ -16,8 +16,33 @@ export interface DeviceRow {
   hasPendingChanges: boolean;
   hasUpdateAvailable: boolean;
   busy: boolean;
+  recentJob: FirmwareJob | null;
   _device: ConfiguredDevice;
 }
+
+const RECENT_ICON: Record<JobStatus, string | null> = {
+  [JobStatus.QUEUED]: null,
+  [JobStatus.RUNNING]: null,
+  [JobStatus.COMPLETED]: "check-circle",
+  [JobStatus.FAILED]: "close-circle",
+  [JobStatus.CANCELLED]: "cancel",
+};
+
+const RECENT_CLASS: Record<JobStatus, string> = {
+  [JobStatus.QUEUED]: "",
+  [JobStatus.RUNNING]: "",
+  [JobStatus.COMPLETED]: "status-recent--success",
+  [JobStatus.FAILED]: "status-recent--failed",
+  [JobStatus.CANCELLED]: "status-recent--cancelled",
+};
+
+const RECENT_LABEL_KEY: Record<JobStatus, string> = {
+  [JobStatus.QUEUED]: "",
+  [JobStatus.RUNNING]: "",
+  [JobStatus.COMPLETED]: "firmware_jobs.status_completed",
+  [JobStatus.FAILED]: "firmware_jobs.status_failed",
+  [JobStatus.CANCELLED]: "firmware_jobs.status_cancelled",
+};
 
 const dispatchRowEvent = (e: Event, name: string, device: ConfiguredDevice) => {
   e.stopPropagation();
@@ -35,7 +60,7 @@ export function createDeviceColumns(localize: LocalizeFunc): ColumnDef<DeviceRow
         const row = info.row.original;
         if (row.busy) {
           return html`<span
-            class="cell-status-center cell-status-busy"
+            class="cell-status cell-status-busy"
             role="button"
             tabindex="0"
             title=${localize("dashboard.table_action_view_progress")}
@@ -46,7 +71,17 @@ export function createDeviceColumns(localize: LocalizeFunc): ColumnDef<DeviceRow
                 dispatchRowEvent(e, "show-progress", row._device);
               }
             }}
-          ><wa-spinner class="status-spinner" style="font-size:12px;--indicator-color:var(--esphome-primary);--track-color:transparent;"></wa-spinner></span>`;
+          ><wa-spinner class="status-spinner" style="font-size:14px;--indicator-color:var(--esphome-primary);--track-color:transparent;"></wa-spinner></span>`;
+        }
+        if (row.recentJob) {
+          const status = row.recentJob.status;
+          const icon = RECENT_ICON[status];
+          if (icon) {
+            return html`<span
+              class="cell-status status-recent ${RECENT_CLASS[status]}"
+              title=${localize(RECENT_LABEL_KEY[status])}
+            ><wa-icon library="mdi" name=${icon}></wa-icon></span>`;
+          }
         }
         const state = info.getValue() as DeviceState;
         const dotClass = state === DeviceState.ONLINE ? "online" : state === DeviceState.OFFLINE ? "offline" : "unknown";
@@ -55,7 +90,7 @@ export function createDeviceColumns(localize: LocalizeFunc): ColumnDef<DeviceRow
           : state === DeviceState.OFFLINE
             ? localize("dashboard.table_status_offline")
             : localize("dashboard.table_status_unknown");
-        return html`<span class="cell-status-center"><span
+        return html`<span class="cell-status"><span
           class="status-dot ${dotClass}"
           title="${title}"
         ></span></span>`;

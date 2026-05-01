@@ -22,6 +22,7 @@ import {
   devicesLoadedContext,
   importableDevicesContext,
   localizeContext,
+  recentJobsContext,
 } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
 import { registerMdiIcons } from "../util/register-icons.js";
@@ -90,6 +91,10 @@ export class ESPHomePageDashboard extends LitElement {
   @consume({ context: activeJobsContext, subscribe: true })
   @state()
   private _activeJobs: Map<string, FirmwareJob> = new Map();
+
+  @consume({ context: recentJobsContext, subscribe: true })
+  @state()
+  private _recentJobs: Map<string, FirmwareJob> = new Map();
 
   @consume({ context: apiContext })
   private _api!: ESPHomeAPI;
@@ -284,6 +289,7 @@ export class ESPHomePageDashboard extends LitElement {
               ?has-pending-changes=${device.has_pending_changes === true}
               ?has-update-available=${device.update_available}
               ?busy=${this._activeJobs.has(device.configuration)}
+              .recentJob=${this._recentJobs.get(device.configuration) ?? null}
               ?select-mode=${this._selectMode}
               ?selected=${this._selectedDevices.has(device.configuration)}
               @edit-device=${() => editDevice(device)}
@@ -307,6 +313,7 @@ export class ESPHomePageDashboard extends LitElement {
         .devices=${this._devices}
         .search=${this._search}
         .activeJobs=${this._activeJobs}
+        .recentJobs=${this._recentJobs}
         .initialPageSize=${this._tablePageSize}
         .initialSorting=${this._tableSorting}
         .initialColumnVisibility=${this._tableColumnVisibility}

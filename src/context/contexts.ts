@@ -51,6 +51,14 @@ export const activeJobsContext = createContext<Map<string, FirmwareJob>>(
   Symbol("esphome-active-jobs")
 );
 
+/** Context for jobs that just finished, keyed by device configuration.
+ *  Holds the terminal job for ~30s after `_terminateJob` so the
+ *  cards/tables can show a transient success/failure indicator before
+ *  reverting to the regular online/offline state. */
+export const recentJobsContext = createContext<Map<string, FirmwareJob>>(
+  Symbol("esphome-recent-jobs")
+);
+
 /** Context for every firmware job the backend currently exposes
  *  (active and the trimmed terminal history), keyed by `job_id`.
  *  Powers the firmware-tasks dialog — a device can have several jobs

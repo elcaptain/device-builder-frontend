@@ -1,9 +1,12 @@
 import { consume } from "@lit/context";
 import {
+  mdiCancel,
+  mdiCheckCircle,
   mdiCheckboxBlankOutline,
   mdiCheckboxMarked,
   mdiChevronDown,
   mdiChevronUp,
+  mdiCloseCircle,
   mdiDotsVertical,
   mdiUnfoldMoreHorizontal,
 } from "@mdi/js";
@@ -22,7 +25,7 @@ import {
 import type { PropertyValues } from "lit";
 import { LitElement, html, nothing } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
-import type { ConfiguredDevice } from "../../api/types.js";
+import type { ConfiguredDevice, FirmwareJob } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
@@ -39,10 +42,13 @@ import "./table-pagination.js";
 import "./table-row-menu.js";
 
 registerMdiIcons({
+  cancel: mdiCancel,
+  "check-circle": mdiCheckCircle,
   "checkbox-blank-outline": mdiCheckboxBlankOutline,
   "checkbox-marked": mdiCheckboxMarked,
   "chevron-up": mdiChevronUp,
   "chevron-down": mdiChevronDown,
+  "close-circle": mdiCloseCircle,
   "dots-vertical": mdiDotsVertical,
   "unfold-more-horizontal": mdiUnfoldMoreHorizontal,
 });
@@ -80,6 +86,9 @@ export class ESPHomeDeviceTable extends LitElement {
 
   @property({ attribute: false })
   activeJobs = new Map<string, unknown>();
+
+  @property({ attribute: false })
+  recentJobs = new Map<string, FirmwareJob>();
 
   /** Initial sorting from preferences — applied once when first set. */
   @property({ attribute: false })
@@ -206,7 +215,11 @@ export class ESPHomeDeviceTable extends LitElement {
       this._prevLocalize = this._localize;
       this._columns = createDeviceColumns(this._localize);
     }
-    if (changed.has("devices") || changed.has("activeJobs")) {
+    if (
+      changed.has("devices") ||
+      changed.has("activeJobs") ||
+      changed.has("recentJobs")
+    ) {
       this._rows = this.devices.map((d) => ({
         status: d.state,
         name: d.name,
@@ -219,6 +232,7 @@ export class ESPHomeDeviceTable extends LitElement {
         hasPendingChanges: d.has_pending_changes === true,
         hasUpdateAvailable: d.update_available,
         busy: this.activeJobs.has(d.configuration),
+        recentJob: this.recentJobs.get(d.configuration) ?? null,
         _device: d,
       }));
     }

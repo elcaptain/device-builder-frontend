@@ -1,7 +1,10 @@
 import { consume } from "@lit/context";
 import {
+  mdiCancel,
+  mdiCheckCircle,
   mdiCheckboxBlankOutline,
   mdiCheckboxMarked,
+  mdiCloseCircle,
   mdiDotsVertical,
   mdiPencil,
   mdiUpload,
@@ -10,7 +13,8 @@ import {
 } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { DeviceState } from "../api/types.js";
+import { DeviceState, JobStatus } from "../api/types.js";
+import type { FirmwareJob } from "../api/types.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import { localizeContext } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
@@ -20,14 +24,41 @@ import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
 
 registerMdiIcons({
+  cancel: mdiCancel,
+  "check-circle": mdiCheckCircle,
   "checkbox-blank-outline": mdiCheckboxBlankOutline,
   "checkbox-marked": mdiCheckboxMarked,
+  "close-circle": mdiCloseCircle,
   "dots-vertical": mdiDotsVertical,
   pencil: mdiPencil,
   upload: mdiUpload,
   wifi: mdiWifi,
   "wifi-off": mdiWifiOff,
 });
+
+const RECENT_JOB_ICON: Record<JobStatus, string | null> = {
+  [JobStatus.QUEUED]: null,
+  [JobStatus.RUNNING]: null,
+  [JobStatus.COMPLETED]: "check-circle",
+  [JobStatus.FAILED]: "close-circle",
+  [JobStatus.CANCELLED]: "cancel",
+};
+
+const RECENT_JOB_VARIANT: Record<JobStatus, string> = {
+  [JobStatus.QUEUED]: "",
+  [JobStatus.RUNNING]: "",
+  [JobStatus.COMPLETED]: "completed",
+  [JobStatus.FAILED]: "failed",
+  [JobStatus.CANCELLED]: "cancelled",
+};
+
+const RECENT_JOB_LABEL: Record<JobStatus, string> = {
+  [JobStatus.QUEUED]: "",
+  [JobStatus.RUNNING]: "",
+  [JobStatus.COMPLETED]: "firmware_jobs.status_completed",
+  [JobStatus.FAILED]: "firmware_jobs.status_failed",
+  [JobStatus.CANCELLED]: "firmware_jobs.status_cancelled",
+};
 
 @customElement("esphome-device-card")
 export class ESPHomeDeviceCard extends LitElement {
@@ -52,6 +83,9 @@ export class ESPHomeDeviceCard extends LitElement {
 
   @property({ type: Boolean })
   busy = false;
+
+  @property({ attribute: false })
+  recentJob: FirmwareJob | null = null;
 
   @property({ type: Boolean, attribute: "select-mode" })
   selectMode = false;
@@ -199,6 +233,21 @@ export class ESPHomeDeviceCard extends LitElement {
         --track-color: transparent;
       }
 
+      .device-status.completed {
+        background: color-mix(in srgb, var(--esphome-success), transparent 85%);
+        color: var(--esphome-success);
+      }
+
+      .device-status.failed {
+        background: color-mix(in srgb, var(--esphome-error), transparent 85%);
+        color: var(--esphome-error);
+      }
+
+      .device-status.cancelled {
+        background: var(--wa-color-surface-lowered);
+        color: var(--wa-color-text-quiet);
+      }
+
       .action-btn:disabled {
         opacity: 0.4;
         cursor: not-allowed;
@@ -315,19 +364,7 @@ export class ESPHomeDeviceCard extends LitElement {
             </div>
             <p class="device-config">${this.configuration}</p>
           </div>
-          ${this.busy
-            ? html`<div class="device-status busy" @click=${(e: Event) => { e.stopPropagation(); this._emit("show-progress"); }}>
-                <wa-spinner></wa-spinner>
-                ${this._localize("dashboard.status_installing")}
-              </div>`
-            : html`<div class="device-status ${this.state}">
-                <wa-icon library="mdi" name=${this.state === DeviceState.ONLINE ? "wifi" : "wifi-off"}></wa-icon>
-                ${this.state === DeviceState.ONLINE
-                  ? this._localize("dashboard.online")
-                  : this.state === DeviceState.OFFLINE
-                    ? this._localize("dashboard.offline")
-                    : this._localize("dashboard.unknown")}
-              </div>`}
+          ${this._renderStatusBadge()}
         </div>
         ${!this.selectMode
           ? html`
@@ -374,6 +411,45 @@ export class ESPHomeDeviceCard extends LitElement {
           : nothing}
       </div>
     `;
+  }
+
+  private _renderStatusBadge() {
+    if (this.busy) {
+      return html`<div
+        class="device-status busy"
+        @click=${(e: Event) => {
+          e.stopPropagation();
+          this._emit("show-progress");
+        }}
+      >
+        <wa-spinner></wa-spinner>
+        ${this._localize("dashboard.status_installing")}
+      </div>`;
+    }
+    if (this.recentJob) {
+      const status = this.recentJob.status;
+      const icon = RECENT_JOB_ICON[status];
+      if (icon) {
+        return html`<div
+          class="device-status ${RECENT_JOB_VARIANT[status]}"
+          title=${this._localize(RECENT_JOB_LABEL[status])}
+        >
+          <wa-icon library="mdi" name=${icon}></wa-icon>
+          ${this._localize(RECENT_JOB_LABEL[status])}
+        </div>`;
+      }
+    }
+    return html`<div class="device-status ${this.state}">
+      <wa-icon
+        library="mdi"
+        name=${this.state === DeviceState.ONLINE ? "wifi" : "wifi-off"}
+      ></wa-icon>
+      ${this.state === DeviceState.ONLINE
+        ? this._localize("dashboard.online")
+        : this.state === DeviceState.OFFLINE
+          ? this._localize("dashboard.offline")
+          : this._localize("dashboard.unknown")}
+    </div>`;
   }
 
   private _onContextMenu(e: MouseEvent) {

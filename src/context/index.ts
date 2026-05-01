@@ -8,6 +8,7 @@ export {
   devicesLoadedContext,
   isHaIngressContext,
   activeJobsContext,
+  recentJobsContext,
   firmwareJobsContext,
   yamlDiffButtonContext,
 } from "./contexts.js";

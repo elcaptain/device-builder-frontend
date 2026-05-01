@@ -44,6 +44,7 @@ import {
   devicesContext,
   devicesLoadedContext,
   activeJobsContext,
+  recentJobsContext,
   firmwareJobsContext,
   importableDevicesContext,
   isHaIngressContext,
@@ -66,6 +67,10 @@ const TERMINAL_STATUSES: ReadonlySet<JobStatus> = new Set([
   JobStatus.FAILED,
   JobStatus.CANCELLED,
 ]);
+
+// How long a terminated job stays in `_recentJobs` so the dashboard
+// can flash a success/failure indicator after the spinner clears.
+const RECENT_JOB_TTL_MS = 30_000;
 
 // Import child components
 import "../pages/dashboard.js";
@@ -110,6 +115,13 @@ export class ESPHomeApp extends LitElement {
   @provide({ context: activeJobsContext })
   @state()
   private _activeJobs: Map<string, FirmwareJob> = new Map();
+
+  @provide({ context: recentJobsContext })
+  @state()
+  private _recentJobs: Map<string, FirmwareJob> = new Map();
+
+  /** Per-device timeout handles for `_recentJobs` cleanup. */
+  private _recentJobTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
   @provide({ context: firmwareJobsContext })
   @state()
@@ -190,6 +202,7 @@ export class ESPHomeApp extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     this._api.disconnect();
+    this._clearRecentJobs();
     if ("serial" in navigator) {
       navigator.serial.removeEventListener("connect", this._onSerialConnect);
     }
@@ -281,6 +294,7 @@ export class ESPHomeApp extends LitElement {
   private _subscribeToFollowJobs() {
     this._activeJobs = new Map();
     this._firmwareJobs = new Map();
+    this._clearRecentJobs();
     try {
       this._api.firmwareFollowJobs((event, data) =>
         this._handleJobEvent(event, data)
@@ -288,6 +302,14 @@ export class ESPHomeApp extends LitElement {
     } catch (err) {
       console.error("Failed to follow firmware jobs:", err);
     }
+  }
+
+  private _clearRecentJobs() {
+    for (const timer of this._recentJobTimers.values()) {
+      clearTimeout(timer);
+    }
+    this._recentJobTimers.clear();
+    this._recentJobs = new Map();
   }
 
   private _handleJobEvent(event: string, data: unknown): void {
@@ -328,6 +350,10 @@ export class ESPHomeApp extends LitElement {
     const next = new Map(this._firmwareJobs);
     next.set(job.job_id, job);
     this._firmwareJobs = next;
+    // Snapshots replay terminal jobs too — those belong only in the
+    // history map. Treating them as active leaves the spinner stuck on
+    // the device after a reconnect.
+    if (TERMINAL_STATUSES.has(job.status)) return;
     const active = new Map(this._activeJobs);
     active.set(job.configuration, job);
     this._activeJobs = active;
@@ -379,6 +405,34 @@ export class ESPHomeApp extends LitElement {
       active.delete(job.configuration);
       this._activeJobs = active;
     }
+    if (job.configuration) {
+      this._markJobRecent(job);
+    }
+  }
+
+  /** Hold a just-terminated job in `_recentJobs` so the dashboard can
+   *  show a transient success/failure indicator. Replaces any prior
+   *  recent entry (and timer) for the same device. */
+  private _markJobRecent(job: FirmwareJob): void {
+    const recent = new Map(this._recentJobs);
+    recent.set(job.configuration, job);
+    this._recentJobs = recent;
+
+    const prevTimer = this._recentJobTimers.get(job.configuration);
+    if (prevTimer !== undefined) clearTimeout(prevTimer);
+
+    const timer = setTimeout(() => {
+      this._recentJobTimers.delete(job.configuration);
+      // Only drop if this job is still the latest recent entry; a
+      // newer terminate would have replaced it.
+      if (this._recentJobs.get(job.configuration)?.job_id !== job.job_id) {
+        return;
+      }
+      const next = new Map(this._recentJobs);
+      next.delete(job.configuration);
+      this._recentJobs = next;
+    }, RECENT_JOB_TTL_MS);
+    this._recentJobTimers.set(job.configuration, timer);
   }
 
   private _handleEvent(event: string, data: unknown): void {
@@ -522,6 +576,7 @@ export class ESPHomeApp extends LitElement {
       }
     }
     this._firmwareJobs = next;
+    this._clearRecentJobs();
   }
 }
 

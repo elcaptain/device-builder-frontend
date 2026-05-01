@@ -5,17 +5,24 @@ import { css } from "lit";
  * Extracted to keep individual files under the 500-line limit.
  */
 export const tableCellStyles = css`
-  .cell-status-center {
-    display: flex;
+  /* Fixed-size box so the dot, spinner, and recent-status icon all
+   * land on the exact same pixel — no horizontal jitter when the row
+   * transitions between active / terminated / idle. */
+  .cell-status {
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 100%;
+    width: 20px;
+    height: 20px;
+    border-radius: var(--wa-border-radius-m);
   }
 
   .cell-status-busy {
     cursor: pointer;
-    border-radius: var(--wa-border-radius-m);
+    /* Padding + matching negative margin grows the hover halo without
+     * shifting the icon position relative to its sibling rows. */
     padding: 4px;
+    margin: -4px;
     transition: background 0.12s;
   }
   .cell-status-busy:hover,
@@ -43,6 +50,19 @@ export const tableCellStyles = css`
   .status-dot.unknown {
     background: var(--wa-color-text-quiet);
     opacity: 0.5;
+  }
+
+  .status-recent wa-icon {
+    font-size: 16px;
+  }
+  .status-recent--success {
+    color: var(--esphome-success);
+  }
+  .status-recent--failed {
+    color: var(--esphome-error);
+  }
+  .status-recent--cancelled {
+    color: var(--wa-color-text-quiet);
   }
 
   .cell-name-wrap {
