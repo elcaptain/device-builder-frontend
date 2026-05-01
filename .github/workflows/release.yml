@@ -19,8 +19,6 @@ on:
         required: true
         type: string
     secrets:
-      ESPHOME_GITHUB_APP_ID:
-        required: true
       ESPHOME_GITHUB_APP_PRIVATE_KEY:
         required: true
 
@@ -131,7 +129,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         with:
-          app-id: ${{ secrets.ESPHOME_GITHUB_APP_ID || vars.ESPHOME_GITHUB_APP_ID }}
+          app-id: ${{ vars.ESPHOME_GITHUB_APP_ID || secrets.ESPHOME_GITHUB_APP_ID }}
           private-key: ${{ secrets.ESPHOME_GITHUB_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: |
