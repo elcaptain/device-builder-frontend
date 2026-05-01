@@ -32,7 +32,7 @@ import {
   deleteDevice,
   downloadYaml,
   editDevice,
-  extractApiKey,
+  fetchApiKey,
   streamSerialToDialog,
 } from "./dashboard-actions.js";
 import { detectChip, disconnect } from "../util/web-serial.js";
@@ -311,6 +311,8 @@ export class ESPHomePageDashboard extends LitElement {
               .state=${device.state}
               ?has-pending-changes=${device.has_pending_changes === true}
               ?has-update-available=${device.update_available}
+              ?api-enabled=${device.api_enabled === true}
+              ?api-encrypted=${device.api_encrypted === true}
               ?busy=${this._activeJobs.has(device.configuration)}
               .recentJob=${this._recentJobs.get(device.configuration) ?? null}
               ?select-mode=${this._selectMode}
@@ -529,7 +531,7 @@ export class ESPHomePageDashboard extends LitElement {
   }
 
   private async _showApiKey(device: ConfiguredDevice) {
-    const key = await extractApiKey(device, this._api);
+    const key = await fetchApiKey(device, this._api);
     this._apiKeyDialog.open(key);
   }
 

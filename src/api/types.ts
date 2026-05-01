@@ -91,6 +91,24 @@ export interface ConfiguredDevice {
   has_pending_changes: boolean;
   /** True if compiled with older ESPHome version */
   update_available: boolean;
+  /**
+   * True when the resolved YAML carries a top-level ``api:`` block
+   * (the device exposes the Native API at all). Gates the lock-icon
+   * indicator next to the device name in the table + card views and
+   * the encryption pill in the detail drawer. Devices without an
+   * api block — MQTT-only / sensor-bridge configs — get no indicator
+   * at all, since "insecure" doesn't apply to a surface that's
+   * turned off.
+   */
+  api_enabled: boolean;
+  /**
+   * True when the YAML (after !include / packages / !secret
+   * resolution) declares an ``api: encryption:`` block. Flips the
+   * indicator variant (filled lock vs open lock) when ``api_enabled``
+   * is set. The actual key value is fetched on demand via
+   * ``devices/get_api_key``.
+   */
+  api_encrypted: boolean;
 }
 
 /** An adoptable/importable ESPHome device. */

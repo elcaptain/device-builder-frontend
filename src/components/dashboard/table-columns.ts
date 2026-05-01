@@ -15,6 +15,8 @@ export interface DeviceRow {
   config: string;
   hasPendingChanges: boolean;
   hasUpdateAvailable: boolean;
+  api_enabled: boolean;
+  api_encrypted: boolean;
   busy: boolean;
   recentJob: FirmwareJob | null;
   _device: ConfiguredDevice;
@@ -103,6 +105,15 @@ export function createDeviceColumns(localize: LocalizeFunc): ColumnDef<DeviceRow
       header: localize("dashboard.table_col_name"),
       cell: (info) => {
         const row = info.row.original;
+        // No lock at all when the device doesn't expose the Native API.
+        // "Insecure" only makes sense for a surface that's actually on.
+        const encryptionIcon = row.api_encrypted ? "lock" : "lock-open-variant";
+        // Icon-only indicator → use the longer descriptive tooltip;
+        // there's no visible label competing for space.
+        const encryptionTitle = row.api_encrypted
+          ? localize("dashboard.table_status_encrypted_tooltip")
+          : localize("dashboard.table_status_unencrypted_tooltip");
+        const encryptionClass = row.api_encrypted ? "secure" : "insecure";
         return html`<span class="cell-name-wrap">
           <span class="cell-name">${row.friendly_name || row.name}</span>
           ${row.hasPendingChanges
@@ -110,6 +121,14 @@ export function createDeviceColumns(localize: LocalizeFunc): ColumnDef<DeviceRow
             : nothing}
           ${row.hasUpdateAvailable
             ? html`<span class="cell-indicator cell-indicator--update" title=${localize("dashboard.status_update_available")}></span>`
+            : nothing}
+          ${row.api_enabled
+            ? html`<wa-icon
+                class="cell-encryption ${encryptionClass}"
+                library="mdi"
+                name=${encryptionIcon}
+                title=${encryptionTitle}
+              ></wa-icon>`
             : nothing}
         </span>`;
       },
