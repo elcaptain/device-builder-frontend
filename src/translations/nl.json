@@ -391,10 +391,6 @@
   },
   "layout": {
     "secrets": "Geheimen",
-    "update_all": "Alles bijwerken",
-    "update_all_title": "Alle apparaten bijwerken",
-    "update_all_desc": "Dit zal een OTA-update starten voor alle momenteel online apparaten. Weet u het zeker?",
-    "update_all_confirm": "Alles bijwerken",
     "update_all_started": "{count} apparaat-update(s) gestart",
     "update_all_none": "Geen online apparaten om bij te werken",
     "update_all_error": "Starten van updates mislukt",

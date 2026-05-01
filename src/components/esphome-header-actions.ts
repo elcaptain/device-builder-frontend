@@ -4,7 +4,6 @@ import {
   mdiDotsVertical,
   mdiKeyVariant,
   mdiPlaylistCheck,
-  mdiUpdate,
 } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
@@ -23,7 +22,6 @@ registerMdiIcons({
   "dots-vertical": mdiDotsVertical,
   "key-variant": mdiKeyVariant,
   "playlist-check": mdiPlaylistCheck,
-  update: mdiUpdate,
 });
 
 @customElement("esphome-header-actions")
@@ -37,24 +35,7 @@ export class ESPHomeHeaderActions extends LitElement {
   private _jobs: Map<string, FirmwareJob> = new Map();
 
   @state()
-  private _path = window.location.pathname;
-
-  @state()
   private _open = false;
-
-  private _onPopState = () => {
-    this._path = window.location.pathname;
-  };
-
-  connectedCallback() {
-    super.connectedCallback();
-    window.addEventListener("popstate", this._onPopState);
-  }
-
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    window.removeEventListener("popstate", this._onPopState);
-  }
 
   static styles = [
     espHomeStyles,
@@ -205,14 +186,6 @@ export class ESPHomeHeaderActions extends LitElement {
         ? html`
             <div class="backdrop" @click=${this._close}></div>
             <div class="menu" style="position:fixed;top:var(--esphome-header-height, 48px);right:var(--wa-space-s);">
-              ${this._path === "/"
-                ? html`
-                    <div class="menu-item" @click=${this._openUpdateAll}>
-                      <wa-icon library="mdi" name="update"></wa-icon>
-                      ${this._localize("layout.update_all")}
-                    </div>
-                  `
-                : nothing}
               <div class="menu-item" @click=${this._openFirmwareJobs}>
                 <wa-icon library="mdi" name="playlist-check"></wa-icon>
                 <span class="menu-item-label">${this._localize("firmware_jobs.menu_item")}</span>
@@ -246,11 +219,6 @@ export class ESPHomeHeaderActions extends LitElement {
   private _openSecrets() {
     this._close();
     navigate("/secrets");
-  }
-
-  private _openUpdateAll() {
-    this._close();
-    window.dispatchEvent(new CustomEvent("esphome-enter-select-mode"));
   }
 
   private _openFirmwareJobs() {

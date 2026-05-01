@@ -1,5 +1,6 @@
 import { consume } from "@lit/context";
 import {
+  mdiCheckboxMultipleMarkedOutline,
   mdiClipboardTextSearchOutline,
   mdiMagnify,
   mdiPlus,
@@ -62,6 +63,7 @@ import "../components/wizard/create-config-dialog.js";
 import type { ESPHomeCreateConfigDialog } from "../components/wizard/create-config-dialog.js";
 
 registerMdiIcons({
+  "checkbox-multiple-marked-outline": mdiCheckboxMultipleMarkedOutline,
   "clipboard-text-search-outline": mdiClipboardTextSearchOutline,
   magnify: mdiMagnify,
   plus: mdiPlus,
@@ -124,8 +126,6 @@ export class ESPHomePageDashboard extends LitElement {
     this._selectedDevices = configuration ? new Set([configuration]) : new Set();
   };
 
-  private _onGlobalEnterSelectMode = () => this._onEnterSelectMode();
-
   protected willUpdate(changed: PropertyValues) {
     if (changed.has("_view")) {
       this.setAttribute("view", this._view);
@@ -141,7 +141,6 @@ export class ESPHomePageDashboard extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.setAttribute("view", this._view);
-    window.addEventListener("esphome-enter-select-mode", this._onGlobalEnterSelectMode);
     window.addEventListener("esphome-serial-setup", this._onSerialSetup);
   }
 
@@ -167,7 +166,6 @@ export class ESPHomePageDashboard extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    window.removeEventListener("esphome-enter-select-mode", this._onGlobalEnterSelectMode);
     window.removeEventListener("esphome-serial-setup", this._onSerialSetup);
   }
 
@@ -243,6 +241,30 @@ export class ESPHomePageDashboard extends LitElement {
     `;
   }
 
+  private _renderSelectToggle() {
+    const label = this._localize("dashboard.toggle_select_mode");
+    return html`
+      <button
+        class="select-toggle-btn ${this._selectMode ? "active" : ""}"
+        title=${label}
+        aria-label=${label}
+        aria-pressed=${this._selectMode}
+        @click=${this._toggleSelectMode}
+      >
+        <wa-icon library="mdi" name="checkbox-multiple-marked-outline"></wa-icon>
+      </button>
+    `;
+  }
+
+  private _toggleSelectMode = () => {
+    if (this._selectMode) {
+      this._selectMode = false;
+      this._selectedDevices = new Set();
+    } else {
+      this._selectMode = true;
+    }
+  };
+
   private _renderToolbar(matchCount: number, total: number) {
     const q = this._search.trim();
     const unit = matchCount === 1 ? this._localize("dashboard.device_singular") : this._localize("dashboard.device_plural");
@@ -258,6 +280,7 @@ export class ESPHomePageDashboard extends LitElement {
               @input=${(e: Event) => { this._search = (e.target as HTMLInputElement).value; }}
             />
           </div>
+          ${this._renderSelectToggle()}
           ${this._renderViewToggle()}
         </div>
         <span class="device-count"><strong>${matchCount}</strong> ${unit}${suffix}</span>
@@ -349,6 +372,7 @@ export class ESPHomePageDashboard extends LitElement {
               @input=${(e: Event) => { this._search = (e.target as HTMLInputElement).value; }}
             />
           </div>
+          ${this._renderSelectToggle()}
           ${this._renderViewToggle()}
         </div>
         <button slot="actions" class="table-create-btn" @click=${() => this._createDialog.open()}>

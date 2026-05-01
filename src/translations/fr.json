@@ -391,10 +391,6 @@
   },
   "layout": {
     "secrets": "Secrets",
-    "update_all": "Tout mettre à jour",
-    "update_all_title": "Mettre à jour tous les appareils",
-    "update_all_desc": "Cela déclenchera une mise à jour OTA pour tous les appareils actuellement en ligne. Êtes-vous sûr ?",
-    "update_all_confirm": "Tout mettre à jour",
     "update_all_started": "{count} mise(s) à jour démarrée(s)",
     "update_all_none": "Aucun appareil en ligne à mettre à jour",
     "update_all_error": "Échec du démarrage des mises à jour",

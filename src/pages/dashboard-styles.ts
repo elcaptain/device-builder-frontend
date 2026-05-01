@@ -189,6 +189,47 @@ export const dashboardStyles = css`
     font-size: 18px;
   }
 
+  /* Standalone toggle for "select multiple devices" mode. Sits next to
+   * the view-toggle and matches its size/feel, but is its own button so
+   * users don't read it as part of the view-type group. */
+  .select-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--wa-border-radius-m);
+    border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+    background: var(--wa-color-surface-raised);
+    color: var(--wa-color-text-quiet);
+    cursor: pointer;
+    transition:
+      background 0.12s,
+      color 0.12s,
+      border-color 0.12s;
+    padding: 0;
+    flex-shrink: 0;
+  }
+
+  .select-toggle-btn:hover {
+    background: var(--wa-color-surface-lowered);
+    color: var(--wa-color-text-normal);
+  }
+
+  .select-toggle-btn.active {
+    background: var(--esphome-primary);
+    color: var(--esphome-on-primary);
+    border-color: var(--esphome-primary);
+  }
+
+  .select-toggle-btn.active:hover {
+    background: color-mix(in srgb, var(--esphome-primary), black 10%);
+  }
+
+  .select-toggle-btn wa-icon {
+    font-size: 18px;
+  }
+
   /* ─── Empty search state ─── */
 
   .empty-search {

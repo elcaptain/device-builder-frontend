@@ -122,6 +122,7 @@
     "table_action_logs": "View logs",
     "table_action_install": "Install pending changes",
     "table_action_update": "Update to latest version",
+    "toggle_select_mode": "Select multiple devices",
     "table_status_online": "Online",
     "table_status_offline": "Offline",
     "table_status_unknown": "Unknown",
@@ -431,10 +432,6 @@
   },
   "layout": {
     "secrets": "Secrets",
-    "update_all": "Update All",
-    "update_all_title": "Update all devices",
-    "update_all_desc": "This will trigger an OTA update for all currently online devices. Are you sure?",
-    "update_all_confirm": "Update All",
     "update_all_started": "{count} device update(s) started",
     "update_all_none": "No online devices to update",
     "update_all_error": "Failed to start updates",
