@@ -74,6 +74,9 @@ jobs:
   trigger-release:
     needs: check-and-release
     if: needs.check-and-release.outputs.should_release == 'true'
+    permissions:
+      contents: write
+      pull-requests: read
     uses: ./.github/workflows/release.yml
     with:
       version: ${{ needs.check-and-release.outputs.version }}
