@@ -80,12 +80,32 @@ export const tableCellStyles = css`
   }
   .status-recent--success {
     color: var(--esphome-success);
+    /* Pulse the success indicator so it reads as transient — the
+       dashboard window for the COMPLETED state is short and the
+       throb signals "this is about to go away" instead of looking
+       like the device's permanent state. */
+    animation: cell-status-completed-pulse 1s ease-in-out infinite;
   }
   .status-recent--failed {
     color: var(--esphome-error);
   }
   .status-recent--cancelled {
     color: var(--wa-color-text-quiet);
+  }
+  @keyframes cell-status-completed-pulse {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+  /* Honour reduced-motion preferences — keep the icon solid and let
+     the success colour alone signal completion. */
+  @media (prefers-reduced-motion: reduce) {
+    .status-recent--success {
+      animation: none;
+    }
   }
 
   .cell-name-wrap {
