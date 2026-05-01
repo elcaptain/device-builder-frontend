@@ -112,9 +112,17 @@ export const deviceSectionConfigStyles = css`
 
   .actions {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
     gap: var(--wa-space-s);
     padding-top: var(--wa-space-s);
+  }
+
+  /* When the delete button is hidden (e.g. esphome:), the save button
+   * should still hug the right edge — :only-child gets pushed to the
+   * right by the space-between layout naturally. */
+  .actions > :only-child {
+    margin-left: auto;
   }
 
   .save-button {
@@ -142,6 +150,37 @@ export const deviceSectionConfigStyles = css`
   }
 
   .save-button wa-icon {
+    font-size: 16px;
+  }
+
+  .delete-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    color: var(--esphome-error);
+    border: var(--wa-border-width-s) solid
+      color-mix(in srgb, var(--esphome-error), transparent 70%);
+    padding: var(--wa-space-xs) var(--wa-space-m);
+    border-radius: var(--wa-border-radius-m);
+    cursor: pointer;
+    font-size: var(--wa-font-size-s);
+    font-weight: var(--wa-font-weight-bold);
+    font-family: inherit;
+    transition: background 0.12s, border-color 0.12s;
+  }
+
+  .delete-button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--esphome-error), transparent 90%);
+    border-color: var(--esphome-error);
+  }
+
+  .delete-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .delete-button wa-icon {
     font-size: 16px;
   }
 

@@ -265,3 +265,51 @@ export function updateSectionInYaml(
   lines.splice(start, end - start, ...newLines);
   return lines.join("\n");
 }
+
+/**
+ * Remove a section (top-level block or single list item) from a YAML
+ * document. When deleting a list item leaves its parent block with
+ * nothing but blank lines, the empty parent is removed too — both to
+ * avoid a stray `sensor:` that ESPHome rejects, and to keep the
+ * resulting YAML tidy.
+ */
+export function removeSectionFromYaml(
+  yaml: string,
+  sectionKey: string,
+  fromLine?: number,
+): string {
+  const lines = yaml.split("\n");
+  const { start, end } = findSectionRange(lines, sectionKey, fromLine);
+  if (start < 0) return yaml;
+
+  const isListItem = /^\s+-\s/.test(lines[start]);
+  lines.splice(start, end - start);
+
+  if (isListItem) {
+    // Walk backwards to the parent top-level key; if nothing but
+    // blanks remain between it and the next sibling, drop it too.
+    let parentIdx = start - 1;
+    while (parentIdx >= 0 && !/^[a-zA-Z]/.test(lines[parentIdx])) {
+      parentIdx--;
+    }
+    if (parentIdx >= 0) {
+      let hasContent = false;
+      let parentEnd = lines.length;
+      for (let i = parentIdx + 1; i < lines.length; i++) {
+        if (/^[a-zA-Z]/.test(lines[i])) {
+          parentEnd = i;
+          break;
+        }
+        if (lines[i].trim() !== "") {
+          hasContent = true;
+          break;
+        }
+      }
+      if (!hasContent) {
+        lines.splice(parentIdx, parentEnd - parentIdx);
+      }
+    }
+  }
+
+  return lines.join("\n");
+}

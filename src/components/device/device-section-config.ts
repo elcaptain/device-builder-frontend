@@ -1,6 +1,7 @@
 import { consume } from "@lit/context";
 import {
   mdiContentSave,
+  mdiDelete,
   mdiInformationOutline,
   mdiOpenInNew,
 } from "@mdi/js";
@@ -26,6 +27,7 @@ import { setIn } from "../../util/nested-values.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import {
   parseYamlSectionValues,
+  removeSectionFromYaml,
   updateSectionInYaml,
 } from "../../util/yaml-section-values.js";
 import { parseTopLevelComponents } from "../../util/yaml-serialize.js";
@@ -33,6 +35,8 @@ import { parseTopLevelComponents } from "../../util/yaml-serialize.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
 import "@home-assistant/webawesome/dist/components/switch/switch.js";
+import "../confirm-dialog.js";
+import type { ESPHomeConfirmDialog } from "../confirm-dialog.js";
 import "./config-entry-form.js";
 import type {
   ConfigEntryValueChange,
@@ -42,9 +46,15 @@ import { deviceSectionConfigStyles } from "./device-section-config.styles.js";
 
 registerMdiIcons({
   "content-save": mdiContentSave,
+  delete: mdiDelete,
   "information-outline": mdiInformationOutline,
   "open-in-new": mdiOpenInNew,
 });
+
+// `esphome:` is the device's identity block — required for the
+// configuration to compile. Hide the delete button there to prevent
+// the user accidentally bricking the file in one click.
+const UNDELETABLE_SECTIONS = new Set(["esphome"]);
 
 // Local type — SectionConfigResponse is not yet available in the WebSocket backend
 interface SectionConfigResponse {
@@ -147,6 +157,12 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
   @query("esphome-config-entry-form")
   private _form?: ESPHomeConfigEntryForm;
+
+  @query("esphome-confirm-dialog")
+  private _confirmDialog?: ESPHomeConfirmDialog;
+
+  @state()
+  private _deleting = false;
 
   static styles = [espHomeStyles, inputStyles, deviceSectionConfigStyles];
 
@@ -258,6 +274,8 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
       YAML_ONLY_SECTIONS.has(this.sectionKey) ||
       this._config.entries.length === 0;
 
+    const canDelete = !UNDELETABLE_SECTIONS.has(this.sectionKey);
+
     return html`
       <div class="section-header">
         <div class="section-header-info">
@@ -290,20 +308,25 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
       </div>
       ${yamlOnly
         ? html`<div class="yaml-only-notice" role="note">
-            <wa-icon library="mdi" name="information-outline"></wa-icon>
-            <div class="yaml-only-notice-body">
-              <p>${this._localize("device.yaml_only_section")}</p>
-              ${this.yamlPaneVisible
-                ? nothing
-                : html`<button
-                    type="button"
-                    class="yaml-only-notice-cta"
-                    @click=${this._onShowYamlEditor}
-                  >
-                    ${this._localize("device.show_yaml_editor")}
-                  </button>`}
+              <wa-icon library="mdi" name="information-outline"></wa-icon>
+              <div class="yaml-only-notice-body">
+                <p>${this._localize("device.yaml_only_section")}</p>
+                ${this.yamlPaneVisible
+                  ? nothing
+                  : html`<button
+                      type="button"
+                      class="yaml-only-notice-cta"
+                      @click=${this._onShowYamlEditor}
+                    >
+                      ${this._localize("device.show_yaml_editor")}
+                    </button>`}
+              </div>
             </div>
-          </div>`
+            ${canDelete
+              ? html`<div class="actions">
+                  ${this._renderDeleteButton()}
+                </div>`
+              : nothing}`
         : html`
             <esphome-config-entry-form
               .entries=${this._config.entries}
@@ -338,6 +361,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
               ? html`<p class="error">${this._error}</p>`
               : nothing}
             <div class="actions">
+              ${canDelete ? this._renderDeleteButton() : nothing}
               <button
                 class="save-button"
                 ?disabled=${this._saving || !this._dirty}
@@ -350,7 +374,78 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
               </button>
             </div>
           `}
+      ${canDelete
+        ? html`<esphome-confirm-dialog
+            heading=${this._localize("device.delete_section")}
+            confirm-label=${this._localize("device.delete_section")}
+            message=${this._localize("device.confirm_delete_section", {
+              name: this._config.title,
+            })}
+            destructive
+            @confirm=${this._onDeleteConfirmed}
+          ></esphome-confirm-dialog>`
+        : nothing}
     `;
+  }
+
+  private _renderDeleteButton() {
+    return html`<button
+      class="delete-button"
+      ?disabled=${this._saving || this._deleting}
+      @click=${this._onDeleteClick}
+    >
+      <wa-icon library="mdi" name="delete"></wa-icon>
+      ${this._localize("device.delete_section")}
+    </button>`;
+  }
+
+  private _onDeleteClick() {
+    this._confirmDialog?.open();
+  }
+
+  private async _onDeleteConfirmed() {
+    if (!this._config) return;
+    this._deleting = true;
+    this._error = "";
+    const title = this._config.title;
+    try {
+      const yaml = await this._api.getConfig(this.configuration);
+      const newYaml = removeSectionFromYaml(
+        yaml,
+        this.sectionKey,
+        this.fromLine,
+      );
+      if (newYaml === yaml) {
+        this._error = this._localize("device.section_delete_error");
+        return;
+      }
+      await this._api.updateConfig(this.configuration, newYaml);
+      this._dirty = false;
+      this.dispatchEvent(
+        new CustomEvent("yaml-updated", {
+          detail: { yaml: newYaml },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+      this.dispatchEvent(
+        new CustomEvent("section-select", {
+          detail: { sectionKey: null },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+      toast.success(this._localize("device.section_deleted", { name: title }), {
+        richColors: true,
+      });
+    } catch (e) {
+      this._error =
+        e instanceof Error
+          ? e.message
+          : this._localize("device.section_delete_error");
+    } finally {
+      this._deleting = false;
+    }
   }
 
   private _onShowYamlEditor() {
