@@ -29,7 +29,7 @@ describe("getEncryptionState", () => {
     expect(getEncryptionState(inputs({ api_encrypted: false }))).toBe("plaintext");
   });
 
-  it("returns 'active' when YAML encrypted and mDNS not seen yet", () => {
+  it("returns 'active' when YAML encrypted, in sync, and mDNS not seen yet", () => {
     expect(getEncryptionState(inputs({ api_encryption_active: null }))).toBe("active");
   });
 
@@ -49,12 +49,39 @@ describe("getEncryptionState", () => {
     ).toBe("active");
   });
 
-  it("returns 'pending' when YAML encrypted, mDNS reports plaintext, and changes are pending", () => {
+  it("returns 'pending' on pending changes when mDNS hasn't confirmed encryption", () => {
+    /* Take Control adds ``api: encryption: …`` to the YAML before
+       the user has flashed. The running firmware is still the
+       vendor image with no encryption, so the indicator must read
+       "pending" — both for the brand-new ``null`` case (mDNS
+       hasn't observed the device yet) and the ``""`` case (mDNS
+       confirms the device is broadcasting plaintext). The
+       previous behaviour fell through to "active" via the null
+       path and showed a green lock for an unencrypted device. */
+    for (const observed of [null, ""]) {
+      expect(
+        getEncryptionState(
+          inputs({ api_encryption_active: observed, has_pending_changes: true }),
+        ),
+      ).toBe("pending");
+    }
+  });
+
+  it("stays 'active' when mDNS confirms encryption even with pending changes", () => {
+    /* Comment / whitespace / unrelated YAML edit on a device that
+       is already running encrypted firmware — the running
+       firmware still answers Noise on the wire, so encryption is
+       live. ``has_pending_changes`` here means "YAML differs from
+       last compile", not "encryption is about to change". Truth
+       on the wire wins. */
     expect(
       getEncryptionState(
-        inputs({ api_encryption_active: "", has_pending_changes: true }),
+        inputs({
+          api_encryption_active: "Noise_NNpsk0_25519_ChaChaPoly_SHA256",
+          has_pending_changes: true,
+        }),
       ),
-    ).toBe("pending");
+    ).toBe("active");
   });
 
   it("returns 'mismatch' when YAML encrypted, mDNS reports plaintext, no pending changes", () => {
