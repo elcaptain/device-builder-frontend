@@ -20,6 +20,7 @@ import type { ConfiguredDevice } from "../../api/types.js";
 import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import { EscapeController } from "../../util/escape-controller.js";
 import { buildWebUiUrl } from "../../util/web-ui-url.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
@@ -266,6 +267,17 @@ export class ESPHomeTableRowMenu extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  private _escape = new EscapeController(this, (e) => {
+    e.preventDefault();
+    this._close();
+  });
+
+  protected willUpdate(changed: Map<string, unknown>) {
+    if (changed.has("device") || changed.has("position")) {
+      this._escape.set(this.device != null && this.position != null);
+    }
   }
 
   protected updated() {

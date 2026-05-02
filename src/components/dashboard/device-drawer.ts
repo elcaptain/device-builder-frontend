@@ -15,6 +15,7 @@ import { DeviceState } from "../../api/types.js";
 import type { ConfiguredDevice } from "../../api/types.js";
 import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import { EscapeController } from "../../util/escape-controller.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
@@ -388,6 +389,15 @@ export class ESPHomeDeviceDrawer extends LitElement {
     this.dispatchEvent(
       new CustomEvent("drawer-close", { bubbles: true, composed: true }),
     );
+  }
+
+  private _escape = new EscapeController(this, (e) => {
+    e.preventDefault();
+    this._close();
+  });
+
+  protected willUpdate(changed: Map<string, unknown>) {
+    if (changed.has("open")) this._escape.set(this.open);
   }
 
   private _emitAction(name: string) {
