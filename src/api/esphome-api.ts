@@ -674,6 +674,39 @@ export class ESPHomeAPI {
     return this.sendCommand<PagedComponentsResponse>("components/get_components", args);
   }
 
+  /**
+   * Map of integration name → esphome.io docs URL for every
+   * loaded-integration name we can resolve. Names with no docs page
+   * are simply absent from the map; the dashboard renders those as
+   * plain text. Fetched once at app load — the dataset only refreshes
+   * with a backend release.
+   *
+   * The WS layer doesn't enforce a shape, so we filter the payload to
+   * the ``{string: string}`` contract here: anything that isn't a
+   * plain object is replaced with ``{}``, and entries with non-string
+   * keys/values are dropped. Consumers can rely on the result being
+   * safe to spread into a context without further validation.
+   */
+  async getIntegrationDocs(): Promise<Record<string, string>> {
+    const raw = await this.sendCommand<unknown>(
+      "components/get_integration_docs",
+    );
+    if (
+      raw === null ||
+      typeof raw !== "object" ||
+      Array.isArray(raw)
+    ) {
+      return {};
+    }
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (typeof key === "string" && typeof value === "string" && value) {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
   // ─── Config Commands ──────────────────────────────────────
 
   /** Get ESPHome and server version. */

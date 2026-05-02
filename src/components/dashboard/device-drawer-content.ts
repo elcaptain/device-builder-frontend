@@ -16,7 +16,10 @@ import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import type { ConfiguredDevice } from "../../api/types.js";
-import { localizeContext } from "../../context/index.js";
+import {
+  integrationDocsContext,
+  localizeContext,
+} from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
@@ -36,11 +39,34 @@ registerMdiIcons({
   upload: mdiUpload,
 });
 
+/**
+ * Whitelist docs URLs to the canonical esphome.io site over HTTPS.
+ *
+ * The map is populated by the backend from the in-house catalog, so a
+ * compromised payload is the practical concern here — interpolating an
+ * untrusted ``href`` directly would let a ``javascript:`` or
+ * ``data:`` scheme run code on click. Bound the rendered anchors to
+ * exactly the host the catalog targets and fall back to plain text
+ * otherwise.
+ */
+function _isSafeDocsUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname === "esphome.io";
+  } catch {
+    return false;
+  }
+}
+
 @customElement("esphome-device-drawer-content")
 export class ESPHomeDeviceDrawerContent extends LitElement {
   @consume({ context: localizeContext, subscribe: true })
   @state()
   private _localize: LocalizeFunc = (key) => key;
+
+  @consume({ context: integrationDocsContext, subscribe: true })
+  @state()
+  private _integrationDocs: Record<string, string> = {};
 
   @property({ attribute: false })
   device!: ConfiguredDevice;
@@ -145,6 +171,34 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
         background: var(--wa-color-surface-lowered);
         color: var(--wa-color-text-quiet);
         border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+      }
+
+      /* Linked tags get the dashboard's primary colour to read as
+         "this opens something" without pulling so far from the plain
+         tag styling that the row looks visually noisy. text-decoration
+         is reset because the anchor variant inherits the .tag chrome
+         and the underline would clash with the rounded pill shape. */
+      .tag--link {
+        color: var(--esphome-primary);
+        text-decoration: none;
+        cursor: pointer;
+        transition:
+          background 0.12s,
+          border-color 0.12s;
+      }
+
+      .tag--link:hover,
+      .tag--link:focus-visible {
+        background: color-mix(in srgb, var(--esphome-primary), transparent 90%);
+        border-color: color-mix(in srgb, var(--esphome-primary), transparent 60%);
+      }
+
+      /* Keyboard users tabbing onto the tag need the same affordance
+         mouse users get on hover, plus a visible focus ring so the
+         active tag stands out from its peers in the row. */
+      .tag--link:focus-visible {
+        outline: 2px solid var(--esphome-primary);
+        outline-offset: 2px;
       }
 
       .status-badges {
@@ -268,9 +322,18 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
             <div class="section">
               <h4 class="section-title">${this._localize("dashboard.drawer_loaded_integrations")}</h4>
               <div class="tags-wrap">
-                ${d.loaded_integrations.map(
-                  (i) => html`<span class="tag">${i}</span>`,
-                )}
+                ${d.loaded_integrations.map((i) => {
+                  const url = this._integrationDocs[i];
+                  return url && _isSafeDocsUrl(url)
+                    ? html`<a
+                        class="tag tag--link"
+                        href=${url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        >${i}</a
+                      >`
+                    : html`<span class="tag">${i}</span>`;
+                })}
               </div>
             </div>
           `
