@@ -7,8 +7,10 @@ import type { ESPHomeAPI } from "../../api/index.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext, apiContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import { friendlyNameSlugify } from "../../util/friendly-name-slugify.js";
 import { markJustCreated } from "../../util/just-created.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import { safeUploadFilename } from "../../util/safe-upload-filename.js";
 
 import "@home-assistant/webawesome/dist/components/dialog/dialog.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
@@ -264,10 +266,30 @@ export class ESPHomeCreateConfigDialog extends LitElement {
     }
   }
 
+  /** Close the dialog and navigate to the new device's editor.
+   *
+   * Centralised so the three creation paths can't drift apart on
+   * the navigation contract (``markJustCreated`` arms the editor's
+   * one-shot welcome banner; ``encodeURIComponent`` keeps spaces /
+   * Unicode safe in the URL — ``app-shell``'s router render decodes
+   * the param on the receiving side so ``this.id`` stays the raw
+   * filename for ``configuration`` comparison).
+   */
+  private _navigateToCreated(configuration: string): void {
+    markJustCreated(configuration);
+    this.close();
+    window.history.pushState(
+      {},
+      "",
+      `/device/${encodeURIComponent(configuration)}`,
+    );
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }
+
   private async _onCreateEmptyConfig(e: CustomEvent<{ name: string }>) {
     if (this._submitting) return;
     const { name } = e.detail;
-    const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    const slug = friendlyNameSlugify(name);
     this._submitting = true;
     try {
       const { configuration } = await this._api.createDevice({
@@ -275,10 +297,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
         board_id: this._selectedBoard?.id ?? "",
         config_type: "empty",
       });
-      markJustCreated(configuration);
-      this.close();
-      window.history.pushState({}, "", `/device/${configuration}`);
-      window.dispatchEvent(new PopStateEvent("popstate"));
+      this._navigateToCreated(configuration);
     } catch (err) {
       console.error("Failed to create empty config:", err);
     } finally {
@@ -300,8 +319,27 @@ export class ESPHomeCreateConfigDialog extends LitElement {
       return;
     }
 
+    // Preserve the user's original filename character-for-character —
+    // they're importing a working config, not typing a new device
+    // name. ``safeUploadFilename`` only strips characters that would
+    // actually break a filesystem write (NUL, path separators,
+    // Windows-illegal punctuation) so underscores, accented letters,
+    // and non-Latin scripts all round-trip.
     const name = this._importFile.name.replace(/\.(yaml|yml)$/i, "");
-    const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    const slug = safeUploadFilename(name);
+
+    // ``safeUploadFilename`` returns ``""`` when the input was made
+    // entirely of stripped chars (``"..."``, ``"///"``, ``"\x00"``).
+    // Surface a specific error before the network call instead of
+    // letting the backend's generic ``INVALID_ARGS`` bubble up as
+    // ``import_general_error`` — the user can rename the file and
+    // try again, which they can't do if we hide the actual cause.
+    if (!slug) {
+      this._importError = this._localize("wizard.import_invalid_filename", {
+        name,
+      });
+      return;
+    }
 
     this._submitting = true;
     try {
@@ -310,10 +348,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
         config_type: "upload",
         file_content: fileContent,
       });
-      markJustCreated(configuration);
-      this.close();
-      window.history.pushState({}, "", `/device/${configuration}`);
-      window.dispatchEvent(new PopStateEvent("popstate"));
+      this._navigateToCreated(configuration);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this._importError = msg.includes("409")
@@ -335,7 +370,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
     if (this._submitting) return;
     const { board, name, wifiSsid, wifiPassword } = e.detail;
     if (!board) return;
-    const slug = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    const slug = friendlyNameSlugify(name);
     this._submitting = true;
     try {
       const { configuration } = await this._api.createDevice({
@@ -345,10 +380,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
         ssid: wifiSsid,
         psk: wifiPassword,
       });
-      markJustCreated(configuration);
-      this.close();
-      window.history.pushState({}, "", `/device/${configuration}`);
-      window.dispatchEvent(new PopStateEvent("popstate"));
+      this._navigateToCreated(configuration);
     } catch (err) {
       console.error("Failed to create device:", err);
     } finally {
