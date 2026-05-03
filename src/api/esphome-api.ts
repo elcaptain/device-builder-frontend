@@ -6,6 +6,12 @@
  * Streaming commands (compile, upload, logs, validate, clean) receive
  * EventMessages with "output" and "result" events.
  */
+import { APIError } from "./api-error.js";
+import {
+  clearStoredToken,
+  getStoredToken,
+  setStoredToken,
+} from "../util/auth-token.js";
 import type {
   AddComponentResponse,
   ArchivedDevice,
@@ -31,6 +37,40 @@ import type {
   UserPreferences,
   WizardResponse,
 } from "./types.js";
+
+interface AuthLoginResult {
+  token: string;
+  expires_at: number;
+}
+
+/** Mask sensitive auth fields when logging — tokens / passwords show
+ *  up in support tickets via attached browser console logs. The
+ *  formatted command/result still has shape, just no secret values. */
+function redactForLog(payload: unknown): unknown {
+  if (payload === null || typeof payload !== "object") return payload;
+  const obj = payload as Record<string, unknown>;
+  const command = typeof obj.command === "string" ? obj.command : null;
+  const isAuth =
+    (command !== null && command.startsWith("auth")) ||
+    "token" in obj ||
+    "password" in obj;
+  if (!isAuth) return payload;
+  const clone: Record<string, unknown> = { ...obj };
+  if (clone.args && typeof clone.args === "object") {
+    const args = clone.args as Record<string, unknown>;
+    const safeArgs: Record<string, unknown> = { ...args };
+    if ("token" in safeArgs) safeArgs.token = "<redacted>";
+    if ("password" in safeArgs) safeArgs.password = "<redacted>";
+    clone.args = safeArgs;
+  }
+  if (clone.result && typeof clone.result === "object") {
+    const result = clone.result as Record<string, unknown>;
+    if ("token" in result) {
+      clone.result = { ...result, token: "<redacted>" };
+    }
+  }
+  return clone;
+}
 
 type PendingRequest = {
   resolve: (result: unknown) => void;
@@ -59,9 +99,23 @@ export class ESPHomeAPI {
     reject: (error: Error) => void;
   } | null = null;
 
+  // Auth state. ``_authToken`` mirrors the value last accepted by the
+  // server (or pulled from localStorage on (re)connect). ``_ready`` is
+  // a deferred promise resolved either when the server replies
+  // ``requires_auth: false``, or after a successful auth/login —
+  // components that need to issue commands at startup ``await api.ready``
+  // to avoid racing the auth gate.
+  private _authToken: string | null = null;
+  private _readyPromise: Promise<void> = Promise.resolve();
+  private _readyResolve: (() => void) | null = null;
+
   // Callbacks for connection state changes
   onConnected?: (info: ServerInfoMessage) => void;
   onDisconnected?: () => void;
+  /** Fired when the server requires auth and we don't have a usable
+   *  stored token (or the stored token was rejected). The app shell
+   *  uses this to surface the login form. */
+  onAuthRequired?: () => void;
 
   get connected(): boolean {
     return this._connected;
@@ -69,6 +123,34 @@ export class ESPHomeAPI {
 
   get serverInfo(): ServerInfoMessage | null {
     return this._serverInfo;
+  }
+
+  /** Resolves once the connection is fully ready to issue commands —
+   *  i.e. ``requires_auth: false`` was reported, or auth/login
+   *  succeeded. Components that need to fetch data on startup should
+   *  ``await api.ready`` before calling other commands. */
+  get ready(): Promise<void> {
+    return this._readyPromise;
+  }
+
+  /** Replace ``ready`` with a fresh pending promise — but only when
+   *  the previous one was already resolved. This keeps the same
+   *  pending promise alive across the ``connect()`` → ``_onClose``
+   *  → reconnect chain so callers that attached ``.then(...)`` during
+   *  the disconnected window aren't stranded when the reconnect's
+   *  ``connect()`` runs. */
+  private _resetReady(): void {
+    if (this._readyResolve !== null) return;
+    this._readyPromise = new Promise<void>((resolve) => {
+      this._readyResolve = resolve;
+    });
+  }
+
+  private _markReady(): void {
+    if (this._readyResolve) {
+      this._readyResolve();
+      this._readyResolve = null;
+    }
   }
 
   // ─── Connection Management ────────────────────────────────
@@ -81,6 +163,11 @@ export class ESPHomeAPI {
     if (this._connected && this._serverInfo) {
       return Promise.resolve(this._serverInfo);
     }
+
+    // Every connect attempt has its own readiness window — pre-auth
+    // commands shouldn't accidentally observe a still-resolved promise
+    // from a previous (now-closed) connection.
+    this._resetReady();
 
     return new Promise((resolve, reject) => {
       this._connectPromise = { resolve, reject };
@@ -124,7 +211,7 @@ export class ESPHomeAPI {
     let data: Record<string, unknown>;
     try {
       data = JSON.parse(event.data);
-      console.debug("[RECEIVED]", data);
+      console.debug("[RECEIVED]", redactForLog(data));
     } catch {
       console.error("Invalid JSON from WebSocket");
       return;
@@ -140,6 +227,7 @@ export class ESPHomeAPI {
         this._connectPromise = null;
       }
       this.onConnected?.(this._serverInfo);
+      this._handlePostServerInfo(this._serverInfo);
       return;
     }
 
@@ -152,7 +240,7 @@ export class ESPHomeAPI {
       const pending = this._pendingRequests.get(messageId);
       if (pending) {
         this._pendingRequests.delete(messageId);
-        pending.reject(new Error(`${err.error_code}: ${err.details || ""}`));
+        pending.reject(new APIError(err.error_code, err.details));
       }
       const stream = this._streamHandlers.get(messageId);
       if (stream) {
@@ -198,10 +286,66 @@ export class ESPHomeAPI {
     }
   }
 
+  /**
+   * Run the auth dance immediately after the ServerInfoMessage lands.
+   *
+   * - If the server says ``requires_auth: false`` (no password
+   *   configured, or the request came in via the trusted HA-ingress
+   *   site) → mark the connection ready, no further work needed.
+   * - If a stored token exists → try ``auth/login {token}``. On
+   *   success the server returns a fresh token + sliding expiry; we
+   *   persist it and mark ready. On any error the stored token is
+   *   dropped and ``onAuthRequired`` fires so the app shell can
+   *   surface the login form.
+   * - If no stored token exists → fire ``onAuthRequired`` directly.
+   *
+   * Runs on every (re)connect, so a mid-session reconnect with a
+   * still-valid token is transparent and a revoked token correctly
+   * surfaces the login form.
+   */
+  private _handlePostServerInfo(info: ServerInfoMessage): void {
+    if (!info.requires_auth) {
+      this._markReady();
+      return;
+    }
+
+    // Prefer the localStorage copy (it's "the most recent token we
+    // know about" since ``setStoredToken`` runs on every successful
+    // login), but fall back to the in-memory ``_authToken`` so private
+    // mode / sandboxed iframes — where ``setStoredToken`` is silently
+    // a no-op — don't drop the user back to the login form on every
+    // reconnect.
+    const token = getStoredToken() ?? this._authToken;
+    if (!token) {
+      this.onAuthRequired?.();
+      return;
+    }
+
+    void this._tryStoredTokenLogin(token);
+  }
+
+  private async _tryStoredTokenLogin(token: string): Promise<void> {
+    try {
+      await this.login({ token });
+    } catch {
+      // Stored token rejected — wipe it and surface the login form.
+      // The login() method already cleared in-memory + storage on the
+      // not_authenticated path; rate-limited / unexpected errors land
+      // here too, and the user retries with credentials.
+      this.onAuthRequired?.();
+    }
+  }
+
   private _onClose(): void {
     const wasConnected = this._connected;
     this._connected = false;
     this._ws = null;
+
+    // Park ``ready`` until the next successful connect+auth. Without
+    // this, anyone awaiting it during the reconnect-backoff window
+    // would resume against a closed socket and immediately hit
+    // "WebSocket not connected".
+    this._resetReady();
 
     // Reject all pending requests
     for (const [, pending] of this._pendingRequests) {
@@ -276,7 +420,7 @@ export class ESPHomeAPI {
           reject(error);
         },
       });
-      console.debug("[SENDING]", msg);
+      console.debug("[SENDING]", redactForLog(msg));
       this._ws!.send(JSON.stringify(msg));
     });
   }
@@ -302,6 +446,68 @@ export class ESPHomeAPI {
     this._ws.send(JSON.stringify(msg));
 
     return messageId;
+  }
+
+  // ─── Auth ─────────────────────────────────────────────────
+
+  /**
+   * Authenticate the current connection.
+   *
+   * Two paths, mirroring the backend ``auth/login`` contract:
+   * - Username + password (interactive sign-in form).
+   * - Token replay (silent re-auth on (re)connect using a token
+   *   persisted from a previous successful login).
+   *
+   * On success the returned token is persisted to localStorage and
+   * cached on the API client so the next reconnect can replay it
+   * silently. ``ready`` resolves so any callers awaiting it (the app
+   * shell's ``_postAuth`` flow) can proceed.
+   *
+   * On ``not_authenticated`` the stored token is cleared — no point
+   * trying it again. Other errors (rate limited, transport, ...)
+   * leave storage untouched so the user can retry once the limit
+   * window passes or the network recovers.
+   */
+  async login(
+    credentials: { username: string; password: string } | { token: string },
+  ): Promise<AuthLoginResult> {
+    try {
+      const result = await this.sendCommand<AuthLoginResult>(
+        "auth/login",
+        credentials as unknown as Record<string, unknown>,
+      );
+      this._authToken = result.token;
+      setStoredToken(result.token, result.expires_at);
+      this._markReady();
+      return result;
+    } catch (err) {
+      if (err instanceof APIError && err.errorCode === "not_authenticated") {
+        this._authToken = null;
+        clearStoredToken();
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Revoke the current session and drop the stored token.
+   *
+   * The backend closes the socket immediately after responding, which
+   * triggers our auto-reconnect — the new connection will land on
+   * ``requires_auth: true`` with no usable token, so the app shell
+   * surfaces the login form. We don't proactively close here; letting
+   * the backend drive the close keeps the flow simple.
+   */
+  async logout(): Promise<void> {
+    try {
+      await this.sendCommand("auth/logout");
+    } finally {
+      // Always wipe local state — even if the request failed (e.g.
+      // network blip), the user's intent is "log me out". On
+      // reconnect they'll be prompted to sign in again.
+      this._authToken = null;
+      clearStoredToken();
+    }
   }
 
   // ─── Event Subscription ────────────────────────────────────

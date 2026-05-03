@@ -6,6 +6,7 @@ import {
   it,
   vi,
 } from "vitest";
+import { APIError } from "../../src/api/api-error.js";
 import { ESPHomeAPI } from "../../src/api/esphome-api.js";
 import {
   MockWebSocket,
@@ -20,6 +21,22 @@ const serverInfo = {
   ha_addon: false,
   requires_auth: false,
 };
+
+const serverInfoAuthRequired = {
+  ...serverInfo,
+  requires_auth: true,
+};
+
+function stubLocalStorage(initial?: Record<string, string>): Map<string, string> {
+  const store = new Map<string, string>(Object.entries(initial ?? {}));
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => store.set(k, v),
+    removeItem: (k: string) => store.delete(k),
+    clear: () => store.clear(),
+  });
+  return store;
+}
 
 async function connect(api: ESPHomeAPI): Promise<MockWebSocket> {
   const pending = api.connect();
@@ -139,13 +156,28 @@ describe("ESPHomeAPI — sendCommand", () => {
     expect(sent.args).toBeUndefined();
   });
 
-  it("rejects with the error_code + details on ErrorMessage", async () => {
+  it("rejects with an APIError carrying error_code + details", async () => {
     const api = new ESPHomeAPI();
     const ws = await connect(api);
     const pending = api.sendCommand("boom");
     const { message_id } = ws.sentAs<{ message_id: string }>(0);
     ws.receive({ message_id, error_code: "not_found", details: "no such cmd" });
+    // Existing string-match contract preserved for log scrapers.
     await expect(pending).rejects.toThrow(/not_found.*no such cmd/);
+
+    // Structured fields available on the error so callers can branch
+    // on error_code without re-parsing the message.
+    const second = api.sendCommand("boom2");
+    const id2 = ws.sentAs<{ message_id: string }>(1).message_id;
+    ws.receive({ message_id: id2, error_code: "not_found", details: "gone" });
+    try {
+      await second;
+      throw new Error("should have rejected");
+    } catch (err) {
+      expect(err).toBeInstanceOf(APIError);
+      expect((err as APIError).errorCode).toBe("not_found");
+      expect((err as APIError).details).toBe("gone");
+    }
   });
 
   it("rejects when no response arrives before the timeout", async () => {
@@ -447,5 +479,361 @@ describe("ESPHomeAPI — typed command wrappers", () => {
     const sent = ws.sentAs<{ command: string; args: Record<string, unknown> }>(0);
     expect(sent.command).toBe("config/set_preferences");
     expect(sent.args).toEqual({ theme: "dark" });
+  });
+});
+
+describe("ESPHomeAPI — auth", () => {
+  beforeEach(() => {
+    installMockWebSocket();
+    stubLocalStorage();
+  });
+  afterEach(() => {
+    uninstallMockWebSocket();
+    vi.unstubAllGlobals();
+  });
+
+  it("ready resolves immediately when requires_auth is false", async () => {
+    const api = new ESPHomeAPI();
+    const pending = api.connect();
+    const ws = MockWebSocket.latest();
+    ws.open();
+    ws.receive(serverInfo);
+    await pending;
+    // No login needed — the trusted-ingress / no-password case.
+    await expect(api.ready).resolves.toBeUndefined();
+  });
+
+  it("fires onAuthRequired when requires_auth is true and no token is stored", async () => {
+    const api = new ESPHomeAPI();
+    const onAuthRequired = vi.fn();
+    api.onAuthRequired = onAuthRequired;
+    const pending = api.connect();
+    const ws = MockWebSocket.latest();
+    ws.open();
+    ws.receive(serverInfoAuthRequired);
+    await pending;
+    expect(onAuthRequired).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto-replays a stored token when requires_auth is true", async () => {
+    stubLocalStorage({
+      "esphome.auth-token": JSON.stringify({
+        token: "stored-tok",
+        expires_at: 1_700_000_000,
+      }),
+    });
+    const api = new ESPHomeAPI();
+    const onAuthRequired = vi.fn();
+    api.onAuthRequired = onAuthRequired;
+
+    const pending = api.connect();
+    const ws = MockWebSocket.latest();
+    ws.open();
+    ws.receive(serverInfoAuthRequired);
+    await pending;
+
+    // The auto-replay sends auth/login {token}.
+    const sent = ws.sentAs<{
+      command: string;
+      message_id: string;
+      args: Record<string, unknown>;
+    }>(0);
+    expect(sent.command).toBe("auth/login");
+    expect(sent.args).toEqual({ token: "stored-tok" });
+
+    // Server accepts; ready resolves and onAuthRequired never fires.
+    ws.receive({
+      message_id: sent.message_id,
+      result: { token: "fresh-tok", expires_at: 1_800_000_000 },
+    });
+    await expect(api.ready).resolves.toBeUndefined();
+    expect(onAuthRequired).not.toHaveBeenCalled();
+
+    // Fresh token persisted for the next reconnect.
+    expect(localStorage.getItem("esphome.auth-token")).toBe(
+      JSON.stringify({ token: "fresh-tok", expires_at: 1_800_000_000 }),
+    );
+  });
+
+  it("clears the stored token + fires onAuthRequired when the replay is rejected", async () => {
+    stubLocalStorage({
+      "esphome.auth-token": JSON.stringify({
+        token: "stale-tok",
+        expires_at: 1_700_000_000,
+      }),
+    });
+    const api = new ESPHomeAPI();
+    const onAuthRequired = vi.fn();
+    api.onAuthRequired = onAuthRequired;
+
+    const pending = api.connect();
+    const ws = MockWebSocket.latest();
+    ws.open();
+    ws.receive(serverInfoAuthRequired);
+    await pending;
+
+    const sent = ws.sentAs<{ message_id: string }>(0);
+    ws.receive({
+      message_id: sent.message_id,
+      error_code: "not_authenticated",
+      details: "Invalid or expired token",
+    });
+
+    // The stored token is wiped — no point trying it again.
+    await vi.waitFor(() => {
+      expect(onAuthRequired).toHaveBeenCalledTimes(1);
+    });
+    expect(localStorage.getItem("esphome.auth-token")).toBeNull();
+  });
+
+  it("login(credentials) sends username/password and persists the token", async () => {
+    const api = new ESPHomeAPI();
+    const pending = api.connect();
+    const ws = MockWebSocket.latest();
+    ws.open();
+    ws.receive(serverInfoAuthRequired);
+    await pending;
+
+    const loginPromise = api.login({ username: "admin", password: "hunter2" });
+    const sent = ws.sentAs<{
+      command: string;
+      message_id: string;
+      args: Record<string, unknown>;
+    }>(0);
+    expect(sent.command).toBe("auth/login");
+    expect(sent.args).toEqual({ username: "admin", password: "hunter2" });
+
+    ws.receive({
+      message_id: sent.message_id,
+      result: { token: "new-tok", expires_at: 1_900_000_000 },
+    });
+
+    await expect(loginPromise).resolves.toEqual({
+      token: "new-tok",
+      expires_at: 1_900_000_000,
+    });
+    await expect(api.ready).resolves.toBeUndefined();
+    expect(localStorage.getItem("esphome.auth-token")).toBe(
+      JSON.stringify({ token: "new-tok", expires_at: 1_900_000_000 }),
+    );
+  });
+
+  it("login surfaces APIError with not_authenticated for bad credentials", async () => {
+    const api = new ESPHomeAPI();
+    const pending = api.connect();
+    const ws = MockWebSocket.latest();
+    ws.open();
+    ws.receive(serverInfoAuthRequired);
+    await pending;
+
+    const loginPromise = api.login({ username: "admin", password: "wrong" });
+    const sent = ws.sentAs<{ message_id: string }>(0);
+    ws.receive({
+      message_id: sent.message_id,
+      error_code: "not_authenticated",
+      details: "Invalid credentials",
+    });
+
+    await expect(loginPromise).rejects.toBeInstanceOf(APIError);
+    try {
+      await loginPromise;
+    } catch (err) {
+      expect(err).toBeInstanceOf(APIError);
+      expect((err as APIError).errorCode).toBe("not_authenticated");
+      expect((err as APIError).details).toBe("Invalid credentials");
+    }
+  });
+
+  it("login surfaces APIError with rate_limited including the details string", async () => {
+    const api = new ESPHomeAPI();
+    const pending = api.connect();
+    const ws = MockWebSocket.latest();
+    ws.open();
+    ws.receive(serverInfoAuthRequired);
+    await pending;
+
+    const loginPromise = api.login({ username: "admin", password: "wrong" });
+    const sent = ws.sentAs<{ message_id: string }>(0);
+    ws.receive({
+      message_id: sent.message_id,
+      error_code: "rate_limited",
+      details: "Too many failed attempts; try again in 42s",
+    });
+
+    try {
+      await loginPromise;
+      throw new Error("should have rejected");
+    } catch (err) {
+      expect(err).toBeInstanceOf(APIError);
+      expect((err as APIError).errorCode).toBe("rate_limited");
+      expect((err as APIError).details).toContain("42s");
+    }
+  });
+
+  it("logout clears the stored token on success", async () => {
+    stubLocalStorage({
+      "esphome.auth-token": JSON.stringify({
+        token: "tok",
+        expires_at: 1_700_000_000,
+      }),
+    });
+    const api = new ESPHomeAPI();
+    const pending = api.connect();
+    const ws = MockWebSocket.latest();
+    ws.open();
+    ws.receive(serverInfoAuthRequired);
+    await pending;
+
+    // Drain the auto-replay so the next sentAs call sees logout.
+    const replay = ws.sentAs<{ message_id: string }>(0);
+    ws.receive({
+      message_id: replay.message_id,
+      result: { token: "tok", expires_at: 1_800_000_000 },
+    });
+    await api.ready;
+
+    const logoutPromise = api.logout();
+    const sent = ws.sentAs<{ command: string; message_id: string }>(1);
+    expect(sent.command).toBe("auth/logout");
+    ws.receive({ message_id: sent.message_id, result: { logged_out: true } });
+    await logoutPromise;
+
+    expect(localStorage.getItem("esphome.auth-token")).toBeNull();
+  });
+
+  it("falls back to the in-memory token when localStorage writes silently fail", async () => {
+    // Private-mode browsers / sandboxed iframes throw on every
+    // localStorage access. ``login()`` still keeps a copy in
+    // ``_authToken`` so reconnects within the same tab can replay it
+    // without dropping the user back to the form.
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("blocked");
+      },
+      removeItem: () => {
+        throw new Error("blocked");
+      },
+      clear: () => {},
+    });
+
+    const api = new ESPHomeAPI();
+    const onAuthRequired = vi.fn();
+    api.onAuthRequired = onAuthRequired;
+
+    // First connect: server requires auth, no stored token → form.
+    const pending = api.connect();
+    const ws = MockWebSocket.latest();
+    ws.open();
+    ws.receive(serverInfoAuthRequired);
+    await pending;
+    expect(onAuthRequired).toHaveBeenCalledTimes(1);
+
+    // User signs in. setStoredToken throws but is swallowed; the API
+    // client caches the token in memory.
+    const loginPromise = api.login({ username: "admin", password: "hunter2" });
+    const sent = ws.sentAs<{ message_id: string }>(0);
+    ws.receive({
+      message_id: sent.message_id,
+      result: { token: "in-mem-tok", expires_at: 1_900_000_000 },
+    });
+    await loginPromise;
+
+    // Socket drops, reconnect. The stored-token lookup misses (private
+    // mode) but the in-memory cache carries the session forward.
+    ws.close();
+
+    const reconnect = api.connect();
+    const ws2 = MockWebSocket.latest();
+    ws2.open();
+    ws2.receive(serverInfoAuthRequired);
+    await reconnect;
+
+    const replay = ws2.sentAs<{
+      command: string;
+      args: Record<string, unknown>;
+      message_id: string;
+    }>(0);
+    expect(replay.command).toBe("auth/login");
+    expect(replay.args).toEqual({ token: "in-mem-tok" });
+
+    // No second prompt — onAuthRequired was only called for the first
+    // (pre-login) connect.
+    expect(onAuthRequired).toHaveBeenCalledTimes(1);
+  });
+
+  it("ready parks until the next successful connect+auth after a disconnect", async () => {
+    // Without this contract, any caller that awaits ``api.ready``
+    // during the reconnect-backoff window resumes against the closed
+    // socket and immediately hits "WebSocket not connected".
+    const api = new ESPHomeAPI();
+    const pending = api.connect();
+    const ws = MockWebSocket.latest();
+    ws.open();
+    ws.receive(serverInfo);
+    await pending;
+    await api.ready; // resolves immediately — no auth required.
+
+    // Drop the socket. ``ready`` should now be a fresh pending
+    // promise — anyone awaiting it parks until the reconnect lands.
+    ws.close();
+
+    let resolved = false;
+    void api.ready.then(() => {
+      resolved = true;
+    });
+    // Yield twice so any spurious resolution would have flushed.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    // Reconnect; ``ready`` resolves only after the new serverinfo.
+    const second = api.connect();
+    const ws2 = MockWebSocket.latest();
+    ws2.open();
+    ws2.receive(serverInfo);
+    await second;
+    await api.ready;
+    expect(resolved).toBe(true);
+  });
+
+  it("logout clears the stored token even when the request fails", async () => {
+    // The intent of ``logout`` is "sign me out of this browser" — a
+    // backend hiccup (network blip, internal_error) shouldn't strand
+    // the token in localStorage where the next reconnect would
+    // happily replay it. The ``finally`` block in ``logout()`` is the
+    // contract we're pinning here.
+    stubLocalStorage({
+      "esphome.auth-token": JSON.stringify({
+        token: "tok",
+        expires_at: 1_700_000_000,
+      }),
+    });
+    const api = new ESPHomeAPI();
+    const pending = api.connect();
+    const ws = MockWebSocket.latest();
+    ws.open();
+    ws.receive(serverInfoAuthRequired);
+    await pending;
+
+    const replay = ws.sentAs<{ message_id: string }>(0);
+    ws.receive({
+      message_id: replay.message_id,
+      result: { token: "tok", expires_at: 1_800_000_000 },
+    });
+    await api.ready;
+
+    const logoutPromise = api.logout();
+    const sent = ws.sentAs<{ command: string; message_id: string }>(1);
+    expect(sent.command).toBe("auth/logout");
+    ws.receive({
+      message_id: sent.message_id,
+      error_code: "internal_error",
+      details: "boom",
+    });
+
+    await expect(logoutPromise).rejects.toBeInstanceOf(APIError);
+    // Local state cleared regardless of the rejection.
+    expect(localStorage.getItem("esphome.auth-token")).toBeNull();
   });
 });
