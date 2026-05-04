@@ -27,6 +27,23 @@ export function safeWebUiUrl(url: string): string {
 }
 
 /**
+ * Wrap *host* in the URL-host shape — IPv6 literals get the
+ * RFC 3986 brackets and a percent-encoded zone-id separator
+ * (``fe80::1%en0`` → ``[fe80::1%25en0]``); IPv4 literals and
+ * hostnames pass through unchanged. Without this, ``new URL`` in
+ * ``safeWebUiUrl`` rejected raw IPv6 hosts entirely and the
+ * Visit-Web-UI link disappeared for V6-only devices. Global IPv6
+ * literals now produce a usable link; scoped (link-local) ones are
+ * still rejected downstream because WHATWG ``new URL`` doesn't
+ * accept zone IDs at all — that's the right outcome since browsers
+ * can't route link-local without an OS interface scope anyway.
+ */
+function _wrapHost(host: string): string {
+  if (!host.includes(":")) return host;
+  return `[${host.replace("%", "%25")}]`;
+}
+
+/**
  * Build the device's web-UI URL, or return ``""`` when the YAML didn't
  * expose a ``web_server`` port or we don't have a host to point at.
  *
@@ -41,6 +58,6 @@ export function buildWebUiUrl(device: ConfiguredDevice): string {
   const host = device.address || device.ip;
   if (!host) return "";
   return safeWebUiUrl(
-    `http://${host}${device.web_port === 80 ? "" : `:${device.web_port}`}`,
+    `http://${_wrapHost(host)}${device.web_port === 80 ? "" : `:${device.web_port}`}`,
   );
 }

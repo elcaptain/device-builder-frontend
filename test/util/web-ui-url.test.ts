@@ -107,4 +107,32 @@ describe("buildWebUiUrl", () => {
       "http://host:22"
     );
   });
+
+  it("brackets a global IPv6 literal", () => {
+    expect(
+      buildWebUiUrl(_device({ web_port: 80, address: "", ip: "2001:db8::1" }))
+    ).toBe("http://[2001:db8::1]");
+  });
+
+  it("returns empty for a scoped IPv6 literal — browsers can't navigate it", () => {
+    // ``_wrapHost`` brackets and percent-encodes the zone-id, but
+    // WHATWG ``new URL`` (and every browser) rejects IPv6 zone IDs
+    // outright. Hiding the link is the right UX: a link that 404s
+    // on click is worse than no link.
+    expect(
+      buildWebUiUrl(_device({ web_port: 80, address: "", ip: "fe80::1%en0" }))
+    ).toBe("");
+  });
+
+  it("brackets IPv6 with a non-default port", () => {
+    expect(
+      buildWebUiUrl(_device({ web_port: 8080, address: "", ip: "2001:db8::1" }))
+    ).toBe("http://[2001:db8::1]:8080");
+  });
+
+  it("leaves IPv4 literals unbracketed", () => {
+    expect(
+      buildWebUiUrl(_device({ web_port: 80, address: "", ip: "192.168.1.42" }))
+    ).toBe("http://192.168.1.42");
+  });
 });
