@@ -253,7 +253,7 @@ export class ESPHomeDeviceTable extends LitElement {
         ip: d.ip || "",
         ip_addresses: d.ip_addresses,
         platform: d.target_platform || "",
-        version: d.current_version || "",
+        version: d.deployed_version || "",
         comment: d.comment || "",
         config: d.configuration,
         hasPendingChanges: d.has_pending_changes === true,
