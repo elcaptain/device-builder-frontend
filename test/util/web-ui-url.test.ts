@@ -12,6 +12,7 @@ const _baseDevice = {
   target_platform: "esp32",
   address: "kitchen.local",
   ip: "",
+  ip_addresses: [],
   web_port: null,
   current_version: "",
   deployed_version: "",
@@ -33,9 +34,7 @@ function _device(overrides: Partial<ConfiguredDevice> = {}): ConfiguredDevice {
 describe("safeWebUiUrl", () => {
   it("accepts http URLs", () => {
     expect(safeWebUiUrl("http://kitchen.local")).toBe("http://kitchen.local");
-    expect(safeWebUiUrl("http://kitchen.local:8080")).toBe(
-      "http://kitchen.local:8080",
-    );
+    expect(safeWebUiUrl("http://kitchen.local:8080")).toBe("http://kitchen.local:8080");
   });
 
   it("accepts https URLs", () => {
@@ -76,38 +75,36 @@ describe("buildWebUiUrl", () => {
   });
 
   it("returns empty string when neither address nor ip is set", () => {
-    expect(buildWebUiUrl(_device({ web_port: 80, address: "", ip: "" }))).toBe(
-      "",
-    );
+    expect(buildWebUiUrl(_device({ web_port: 80, address: "", ip: "" }))).toBe("");
   });
 
   it("uses the mDNS address when present", () => {
-    expect(
-      buildWebUiUrl(_device({ web_port: 80, address: "kitchen.local" })),
-    ).toBe("http://kitchen.local");
+    expect(buildWebUiUrl(_device({ web_port: 80, address: "kitchen.local" }))).toBe(
+      "http://kitchen.local"
+    );
   });
 
   it("falls back to ip when address is empty", () => {
-    expect(
-      buildWebUiUrl(_device({ web_port: 80, address: "", ip: "10.0.0.5" })),
-    ).toBe("http://10.0.0.5");
+    expect(buildWebUiUrl(_device({ web_port: 80, address: "", ip: "10.0.0.5" }))).toBe(
+      "http://10.0.0.5"
+    );
   });
 
   it("omits the port when it's the default 80", () => {
-    expect(
-      buildWebUiUrl(_device({ web_port: 80, address: "kitchen.local" })),
-    ).toBe("http://kitchen.local");
+    expect(buildWebUiUrl(_device({ web_port: 80, address: "kitchen.local" }))).toBe(
+      "http://kitchen.local"
+    );
   });
 
   it("includes a non-default port", () => {
-    expect(
-      buildWebUiUrl(_device({ web_port: 8080, address: "kitchen.local" })),
-    ).toBe("http://kitchen.local:8080");
+    expect(buildWebUiUrl(_device({ web_port: 8080, address: "kitchen.local" }))).toBe(
+      "http://kitchen.local:8080"
+    );
   });
 
   it("includes ports below 80 verbatim", () => {
     expect(buildWebUiUrl(_device({ web_port: 22, address: "host" }))).toBe(
-      "http://host:22",
+      "http://host:22"
     );
   });
 });

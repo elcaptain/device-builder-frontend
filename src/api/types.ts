@@ -82,8 +82,16 @@ export interface ConfiguredDevice {
   target_platform: string;
   /** mDNS hostname from StorageJSON (e.g. "my_device.local"). */
   address: string;
-  /** Resolved IPv4 address from mDNS — empty until the device is seen online. */
+  /** Primary resolved address — IPv4 when the device announces one,
+   *  else the first scoped IPv6. Empty until the device is seen
+   *  online. Drives ICMP probes, the OTA address cache, and the
+   *  table's IP column. */
   ip: string;
+  /** Every IP currently announced by the device (IPv4 first, then
+   *  any scoped IPv6 entries). Empty until mDNS resolves the device;
+   *  populated alongside ``ip`` so the drawer can surface every
+   *  address a multi-homed device claims. */
+  ip_addresses: string[];
   web_port: number | null;
   current_version: string;
   deployed_version: string;

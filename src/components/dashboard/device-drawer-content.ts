@@ -21,10 +21,7 @@ import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import type { ConfiguredDevice } from "../../api/types.js";
-import {
-  integrationDocsContext,
-  localizeContext,
-} from "../../context/index.js";
+import { integrationDocsContext, localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { getEncryptionState } from "../../util/encryption-state.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
@@ -101,8 +98,7 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
         letter-spacing: 0.06em;
         margin: 0 0 var(--wa-space-s);
         padding-bottom: var(--wa-space-xs);
-        border-bottom: var(--wa-border-width-s) solid
-          var(--wa-color-surface-border);
+        border-bottom: var(--wa-border-width-s) solid var(--wa-color-surface-border);
       }
 
       .row {
@@ -124,11 +120,7 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
         width: 32px;
         height: 32px;
         border-radius: var(--wa-border-radius-m);
-        background: color-mix(
-          in srgb,
-          var(--esphome-primary),
-          transparent 90%
-        );
+        background: color-mix(in srgb, var(--esphome-primary), transparent 90%);
         flex-shrink: 0;
         margin-top: 2px;
       }
@@ -156,14 +148,23 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
       }
 
       .value.mono {
-        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-          monospace;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
         font-size: var(--wa-font-size-xs);
       }
 
       .value.muted {
         color: var(--wa-color-text-quiet);
         font-style: italic;
+      }
+
+      /* Vertical list for the IP-address row when a device announces
+         more than one address. Each entry sits on its own line so the
+         drawer doesn't truncate scoped IPv6 entries (which carry a
+         "%scope" suffix and easily overflow the row width). */
+      .ip-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
       }
 
       .tags-wrap {
@@ -332,25 +333,39 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
         : nothing}
       <div class="section">
         <h4 class="section-title">${this._localize("dashboard.drawer_device_info")}</h4>
-        ${this._row("information-outline", this._localize("dashboard.drawer_name"), d.friendly_name || d.name)}
-        ${this._row("ip-network-outline", this._localize("dashboard.drawer_ip_address"), d.ip || d.address, true)}
-        ${this._row("memory", this._localize("dashboard.drawer_platform"), d.target_platform)}
+        ${this._row(
+          "information-outline",
+          this._localize("dashboard.drawer_name"),
+          d.friendly_name || d.name
+        )}
+        ${this._renderIpRow(d)}
+        ${this._row(
+          "memory",
+          this._localize("dashboard.drawer_platform"),
+          d.target_platform
+        )}
       </div>
 
       ${this._renderVersionSection(d)}
 
       <div class="section">
         <h4 class="section-title">${this._localize("dashboard.drawer_configuration")}</h4>
-        ${this._row("file-document-outline", this._localize("dashboard.drawer_config_file"), d.configuration, true)}
+        ${this._row(
+          "file-document-outline",
+          this._localize("dashboard.drawer_config_file"),
+          d.configuration,
+          true
+        )}
         ${this._row("text-short", this._localize("dashboard.drawer_comment"), d.comment)}
       </div>
 
       ${this._renderConfigHashSection(d)}
-
       ${d.loaded_integrations && d.loaded_integrations.length > 0
         ? html`
             <div class="section">
-              <h4 class="section-title">${this._localize("dashboard.drawer_loaded_integrations")}</h4>
+              <h4 class="section-title">
+                ${this._localize("dashboard.drawer_loaded_integrations")}
+              </h4>
               <div class="tags-wrap">
                 ${d.loaded_integrations.map((i) => {
                   const url = this._integrationDocs[i];
@@ -395,7 +410,9 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
     const statusKey = matches
       ? "dashboard.drawer_version_in_sync"
       : "dashboard.drawer_version_out_of_sync";
-    const statusCls = matches ? "sync-status sync-status--match" : "sync-status sync-status--diff";
+    const statusCls = matches
+      ? "sync-status sync-status--match"
+      : "sync-status sync-status--diff";
     // Suppress the badge entirely when the device hasn't reported a
     // version yet (no mDNS announce). Comparing against an empty
     // string would always read "out of sync" — meaningless noise on
@@ -414,13 +431,13 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
           "tag-multiple",
           this._localize("dashboard.drawer_current_version"),
           local,
-          true,
+          true
         )}
         ${this._row(
           "upload",
           this._localize("dashboard.drawer_deployed_version"),
           deployed,
-          true,
+          true
         )}
       </div>
     `;
@@ -448,7 +465,9 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
     const statusKey = matches
       ? "dashboard.drawer_config_hash_in_sync"
       : "dashboard.drawer_config_hash_out_of_sync";
-    const statusCls = matches ? "sync-status sync-status--match" : "sync-status sync-status--diff";
+    const statusCls = matches
+      ? "sync-status sync-status--match"
+      : "sync-status sync-status--diff";
     // Match the version section's gating: only show the pill when
     // both sides are populated. A device that has compiled but
     // hasn't broadcast yet (or vice versa) doesn't have enough data
@@ -471,19 +490,21 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
           "fingerprint",
           this._localize("dashboard.drawer_config_hash_local"),
           expected,
-          true,
+          true
         )}
         ${this._row(
           "fingerprint",
           this._localize("dashboard.drawer_config_hash_deployed"),
           deployed,
-          true,
+          true
         )}
       </div>
     `;
   }
 
-  private _renderEncryptionBadge(state: "active" | "plaintext" | "pending" | "mismatch" | "none") {
+  private _renderEncryptionBadge(
+    state: "active" | "plaintext" | "pending" | "mismatch" | "none"
+  ) {
     /* The four-state mapping for the drawer's coloured pill. The
        ``getEncryptionVisual`` helper carries the icon + tooltip
        choices for the icon-only views (card, table); the drawer adds
@@ -534,6 +555,35 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
           <div class="label">${label}</div>
           <div class="value ${mono ? "mono" : ""} ${empty ? "muted" : ""}">
             ${value || "\u2014"}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /* Render the IP-address row. When the device has announced more
+     than one address (a dual-stack host with both V4 and a scoped
+     IPv6) the row stacks each entry on its own line; with a single
+     address (or none) it falls back to the same shape as every
+     other row. ``ip_addresses`` is the canonical multi-IP list;
+     ``ip`` and ``address`` keep the row populated for older API
+     responses and pre-mDNS state. */
+  private _renderIpRow(d: ConfiguredDevice) {
+    const label = this._localize("dashboard.drawer_ip_address");
+    const ips =
+      d.ip_addresses && d.ip_addresses.length > 0 ? d.ip_addresses : d.ip ? [d.ip] : [];
+    if (ips.length <= 1) {
+      return this._row("ip-network-outline", label, ips[0] || d.address, true);
+    }
+    return html`
+      <div class="row">
+        <div class="icon">
+          <wa-icon library="mdi" name="ip-network-outline"></wa-icon>
+        </div>
+        <div class="content">
+          <div class="label">${label}</div>
+          <div class="value mono ip-list">
+            ${ips.map((ip) => html`<span>${ip}</span>`)}
           </div>
         </div>
       </div>

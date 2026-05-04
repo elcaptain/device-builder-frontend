@@ -210,10 +210,14 @@ export class ESPHomeDeviceTable extends LitElement {
     const q = (filterValue as string).trim().toLowerCase();
     if (!q) return true;
     const d: DeviceRow = row.original;
+    // Match against every announced IP — a dual-stack device's IPv6
+    // address is just as legitimate a search target as its IPv4, and
+    // the row's ``ip`` only carries the V4 primary.
+    const allIps = d._device.ip_addresses?.length ? d._device.ip_addresses : [d.ip];
     return (
       (d.friendly_name || d.name).toLowerCase().includes(q) ||
       d.config.toLowerCase().includes(q) ||
-      d.ip.toLowerCase().includes(q) ||
+      allIps.some((ip) => ip.toLowerCase().includes(q)) ||
       d.platform.toLowerCase().includes(q)
     );
   };
@@ -227,7 +231,10 @@ export class ESPHomeDeviceTable extends LitElement {
     }
     if (changed.has("initialColumnVisibility") && this.initialColumnVisibility !== null) {
       // Merge defaults so columns the user hasn't explicitly toggled stay hidden.
-      this._columnVisibility = { ...DEFAULT_HIDDEN_COLUMNS, ...this.initialColumnVisibility };
+      this._columnVisibility = {
+        ...DEFAULT_HIDDEN_COLUMNS,
+        ...this.initialColumnVisibility,
+      };
     }
     if (changed.has("initialPageSize")) {
       this._pageSize = this.initialPageSize;
@@ -430,7 +437,9 @@ export class ESPHomeDeviceTable extends LitElement {
                       : sorted === "desc"
                         ? "descending"
                         : "none"}
-                    class="${canSort ? "sortable" : ""} ${sorted ? "sorted" : ""} col-${header.column.id}"
+                    class="${canSort ? "sortable" : ""} ${sorted
+                      ? "sorted"
+                      : ""} col-${header.column.id}"
                     style="width:${header.getSize()}px"
                     @click=${canSort ? () => header.column.toggleSorting() : nothing}
                   >
@@ -473,10 +482,8 @@ export class ESPHomeDeviceTable extends LitElement {
                   data-configuration=${row.original.config}
                   class=${classMap({
                     selected:
-                      this.selectMode &&
-                      this.selectedDevices.has(row.original.config),
-                    highlight:
-                      this.highlightConfiguration === row.original.config,
+                      this.selectMode && this.selectedDevices.has(row.original.config),
+                    highlight: this.highlightConfiguration === row.original.config,
                   })}
                   @click=${() =>
                     this.selectMode
@@ -575,7 +582,7 @@ export class ESPHomeDeviceTable extends LitElement {
     const root = this.shadowRoot;
     if (!root) return;
     const row = root.querySelector<HTMLElement>(
-      `tr[data-configuration="${CSS.escape(configuration)}"]`,
+      `tr[data-configuration="${CSS.escape(configuration)}"]`
     );
     row?.scrollIntoView({ behavior: "instant", block: "center" });
   }
