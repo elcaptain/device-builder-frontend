@@ -157,10 +157,10 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
         font-style: italic;
       }
 
-      /* Vertical list for the IP-address row when a device announces
-         more than one address. Each entry sits on its own line so the
-         drawer doesn't truncate scoped IPv6 entries (which carry a
-         "%scope" suffix and easily overflow the row width). */
+      /* Stack each IP on its own line when a device announces more
+         than one address. Without this, .value's word-break would
+         wrap a long scoped IPv6 ("%scope" suffix and all) into the
+         next address mid-token, making the list hard to read. */
       .ip-list {
         display: flex;
         flex-direction: column;
@@ -565,13 +565,12 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
      than one address (a dual-stack host with both V4 and a scoped
      IPv6) the row stacks each entry on its own line; with a single
      address (or none) it falls back to the same shape as every
-     other row. ``ip_addresses`` is the canonical multi-IP list;
-     ``ip`` and ``address`` keep the row populated for older API
-     responses and pre-mDNS state. */
+     other row. ``ip_addresses`` is the canonical multi-IP list and
+     ``ip`` is its primary; ``address`` (the mDNS hostname) keeps
+     the row populated when the device hasn't been resolved yet. */
   private _renderIpRow(d: ConfiguredDevice) {
     const label = this._localize("dashboard.drawer_ip_address");
-    const ips =
-      d.ip_addresses && d.ip_addresses.length > 0 ? d.ip_addresses : d.ip ? [d.ip] : [];
+    const ips = d.ip_addresses?.length ? d.ip_addresses : d.ip ? [d.ip] : [];
     if (ips.length <= 1) {
       return this._row("ip-network-outline", label, ips[0] || d.address, true);
     }
