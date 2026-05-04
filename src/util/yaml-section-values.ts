@@ -7,11 +7,52 @@
  * read and write — not as a general YAML parser.
  */
 
-import { serializeYamlValues } from "./yaml-serialize.js";
+import { formatYamlScalar, serializeYamlValues } from "./yaml-serialize.js";
+
+/**
+ * Identifier alphabet ESPHome accepts for top-level / nested config
+ * keys. Centralised so the parse and write paths stay in lockstep —
+ * if the schema ever broadens (e.g. hyphenated or namespaced keys),
+ * both sides change at one site instead of drifting silently.
+ */
+const KEY_PATTERN = "[a-zA-Z_][a-zA-Z0-9_]*";
+
+/**
+ * Match the inline-key form on a YAML list-item line
+ * (`  - platform: esphome`). Capture group 1 is the key.
+ *
+ * Used by `parseYamlSectionValues` (to read the inline key into
+ * the form values) and by `updateSectionInYaml` (to drop that
+ * same key from the values before re-serializing the body, so it
+ * isn't emitted twice). The two call sites must agree on what
+ * "inline key" means; sharing the regex makes that a compile-time
+ * fact.
+ */
+const LIST_ITEM_INLINE_KEY_RE = new RegExp(
+  `^\\s+-\\s+(${KEY_PATTERN}):\\s*(.*)$`,
+);
+
+/**
+ * Detect a YAML list-item start. Accepts both the standard
+ * `  - <content>` form and the bare `  -` (end-of-line) form
+ * `updateSectionInYaml` emits when a list item's inline-keyed
+ * value can't be represented inline (object / array / null).
+ *
+ * Loosened from a stricter `/^\s+-\s/` so the parser agrees with
+ * what the serializer in this same module can emit. ESPHome's
+ * own YAML output never produces a bare-`-` outside that
+ * round-trip path, so this is the only realistic source.
+ */
+export const LIST_ITEM_START_RE = /^\s+-(\s|$)/;
 
 const childRegexFor = (indent: string) =>
-  new RegExp(`^${indent}([a-zA-Z_][a-zA-Z0-9_]*):\\s*(.*)$`);
+  new RegExp(`^${indent}(${KEY_PATTERN}):\\s*(.*)$`);
 
+// Intentionally permissive — the body after `- ` can be any
+// scalar (string with spaces, number, !secret reference) and we
+// just round-trip it. Validating the leading-token shape here
+// would over-match `KEY_PATTERN`'s purpose; that constraint
+// applies only to dict keys.
 const listItemRegexFor = (indent: string) =>
   new RegExp(`^${indent}  -\\s+(.*)$`);
 
@@ -77,6 +118,12 @@ export function findSectionStart(
  * Parse the values inside a YAML section into a plain object.
  * Walks from `fromLine` (or the first `${sectionKey}:` line) and
  * stops at the next sibling section.
+ *
+ * List-item recognition uses the loose `LIST_ITEM_START_RE` so
+ * the parser agrees with what `updateSectionInYaml` in this same
+ * module can emit (including the bare `  -` dash that the
+ * non-scalar inline-value path produces). The parser must agree
+ * with the serializer; if you tighten one, tighten both.
  */
 export function parseYamlSectionValues(
   yaml: string,
@@ -84,20 +131,31 @@ export function parseYamlSectionValues(
   fromLine?: number,
 ): Record<string, unknown> {
   const lines = yaml.split("\n");
-  const values: Record<string, unknown> = {};
+  // Null-prototype map so a YAML key like `__proto__` /
+  // `constructor` / `prototype` lands as a normal own property
+  // instead of mutating the inherited prototype chain — defends
+  // against prototype-pollution via crafted YAML.
+  //
+  // Semantic change for downstream: the returned map (and the
+  // nested blocks parsed via `parseNestedBlock`) have no
+  // `Object.prototype` methods. `for ... in`, `Object.keys`,
+  // spread, `JSON.stringify`, `in`, and direct property access
+  // all behave identically — they read enumerable own properties,
+  // not prototype-inherited ones — but `values.hasOwnProperty(k)`
+  // would now throw. Use `Object.prototype.hasOwnProperty.call` if
+  // you need that check on a downstream consumer.
+  const values: Record<string, unknown> = Object.create(null);
   const startIdx = findSectionStart(lines, sectionKey, fromLine);
   if (startIdx < 0) return values;
 
-  const isListItem = /^\s+-\s/.test(lines[startIdx]);
+  const isListItem = LIST_ITEM_START_RE.test(lines[startIdx]);
   const childIndent = isListItem ? "    " : "  ";
   const childRegex = childRegexFor(childIndent);
 
   // List-item form: the first child key may sit on the same line as
   // the leading dash (e.g. `  - platform: gpio\n    pin: 4`).
   if (isListItem) {
-    const firstMatch = lines[startIdx].match(
-      /^\s+-\s+([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/,
-    );
+    const firstMatch = lines[startIdx].match(LIST_ITEM_INLINE_KEY_RE);
     if (firstMatch) {
       const raw = firstMatch[2].trim();
       if (raw !== "") values[firstMatch[1]] = parseScalar(raw);
@@ -111,7 +169,7 @@ export function parseYamlSectionValues(
     const line = lines[i];
     if (line.trim() === "") continue;
     if (isListItem) {
-      if (/^\s+-\s/.test(line) || /^[a-zA-Z]/.test(line)) break;
+      if (LIST_ITEM_START_RE.test(line) || /^[a-zA-Z]/.test(line)) break;
     } else if (/^[a-zA-Z]/.test(line)) {
       break;
     }
@@ -171,7 +229,10 @@ function parseNestedBlock(
   const childRegex = childRegexFor(indent);
   const listItemPrefix = `${indent}  - `;
   const listItemRegex = listItemRegexFor(indent);
-  const values: Record<string, unknown> = {};
+  // Null-prototype — same prototype-pollution defense as the
+  // top-level `parseYamlSectionValues` map; nested blocks recurse
+  // into here so they need the same safety.
+  const values: Record<string, unknown> = Object.create(null);
   let i = startIdx;
   while (i < lines.length) {
     const line = lines[i];
@@ -232,11 +293,11 @@ export function findSectionRange(
   const start = findSectionStart(lines, sectionKey, fromLine);
   if (start < 0) return { start: -1, end: -1 };
 
-  const isListItem = /^\s+-\s/.test(lines[start]);
+  const isListItem = LIST_ITEM_START_RE.test(lines[start]);
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
     if (isListItem) {
-      if (/^\s+-\s/.test(lines[i]) || /^[a-zA-Z]/.test(lines[i])) {
+      if (LIST_ITEM_START_RE.test(lines[i]) || /^[a-zA-Z]/.test(lines[i])) {
         end = i;
         break;
       }
@@ -259,11 +320,100 @@ export function updateSectionInYaml(
   const { start, end } = findSectionRange(lines, sectionKey, fromLine);
   if (start < 0) return yaml;
 
-  const isListItem = /^\s+-\s/.test(lines[start]);
+  const isListItem = LIST_ITEM_START_RE.test(lines[start]);
   const childIndent = isListItem ? "    " : "  ";
-  const newLines = [lines[start], ...serializeYamlValues(values, childIndent)];
+  let toSerialize = values;
+  let dashLine = lines[start];
+  if (isListItem) {
+    // List items can carry a key/value inline with the dash
+    // (`- platform: esphome`). `parseYamlSectionValues` reads
+    // that key into `values`; if we re-serialize it under the
+    // dash line it gets emitted twice — once on the dash, once
+    // as a regular child — the visible
+    // `- platform: esphome\n    platform: esphome` duplicate
+    // users reported as "Save adds another esphome item".
+    //
+    // The form is the authoritative source for the inline key.
+    // Three cases, all of which yield the inline key exactly
+    // once in the output (or zero times when the form dropped
+    // it):
+    //
+    //   1. inline key absent from form: dash kept as-is, body
+    //      emitted normally. Original behaviour.
+    //   2. form value is an inline-able scalar (string / number
+    //      / boolean): rewrite the dash to carry the form's
+    //      value, drop the key from the body. Handles the
+    //      empty-inline (`- platform:`), stale-inline (form
+    //      picked a different value), and trailing-comment
+    //      (`- platform: # ...`) cases uniformly.
+    //   3. form value is non-scalar (object / array / null /
+    //      undefined): collapse the dash to bare `-` and let
+    //      the body serializer emit the inline key at the
+    //      child indent. The dash can't represent a multi-line
+    //      value, so demoting to a bare list-item head is the
+    //      only way to keep the inline key from appearing
+    //      twice. For object / array values that produces an
+    //      inline-key block under the dash; for null /
+    //      undefined the serializer drops the key entirely
+    //      (the "zero times" arm of the contract above).
+    //
+    // Same regex `parseYamlSectionValues` reads so the two
+    // sides stay in lockstep on what counts as an inline key.
+    const inlineMatch = dashLine.match(LIST_ITEM_INLINE_KEY_RE);
+    if (inlineMatch) {
+      const inlineKey = inlineMatch[1];
+      // Own-property check, not `in`: callers can hand us a
+      // regular `{}` from form-side spreads / `setIn`, where
+      // `"constructor" in values` is `true` because every plain
+      // object inherits from `Object.prototype`. Treating that as
+      // "form set the key" would rewrite the dash from a
+      // prototype-inherited value and lose the YAML's actual
+      // inline content. (`Object.prototype.hasOwnProperty.call`
+      // rather than `Object.hasOwn` for tsconfig-target reach.)
+      if (Object.prototype.hasOwnProperty.call(values, inlineKey)) {
+        // Single regex captures both the indentation up to the
+        // dash and the trailing whitespace before the inline
+        // key — `dashPrefix` (with the trailing space) is what
+        // the rewrite path needs, and the indent alone is what
+        // the bare-dash path needs.
+        //
+        // The match always succeeds in this branch: we entered
+        // it via `LIST_ITEM_INLINE_KEY_RE`, which requires `\s+`
+        // both before and after the dash, so `\s+-\s+` is
+        // already true of `dashLine`. The non-null assertion
+        // makes that invariant local.
+        const dashPrefixMatch = dashLine.match(/^(\s+)-(\s+)/)!;
+        const dashIndent = dashPrefixMatch[1];
+        const dashPrefix = `${dashIndent}-${dashPrefixMatch[2]}`;
+        if (_isInlinableScalar(values[inlineKey])) {
+          dashLine = `${dashPrefix}${inlineKey}: ${formatYamlScalar(
+            values[inlineKey],
+          )}`;
+          const { [inlineKey]: _omit, ...rest } = values;
+          toSerialize = rest;
+        } else {
+          // Non-scalar form value: drop the inline key from the
+          // dash and let the body serializer emit everything,
+          // including the now-non-inline key.
+          dashLine = `${dashIndent}-`;
+        }
+      }
+    }
+  }
+  const newLines = [dashLine, ...serializeYamlValues(toSerialize, childIndent)];
   lines.splice(start, end - start, ...newLines);
   return lines.join("\n");
+}
+
+/**
+ * True when *value* can be emitted on the dash line as
+ * `- key: <value>`. Strings, numbers, booleans qualify; objects,
+ * arrays, null, and undefined need the body representation.
+ */
+function _isInlinableScalar(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  const t = typeof value;
+  return t === "string" || t === "number" || t === "boolean";
 }
 
 /**
@@ -282,7 +432,7 @@ export function removeSectionFromYaml(
   const { start, end } = findSectionRange(lines, sectionKey, fromLine);
   if (start < 0) return yaml;
 
-  const isListItem = /^\s+-\s/.test(lines[start]);
+  const isListItem = LIST_ITEM_START_RE.test(lines[start]);
   lines.splice(start, end - start);
 
   if (isListItem) {

@@ -26,6 +26,20 @@ registerMdiIcons({
   "eye-off": mdiEyeOff,
 });
 
+// Event contract lives in a side-effect-free module so tests can
+// import the builder without pulling in the webawesome
+// CSSStyleSheet polyfill (which fails in Node).
+import {
+  PASSWORD_INPUT_VALUE_CHANGE_EVENT,
+  buildPasswordValueChangeEvent,
+  type PasswordInputValueChange,
+} from "./password-input-event.js";
+export {
+  PASSWORD_INPUT_VALUE_CHANGE_EVENT,
+  buildPasswordValueChangeEvent,
+  type PasswordInputValueChange,
+};
+
 @customElement("esphome-password-input")
 export class ESPHomePasswordInput extends LitElement {
   @consume({ context: localizeContext, subscribe: true })
@@ -141,15 +155,16 @@ export class ESPHomePasswordInput extends LitElement {
   }
 
   private _onInput(e: Event) {
+    // Deliberately fire `password-input-change` (not `input`) so
+    // the native InputEvent that bubbles out of the inner
+    // `<input>` can never collide with our synthesised event on
+    // a consumer's host-level listener — `@password-input-change`
+    // sees only ours, `@input` sees only the native one. The
+    // form already uses `value-change` for its own (different-
+    // shape) event, so a distinct name keeps that channel free.
     const next = (e.target as HTMLInputElement).value;
     this.value = next;
-    this.dispatchEvent(
-      new CustomEvent("input", {
-        detail: { value: next },
-        bubbles: true,
-        composed: true,
-      }),
-    );
+    this.dispatchEvent(buildPasswordValueChangeEvent(next));
   }
 
   private _onToggle() {
