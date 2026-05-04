@@ -213,7 +213,8 @@ export class ESPHomeDeviceTable extends LitElement {
     // Match against every announced IP — a dual-stack device's IPv6
     // address is just as legitimate a search target as its IPv4, and
     // the row's ``ip`` only carries the V4 primary.
-    const allIps = d._device.ip_addresses?.length ? d._device.ip_addresses : [d.ip];
+    const allIps =
+      d._device.ip_addresses.length > 0 ? d._device.ip_addresses : [d.ip];
     return (
       (d.friendly_name || d.name).toLowerCase().includes(q) ||
       d.config.toLowerCase().includes(q) ||

@@ -570,7 +570,7 @@ export class ESPHomeDeviceDrawerContent extends LitElement {
      the row populated when the device hasn't been resolved yet. */
   private _renderIpRow(d: ConfiguredDevice) {
     const label = this._localize("dashboard.drawer_ip_address");
-    const ips = d.ip_addresses?.length ? d.ip_addresses : d.ip ? [d.ip] : [];
+    const ips = d.ip_addresses.length > 0 ? d.ip_addresses : d.ip ? [d.ip] : [];
     if (ips.length <= 1) {
       return this._row("ip-network-outline", label, ips[0] || d.address, true);
     }

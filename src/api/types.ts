@@ -88,11 +88,10 @@ export interface ConfiguredDevice {
    *  table's IP column. */
   ip: string;
   /** Every IP currently announced by the device (IPv4 first, then
-   *  any scoped IPv6 entries). Empty until mDNS resolves the device;
-   *  populated alongside ``ip`` so the drawer can surface every
-   *  address a multi-homed device claims. Optional because older
-   *  backends omit the field entirely — guard before reading. */
-  ip_addresses?: string[];
+   *  any scoped IPv6 entries). Empty array until mDNS resolves the
+   *  device; populated alongside ``ip`` so the drawer can surface
+   *  every address a multi-homed device claims. */
+  ip_addresses: string[];
   web_port: number | null;
   current_version: string;
   deployed_version: string;

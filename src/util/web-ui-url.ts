@@ -40,7 +40,12 @@ export function safeWebUiUrl(url: string): string {
  */
 function _wrapHost(host: string): string {
   if (!host.includes(":")) return host;
-  return `[${host.replace("%", "%25")}]`;
+  // ``replaceAll`` (not ``replace``) so a malformed input with more
+  // than one ``%`` can't leak an unencoded one through — valid IPv6
+  // only has the single zone-id separator, but defensive escaping
+  // costs nothing and silences CodeQL's "incomplete string escaping"
+  // rule.
+  return `[${host.replaceAll("%", "%25")}]`;
 }
 
 /**
