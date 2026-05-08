@@ -56,6 +56,7 @@ import {
   isHaIngressContext,
   labelsContext,
   localizeContext,
+  remoteBuildEnabledContext,
   serverVersionContext,
   versionContext,
   yamlDiffButtonContext,
@@ -197,6 +198,15 @@ export class ESPHomeApp extends LitElement {
   @provide({ context: yamlDiffButtonContext })
   @state()
   private _yamlDiffButton = false;
+
+  // Receiver-side master switch for the remote-build feature
+  // (issue #106 phase 2). Loaded from the backend on (re)connect;
+  // updated when the user toggles ``Settings → Remote builder``.
+  // Phase 2 only persists the flag — phase 3 wires the
+  // ``/remote-build/v1/*`` route registration to it.
+  @provide({ context: remoteBuildEnabledContext })
+  @state()
+  private _remoteBuildEnabled = false;
 
   // Frozen catalog-derived map; refreshed only with a backend release.
   // Cheap to leave at {} until the fetch lands — the device drawer
@@ -457,6 +467,35 @@ export class ESPHomeApp extends LitElement {
     this._loadIntegrationDocs();
     this._loadLabels();
     this._loadThemePreference();
+    this._loadRemoteBuildSettings();
+  }
+
+  // True while a ``setRemoteBuildSettings`` write is in flight. The
+  // reload path on (re)connect skips when this is set so a write
+  // racing with an auto-reconnect can't get clobbered by the
+  // server-side pre-toggle value.
+  private _remoteBuildSetInFlight = false;
+
+  private async _loadRemoteBuildSettings() {
+    // Receiver-side remote-build settings (issue #106 phase 2).
+    // The frontend is shipped bundled with the backend wheel, so
+    // every backend on the wire already knows these commands —
+    // no older-version path. A real failure here is a transient
+    // (broken WS, server bug), logged so it isn't silently
+    // masking ``false`` when the actual state is ``true``.
+    if (this._remoteBuildSetInFlight) {
+      // A user-initiated write is racing with this reload. Skip —
+      // the optimistic value is the source of truth until the
+      // write completes; the post-write state is what should
+      // persist, not the pre-write server snapshot.
+      return;
+    }
+    try {
+      const settings = await this._api.getRemoteBuildSettings();
+      this._remoteBuildEnabled = settings.enabled;
+    } catch (err) {
+      console.warn("Could not load remote-build settings:", err);
+    }
   }
 
   /** Fetch the global label catalog. Called on every (re)connect so
@@ -822,6 +861,7 @@ export class ESPHomeApp extends LitElement {
       <esphome-settings-dialog
         @set-theme=${this._onSetTheme}
         @set-yaml-diff-button=${this._onSetYamlDiffButton}
+        @set-remote-build-enabled=${this._onSetRemoteBuildEnabled}
         @set-language=${this._onSetLanguage}
       ></esphome-settings-dialog>
       <esphome-firmware-jobs-dialog
@@ -890,6 +930,34 @@ export class ESPHomeApp extends LitElement {
     const enabled = e.detail;
     this._yamlDiffButton = enabled;
     this._api.updatePreferences({ yaml_diff_button: enabled }).catch(() => {});
+  }
+
+  private async _onSetRemoteBuildEnabled(e: CustomEvent<boolean>) {
+    // Optimistic flip — keeps the toggle's visual state in sync
+    // with the click. The backend round-trip happens after; if it
+    // fails we revert the optimistic value and surface a toast so
+    // the user sees their security-sensitive toggle didn't take
+    // effect (silent UI / disk divergence on a "trust this peer"
+    // toggle is a real bug, not a polish item).
+    //
+    // ``_remoteBuildSetInFlight`` gates ``_loadRemoteBuildSettings``
+    // so a reconnect that lands mid-write can't clobber the
+    // optimistic value with the pre-toggle server snapshot.
+    const enabled = e.detail;
+    const previous = this._remoteBuildEnabled;
+    this._remoteBuildEnabled = enabled;
+    this._remoteBuildSetInFlight = true;
+    try {
+      await this._api.setRemoteBuildSettings({ enabled });
+    } catch {
+      this._remoteBuildEnabled = previous;
+      toast.error(
+        this._localize("settings.remote_build_save_failed"),
+        { richColors: true }
+      );
+    } finally {
+      this._remoteBuildSetInFlight = false;
+    }
   }
 
   private async _onSetLanguage(
