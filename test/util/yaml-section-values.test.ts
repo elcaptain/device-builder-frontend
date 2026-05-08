@@ -6,6 +6,7 @@ import {
   removeSectionFromYaml,
   updateSectionInYaml,
 } from "../../src/util/yaml-section-values.js";
+import { YamlRawValue } from "../../src/util/yaml-serialize.js";
 
 /** 1-indexed line of the *n*th (1-based) list-item dash following
  *  `parent:` in `yaml`. Section-editor callers pass that line as
@@ -721,6 +722,91 @@ describe("parseYamlSectionValues / updateSectionInYaml — block scalars and com
     expect(buttonBSlice).toContain('icon: "mdi:account"');
     // Sanity: only Button B got the icon (siblings stayed clean)
     expect(after.match(/icon:/g)).toHaveLength(1);
+  });
+
+  it("preserves a lambda block scalar verbatim when the user re-saves without editing", () => {
+    // Issue #428 — opening the form for a binary_sensor with a
+    // ``lambda: |-`` previously rendered ``[object Object]`` and
+    // a save round-trip would have dropped the body entirely. Now
+    // ``YamlRawValue.toString`` surfaces the dedented body for
+    // display; the parser keeps the wrapper intact so the
+    // serializer can paste the lines back unchanged.
+    //
+    // Byte-equality assertion (rather than substring presence) so
+    // a future drift — extra whitespace, indent change, missing
+    // ``|-`` marker — fails the test. The contract for "no edit"
+    // on the lambda is "no diff," so we slice the exact lambda
+    // block out of both the input and the output and compare them
+    // line-for-line. (The test fixture's ``name: "..."`` quoting
+    // gets stripped by the unrelated scalar serializer, so we
+    // can't byte-compare the WHOLE document — that's a separate
+    // pre-existing concern.)
+    const lambdaBlock = `    lambda: |-
+      return id(moving) && id(opening) && !id(opened).state ? true : false;`;
+    const yaml = `binary_sensor:
+  - platform: template
+    name: Driveway Opening
+    id: opening_sensor
+${lambdaBlock}
+`;
+    const values = parseYamlSectionValues(
+      yaml,
+      "binary_sensor.template",
+      2,
+    );
+    // Parser wraps the block scalar so the on-disk style round-trips.
+    expect(values.lambda).toBeInstanceOf(YamlRawValue);
+    // Re-save without editing → byte-identical YAML.
+    const after = updateSectionInYaml(
+      yaml,
+      "binary_sensor.template",
+      values,
+      2,
+    );
+    expect(after).toBe(yaml);
+    // Belt + suspenders: even if a future serializer change
+    // reformats some surrounding key, the lambda block itself
+    // must survive byte-identical.
+    expect(after).toContain(lambdaBlock);
+  });
+
+  it("re-wraps an edited lambda body as a YamlRawValue with the same indent", () => {
+    // Issue #428 — when the user edits a lambda body, the renderer
+    // calls ``YamlRawValue.fromBodyText`` to wrap the textarea
+    // content as a fresh ``YamlRawValue`` with the original indent
+    // and ``|-`` header preserved. The serializer must paste it back
+    // in the same shape so the YAML doesn't drift to inline-quoted
+    // form on save.
+    const yaml = `binary_sensor:
+  - platform: template
+    name: "Driveway Opening"
+    lambda: |-
+      return original_body;
+`;
+    const values = parseYamlSectionValues(
+      yaml,
+      "binary_sensor.template",
+      2,
+    );
+    const original = values.lambda;
+    expect(original).toBeInstanceOf(YamlRawValue);
+    // Simulate the form editing the body:
+    values.lambda = YamlRawValue.fromBodyText(
+      "return id(moving) && id(opening);",
+      original as YamlRawValue,
+    );
+    const after = updateSectionInYaml(
+      yaml,
+      "binary_sensor.template",
+      values,
+      2,
+    );
+    // Block-scalar form is preserved.
+    expect(after).toContain("lambda: |-");
+    // Body has the new content at the original indent.
+    expect(after).toContain("      return id(moving) && id(opening);");
+    // Old body is gone.
+    expect(after).not.toContain("return original_body");
   });
 });
 
