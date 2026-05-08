@@ -51,6 +51,7 @@ export enum ErrorCode {
   UNKNOWN_COMMAND = "unknown_command",
   INVALID_ARGS = "invalid_args",
   NOT_FOUND = "not_found",
+  ALREADY_EXISTS = "already_exists",
   INTERNAL_ERROR = "internal_error",
   NOT_AUTHENTICATED = "not_authenticated",
   RATE_LIMITED = "rate_limited",
@@ -1077,16 +1078,26 @@ export interface EditorValidateResponse {
 
 // Remote-build feature (issue #106).
 // Phase 2: peer dashboard discovery + receiver-side master switch.
+// Phase 2b: user-supplied manual hosts for cross-subnet / non-mDNS LANs.
 // Phase 3+ extends ``RemoteBuildSettings`` with token / cert / TTL knobs.
+
+export type RemoteBuildPeerSource = "mdns" | "manual";
+
+export interface ManualHost {
+  hostname: string;
+  port: number;
+}
 
 export interface RemoteBuildSettings {
   enabled: boolean;
+  manual_hosts: ManualHost[];
 }
 
 export interface RemoteBuildPeer {
   name: string;
   hostname: string;
   port: number;
+  source: RemoteBuildPeerSource;
   addresses: string[];
   server_version: string;
   esphome_version: string;

@@ -1308,15 +1308,56 @@ export class ESPHomeAPI {
   }
 
   /**
-   * List peer dashboards discovered on the LAN via the
-   * ``_esphomebuilder._tcp.local.`` mDNS browse.
+   * List peer dashboards known to this receiver.
    *
-   * Empty array when no peers have been seen yet (or when the
-   * receiver's zeroconf failed to bind). Phase 2 returns the raw
-   * discovery; phase 4+ will add paired-or-not state to each row.
+   * Merges mDNS-discovered peers (placed first, ``source=mdns``)
+   * with user-supplied manual hosts (``source=manual``). Manual
+   * rows have empty version / address fields until phase 4
+   * attempts the connection. Empty array when no peers have been
+   * seen yet and no manual hosts have been added.
    */
   async listRemoteBuildHosts(): Promise<RemoteBuildPeer[]> {
     return this.sendCommand<RemoteBuildPeer[]>("remote_build/list_hosts");
+  }
+
+  /**
+   * Add a user-supplied peer (cross-subnet / non-mDNS LANs).
+   *
+   * The backend validates ``hostname`` (non-empty, lowercased per
+   * RFC 1035 §2.3.3) and ``port`` (1-65535). A bad hostname or
+   * bad port raises ``ErrorCode.INVALID_ARGS``; an attempt to add
+   * a ``(hostname, port)`` pair that's already registered raises
+   * ``ErrorCode.ALREADY_EXISTS`` so the UI can surface a
+   * "this dashboard is already in your list" message distinct
+   * from a generic validation failure. Returns the post-write
+   * settings so the caller can re-render without a separate
+   * ``get_settings`` round-trip.
+   */
+  async addRemoteBuildManualHost(args: {
+    hostname: string;
+    port: number;
+  }): Promise<RemoteBuildSettings> {
+    return this.sendCommand<RemoteBuildSettings>(
+      "remote_build/add_manual_host",
+      args
+    );
+  }
+
+  /**
+   * Remove a previously-added manual peer.
+   *
+   * Hostname is normalised to lowercase server-side, so a
+   * case-different request still finds the entry. Raises
+   * ``NOT_FOUND`` when the entry isn't registered.
+   */
+  async removeRemoteBuildManualHost(args: {
+    hostname: string;
+    port: number;
+  }): Promise<RemoteBuildSettings> {
+    return this.sendCommand<RemoteBuildSettings>(
+      "remote_build/remove_manual_host",
+      args
+    );
   }
 
   /** Get compiled device metadata. */
