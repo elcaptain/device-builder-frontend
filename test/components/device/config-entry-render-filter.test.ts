@@ -6,6 +6,7 @@ import {
   filterRenderable,
 } from "../../../src/components/device/config-entry-render-filter.js";
 import { makeConfigEntry as makeEntry } from "../../util/_make-config-entry.js";
+import { YamlRawValue } from "../../../src/util/yaml-serialize.js";
 
 describe("ALWAYS_SHOWN_KEYS", () => {
   it("contains 'name' (the friendly-name leaf)", () => {
@@ -202,6 +203,91 @@ describe("filterRenderable", () => {
       showAdvanced: false,
     });
     expect(out.map((e) => e.key)).toEqual(["auth"]);
+  });
+
+  it("keeps multi_value NESTED entries with zero items (Add button is the UI)", () => {
+    // Single-nested groups are dropped when no child would render,
+    // because the body would be empty. List-form is different:
+    // ``renderNestedListField`` paints an Add button so the user
+    // can declare the first device — dropping the field would
+    // make ``esphome.devices: []`` un-fillable from the editor.
+    const entries = [
+      makeEntry({
+        key: "devices",
+        type: ConfigEntryType.NESTED,
+        multi_value: true,
+        config_entries: [
+          // Required, but no items yet — the single-nested branch
+          // would drop the group. The list branch must NOT.
+          makeEntry({ key: "id", required: true }),
+        ],
+      }),
+    ];
+    const empty = filterRenderable(
+      entries,
+      {},
+      { requiredOnly: false, showAdvanced: false },
+    );
+    expect(empty.map((e) => e.key)).toEqual(["devices"]);
+    const populated = filterRenderable(
+      entries,
+      { devices: [{ id: "front" }] },
+      { requiredOnly: false, showAdvanced: false },
+    );
+    expect(populated.map((e) => e.key)).toEqual(["devices"]);
+  });
+
+  it("treats a YamlRawValue at a multi_value NESTED key as material", () => {
+    // The parser falls back to ``YamlRawValue`` when the items
+    // can't fit the flat-mapping contract (dotted keys, block
+    // scalars, nested mappings). The user clearly has YAML
+    // there, so an advanced multi_value field with raw content
+    // must stay visible without a trip through the Advanced
+    // toggle — otherwise the visual editor would silently hide
+    // the user's data.
+    const entries = [
+      makeEntry({
+        key: "devices",
+        type: ConfigEntryType.NESTED,
+        multi_value: true,
+        advanced: true,
+        config_entries: [makeEntry({ key: "id" })],
+      }),
+    ];
+    const out = filterRenderable(
+      entries,
+      { devices: new YamlRawValue(["    - id: kitchen", "      filters:", "        delta: 0.5"]) },
+      { requiredOnly: false, showAdvanced: false },
+    );
+    expect(out.map((e) => e.key)).toEqual(["devices"]);
+  });
+
+  it("keeps an advanced multi_value NESTED entry with items, even when showAdvanced is off", () => {
+    // ``hasMaterialValue`` for list-form should treat any non-empty
+    // array as material so an advanced device list set in YAML
+    // stays visible without the user toggling the advanced switch.
+    const entries = [
+      makeEntry({
+        key: "devices",
+        type: ConfigEntryType.NESTED,
+        multi_value: true,
+        advanced: true,
+        config_entries: [makeEntry({ key: "id" })],
+      }),
+    ];
+    const filled = filterRenderable(
+      entries,
+      { devices: [{ id: "front" }] },
+      { requiredOnly: false, showAdvanced: false },
+    );
+    expect(filled.map((e) => e.key)).toEqual(["devices"]);
+    const empty = filterRenderable(
+      entries,
+      { devices: [] },
+      { requiredOnly: false, showAdvanced: false },
+    );
+    // Empty array → not material → advanced gate hides it.
+    expect(empty.map((e) => e.key)).toEqual([]);
   });
 
   it("respects depends_on visibility", () => {
@@ -455,5 +541,52 @@ describe("collectRenderablePaths", () => {
       showAdvanced: false,
     });
     expect([...paths]).toEqual(["vis"]);
+  });
+
+  it("emits per-item indexed paths for multi_value NESTED entries", () => {
+    const entries = [
+      makeEntry({
+        key: "devices",
+        type: ConfigEntryType.NESTED,
+        multi_value: true,
+        config_entries: [
+          makeEntry({ key: "id", required: true }),
+          makeEntry({ key: "name" }),
+        ],
+      }),
+    ];
+    const paths = collectRenderablePaths(
+      entries,
+      { devices: [{ id: "front" }, { id: "kitchen", name: "Kitchen" }] },
+      { requiredOnly: false, showAdvanced: false },
+    );
+    expect([...paths].sort()).toEqual(
+      [
+        "devices",
+        "devices.0.id",
+        "devices.0.name",
+        "devices.1.id",
+        "devices.1.name",
+      ].sort(),
+    );
+  });
+
+  it("emits the bare field path for an empty multi_value NESTED entry", () => {
+    // No items → no per-item paths, but the field itself is still
+    // onscreen (Add button), so its path should land in the set so
+    // an error keyed on the bare field surfaces as visible.
+    const entries = [
+      makeEntry({
+        key: "devices",
+        type: ConfigEntryType.NESTED,
+        multi_value: true,
+        config_entries: [makeEntry({ key: "id", required: true })],
+      }),
+    ];
+    const paths = collectRenderablePaths(entries, {}, {
+      requiredOnly: false,
+      showAdvanced: false,
+    });
+    expect([...paths]).toEqual(["devices"]);
   });
 });

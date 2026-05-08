@@ -13,6 +13,9 @@
  * dependency checks against the user's current configuration.
  */
 
+import { ESPHOME_YAML_INDENT } from "./esphome-yaml-lang.js";
+import { isPlainObject } from "./nested-values.js";
+
 /**
  * Opaque wrapper for a section-value block the parser couldn't fully
  * model — block scalars (`lambda: |-`), automation handlers with
@@ -142,6 +145,74 @@ export interface SerializeYamlOptions {
    * existing empty-string substitution.)
    */
   keepEmptyStrings?: boolean;
+  /**
+   * Indent step for one level deeper. Defaults to
+   * ``ESPHOME_YAML_INDENT`` (two spaces, the canonical emit
+   * format). Pass the user's detected step (e.g. ``"    "`` for
+   * a 4-space file) so saves preserve the surrounding YAML's
+   * indentation instead of splicing canonical 2-space content
+   * into a 4-space file.
+   */
+  indentStep?: string;
+}
+
+/**
+ * Serialize a single list item. Mapping items
+ * (``esphome.devices`` / ``esphome.areas`` shape — the new
+ * ``multi_value=true`` schema entries) emit as
+ * ``${indent}  - first_key: value`` followed by
+ * ``${indent}    other_key: value`` for each remaining field;
+ * scalar items keep the legacy ``${indent}  - value`` shape.
+ *
+ * Per-field skip rules match the top-level serializer
+ * (``undefined`` / ``null`` / empty-string unless
+ * ``keepEmptyStrings``). When all fields are filtered out — or
+ * the item is literally ``{}`` (a freshly-added Add row the user
+ * hasn't filled yet) — emit a bare ``${indent}  -`` placeholder
+ * so the row survives the round-trip. The parser's
+ * ``collectBlockListMappings`` recognises bare dashes and
+ * rebuilds the empty mapping on reload; without the placeholder
+ * the user's in-progress row would silently vanish.
+ *
+ * ``YamlRawValue`` values inside an item are emitted with the
+ * same inline-header / body shape as the top-level branch.
+ */
+function serializeListItem(
+  item: unknown,
+  indent: string,
+  options: SerializeYamlOptions,
+): string[] {
+  const keepEmpty = options.keepEmptyStrings === true;
+  const step = options.indentStep ?? ESPHOME_YAML_INDENT;
+  const dashIndent = `${indent}${step}`;
+  if (isPlainObject(item)) {
+    const entries = Object.entries(item).filter(
+      ([, v]) => v !== undefined && v !== null && (v !== "" || keepEmpty),
+    );
+    if (entries.length === 0) return [`${dashIndent}-`];
+    const lines: string[] = [];
+    // Follow-up sub-keys align with the inline first key (which
+    // sits at ``${dashIndent}- ``, a fixed two-character offset
+    // past the dash) — NOT at ``${dashIndent}${step}``. With a
+    // canonical 2-space step those happen to coincide, but on a
+    // 4-space user file ``${dashIndent}${step}`` lands sub-keys
+    // four columns deeper than the inline key, producing
+    // valid-but-misaligned YAML. ``ESPHOME_YAML_INDENT`` is the
+    // canonical 2-character "- " gap and stays fixed.
+    const childIndent = `${dashIndent}${ESPHOME_YAML_INDENT}`;
+    entries.forEach(([k, v], idx) => {
+      const prefix = idx === 0 ? `${dashIndent}- ` : childIndent;
+      if (v instanceof YamlRawValue) {
+        const header = v.inlineHeader ? ` ${v.inlineHeader}` : "";
+        lines.push(`${prefix}${k}:${header}`);
+        lines.push(...v.lines);
+        return;
+      }
+      lines.push(`${prefix}${k}: ${formatYamlScalar(v)}`);
+    });
+    return lines;
+  }
+  return [`${dashIndent}- ${formatYamlScalar(item)}`];
 }
 
 /**
@@ -156,6 +227,7 @@ export function serializeYamlValues(
 ): string[] {
   const lines: string[] = [];
   const keepEmpty = options.keepEmptyStrings === true;
+  const step = options.indentStep ?? ESPHOME_YAML_INDENT;
   for (const [key, val] of Object.entries(values)) {
     if (val === undefined || val === null) continue;
     if (val === "" && !keepEmpty) continue;
@@ -176,7 +248,8 @@ export function serializeYamlValues(
       if (val.length === 0) continue;
       lines.push(`${indent}${key}:`);
       for (const item of val) {
-        lines.push(`${indent}  - ${formatYamlScalar(item)}`);
+        const itemLines = serializeListItem(item, indent, options);
+        lines.push(...itemLines);
       }
       continue;
     }
@@ -188,7 +261,7 @@ export function serializeYamlValues(
       // is surprising and loses data on round-trip. (Copilot.)
       const sub = serializeYamlValues(
         val as Record<string, unknown>,
-        `${indent}  `,
+        `${indent}${step}`,
         options,
       );
       if (sub.length === 0) continue;

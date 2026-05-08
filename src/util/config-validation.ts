@@ -1,6 +1,8 @@
 import type { ConfigEntry } from "../api/types.js";
 import { ConfigEntryType } from "../api/types.js";
 import { parseFloatWithUnit } from "./float-with-unit.js";
+import { asMappingList, asRecord } from "./nested-values.js";
+import { YamlRawValue } from "./yaml-serialize.js";
 
 /**
  * Determine if a config entry is currently visible.
@@ -222,11 +224,47 @@ function _validateEntriesRecursive(
     if (!isEntryVisible(entry, values, presentComponents, targetPlatform)) continue;
 
     if (entry.type === ConfigEntryType.NESTED) {
-      const child = values[entry.key];
-      const childValues =
-        child !== null && typeof child === "object" && !Array.isArray(child)
-          ? (child as Record<string, unknown>)
-          : {};
+      const childSchema = entry.config_entries ?? [];
+      if (entry.multi_value) {
+        // List-form NESTED (``esphome.devices`` / ``esphome.areas``):
+        // validate each item independently with an array-index path
+        // segment so errors land at ``devices.0.id`` etc. — matching
+        // how the form looks errors up via ``path.join(".")``. An
+        // empty list on an optional field is fine (the user opted
+        // out by adding nothing); a required list with zero items
+        // surfaces a single error on the field itself.
+        //
+        // ``YamlRawValue`` short-circuits — the parser preserved
+        // the block byte-for-byte because items don't fit the
+        // flat-mapping contract, so we can't introspect them. The
+        // user's YAML is present (treats a required field as
+        // satisfied) but unreachable for per-item validation.
+        const raw = values[entry.key];
+        if (raw instanceof YamlRawValue) continue;
+        const items = asMappingList(raw);
+        if (items.length === 0) {
+          if (entry.required) {
+            const fullPath = [...pathPrefix, entry.key].join(".");
+            errors.set(fullPath, {
+              key: fullPath,
+              code: "validation.required",
+            });
+          }
+          continue;
+        }
+        items.forEach((itemValues, idx) => {
+          _validateEntriesRecursive(
+            childSchema,
+            itemValues,
+            presentComponents,
+            targetPlatform,
+            [...pathPrefix, entry.key, String(idx)],
+            errors,
+          );
+        });
+        continue;
+      }
+      const childValues = asRecord(values[entry.key]);
       // Optional nested groups (e.g. `web_server.auth`) often have
       // required CHILDREN (`auth.username`, `auth.password`). Don't
       // flag those as missing when the user hasn't populated the
@@ -239,7 +277,7 @@ function _validateEntriesRecursive(
         continue;
       }
       _validateEntriesRecursive(
-        entry.config_entries ?? [],
+        childSchema,
         childValues,
         presentComponents,
         targetPlatform,
@@ -260,12 +298,8 @@ function _validateEntriesRecursive(
     // regex here would silently drift on any upstream change).
     if (entry.type === ConfigEntryType.MAP) {
       if (entry.required) {
-        const raw = values[entry.key];
-        const map =
-          raw !== null && typeof raw === "object" && !Array.isArray(raw)
-            ? (raw as Record<string, unknown>)
-            : null;
-        if (!map || Object.keys(map).length === 0) {
+        const map = asRecord(values[entry.key]);
+        if (Object.keys(map).length === 0) {
           const fullPath = [...pathPrefix, entry.key].join(".");
           errors.set(fullPath, {
             key: fullPath,
