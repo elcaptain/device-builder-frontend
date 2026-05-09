@@ -520,6 +520,25 @@
     "discard_changes": "Annuler",
     "save_and_leave": "Enregistrer"
   },
+  "onboarding": {
+    "menu_item_setup_wifi": "Configurer le Wi-Fi…",
+    "wifi": {
+      "title": "Configurer les identifiants Wi-Fi",
+      "intro": "Vos appareils s'en servent pour rejoindre le réseau. Ils sont enregistrés une seule fois dans secrets.yaml et partagés entre toutes vos configurations.",
+      "ssid_label": "Nom du réseau Wi-Fi (SSID)",
+      "ssid_placeholder": "MonWifiMaison",
+      "password_label": "Mot de passe Wi-Fi",
+      "password_placeholder": "Laisser vide pour un réseau ouvert",
+      "save": "Enregistrer",
+      "saving": "Enregistrement…",
+      "save_success": "Identifiants Wi-Fi enregistrés",
+      "save_failed": "Échec de l'enregistrement des identifiants Wi-Fi",
+      "ack_failed": "Identifiants Wi-Fi enregistrés, mais l'assistant n'a pas pu être marqué comme terminé — il pourrait réapparaître la prochaine fois.",
+      "decline_failed": "Impossible de mettre à jour les préférences d'intégration",
+      "dismiss_session": "Plus tard",
+      "decline_permanent": "Je n'utilise pas le Wi-Fi — ignorer cette étape"
+    }
+  },
   "layout": {
     "secrets": "Secrets",
     "update_all_started": "{count} mise(s) à jour démarrée(s)",

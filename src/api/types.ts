@@ -796,6 +796,57 @@ export interface UserPreferences {
   table_column_visibility: Record<string, boolean>;
   table_sort_column: string | null;
   table_sort_direction: SortDirection | null;
+  /** Highest onboarding-flow version the user has acknowledged.
+   *  ``0`` ⇒ never gone through onboarding. The dashboard surfaces
+   *  the wizard whenever this is below the server's
+   *  ``OnboardingState.current_version``. */
+  onboarding_completed_version: number;
+}
+
+/**
+ * Stable identifiers for onboarding steps. Keep in lockstep with
+ * the backend's ``OnboardingStepId`` enum — these strings flow
+ * through the wire as-is.
+ */
+export enum OnboardingStepId {
+  WIFI_CREDENTIALS = "wifi_credentials",
+}
+
+export enum OnboardingStepStatus {
+  PENDING = "pending",
+  DONE = "done",
+}
+
+export interface OnboardingStep {
+  id: OnboardingStepId;
+  status: OnboardingStepStatus;
+}
+
+/**
+ * Snapshot of the dashboard onboarding flow.
+ *
+ * ``current_version`` is the version of onboarding the server
+ * knows about; ``completed_version`` is what the user last
+ * acknowledged. The dashboard shows the wizard when
+ * ``completed_version < current_version`` AND the user hasn't
+ * frontend-side session-dismissed it. The data-derived
+ * ``steps[].status`` doesn't gate the dialog — saving real
+ * values OR declining ("I only use Ethernet") both call
+ * ``mark_acknowledged`` to advance the version, so the dialog
+ * stops re-opening regardless of whether the data is now set.
+ *
+ * Step status drives a separate signal: the always-on badge in
+ * the secrets kebab. It's computed from live on-disk state on
+ * every server-side ``get_state`` call — never persisted — and
+ * the dashboard re-fetches on (re)connect, so a manual
+ * ``secrets.yaml`` edit clears the badge no later than the next
+ * WS reconnect (or page reload). Within a single session the
+ * badge is a snapshot of the auth-time fetch.
+ */
+export interface OnboardingState {
+  current_version: number;
+  completed_version: number;
+  steps: OnboardingStep[];
 }
 
 /**

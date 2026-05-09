@@ -19,6 +19,7 @@ import {
   ErrorCode,
   JobStatus,
   JobType,
+  OnboardingStepStatus,
   Theme,
 } from "../api/types.js";
 import type {
@@ -56,6 +57,7 @@ import {
   isHaIngressContext,
   labelsContext,
   localizeContext,
+  onboardingPendingContext,
   remoteBuildEnabledContext,
   serverVersionContext,
   versionContext,
@@ -108,6 +110,7 @@ import "./feedback-dialog.js";
 import type { ESPHomeFeedbackDialog } from "./feedback-dialog.js";
 import "./firmware-jobs-dialog.js";
 import type { ESPHomeFirmwareJobsDialog } from "./firmware-jobs-dialog.js";
+import "./onboarding-wifi-dialog.js";
 import "./settings-dialog.js";
 import type { ESPHomeSettingsDialog } from "./settings-dialog.js";
 
@@ -225,6 +228,32 @@ export class ESPHomeApp extends LitElement {
   @provide({ context: labelsContext })
   @state()
   private _labels: Label[] = [];
+
+  /** True when onboarding has any data-derived ``pending`` step.
+   *  Derived in ``_loadOnboardingState`` from
+   *  ``onboarding/get_state``. Surfaced to header-actions to gate
+   *  the conditional ``Set up Wi-Fi…`` kebab entry. Dialog
+   *  visibility uses a separate signal (acknowledged-version +
+   *  session-dismissal) — this context is the always-on data
+   *  signal that should outlive any dismissal. */
+  @provide({ context: onboardingPendingContext })
+  @state()
+  private _onboardingPending = false;
+
+  /** True when the onboarding wizard should be shown. Computed
+   *  from ``completed_version < current_version`` AND not
+   *  session-dismissed. Session-only ``"maybe later"`` flips
+   *  ``_onboardingSessionDismissed`` so the dialog stays closed
+   *  until the next dashboard load; explicit decline / save call
+   *  ``mark_acknowledged`` on the backend so the dialog stops
+   *  re-popping until a future onboarding-version bump. */
+  @state()
+  private _onboardingShouldShow = false;
+
+  /** Frontend-only "maybe later" — closes the dialog without
+   *  POSTing acknowledgement. Reset on next page load. */
+  @state()
+  private _onboardingSessionDismissed = false;
 
   // ─── Auth gate ───────────────────────────────────────────
   // Drives whether we render the connecting spinner, the login form,
@@ -353,6 +382,12 @@ export class ESPHomeApp extends LitElement {
     if ("serial" in navigator) {
       navigator.serial.addEventListener("connect", this._onSerialConnect);
     }
+    // ``secrets-saved`` is dispatched on ``window`` by every code
+    // path that writes ``secrets.yaml`` (the secrets editor, the
+    // onboarding wizard). Refresh the onboarding snapshot so the
+    // kebab "Set up Wi-Fi" entry tracks the on-disk state in real
+    // time regardless of which surface initiated the write.
+    window.addEventListener("secrets-saved", this._onSecretsSaved);
   }
 
   disconnectedCallback() {
@@ -362,6 +397,7 @@ export class ESPHomeApp extends LitElement {
     if ("serial" in navigator) {
       navigator.serial.removeEventListener("connect", this._onSerialConnect);
     }
+    window.removeEventListener("secrets-saved", this._onSecretsSaved);
   }
 
   private _initDarkMode() {
@@ -468,7 +504,75 @@ export class ESPHomeApp extends LitElement {
     this._loadLabels();
     this._loadThemePreference();
     this._loadRemoteBuildSettings();
+    this._loadOnboardingState();
   }
+
+  /** Load the onboarding snapshot and update both the
+   *  always-on data signal (``_onboardingPending`` — gates the
+   *  ``Set up Wi-Fi…`` kebab entry in header-actions) and the
+   *  dialog-show signal (``_onboardingShouldShow`` — gated by
+   *  acknowledged-version + session-dismissal). Re-runs on
+   *  reconnect and after every secrets save; the dialog doesn't
+   *  re-open mid-session because ``_onboardingSessionDismissed``
+   *  survives the refresh. */
+  private async _loadOnboardingState() {
+    try {
+      const state = await this._api.getOnboardingState();
+      this._onboardingPending = state.steps.some(
+        (s) => s.status === OnboardingStepStatus.PENDING,
+      );
+      const userBehindCurrent =
+        state.completed_version < state.current_version;
+      this._onboardingShouldShow =
+        userBehindCurrent && !this._onboardingSessionDismissed;
+    } catch (err) {
+      // Onboarding is non-critical — a transient WS failure here
+      // shouldn't block the rest of the dashboard. Clear the
+      // badge (the latest data is unknown, so reading as "no
+      // nudge" is safer than a stale red dot) but leave the
+      // dialog-show signal alone: a transient reload on a
+      // session-dismissed state must not cause a false→true
+      // transition that re-opens the wizard the user just
+      // closed. ``_onboardingSessionDismissed`` already prevents
+      // the *next* successful load from re-opening, but only if
+      // we don't toggle the show signal in between.
+      console.warn("Failed to load onboarding state:", err);
+      this._onboardingPending = false;
+    }
+  }
+
+  private _onOnboardingAcknowledged = () => {
+    // Triggered by the dialog after a successful save or explicit
+    // decline — both of which call ``mark_acknowledged`` on the
+    // backend. Refresh the state so the badge reflects the new
+    // data (cleared after a save) and so the dialog signal stays
+    // accurate without another full round-trip on the user's
+    // next page load.
+    this._onboardingShouldShow = false;
+    this._loadOnboardingState();
+  };
+
+  private _onOnboardingDismissedSession = () => {
+    this._onboardingSessionDismissed = true;
+    this._onboardingShouldShow = false;
+  };
+
+  /** User picked the "Set up Wi-Fi" kebab item. Re-launches the
+   *  wizard regardless of acknowledged-version / session-dismiss
+   *  — the kebab entry is the explicit "I want to do this now"
+   *  signal, so we override both gates. */
+  private _onOpenOnboarding = () => {
+    this._onboardingSessionDismissed = false;
+    this._onboardingDialog?.open();
+  };
+
+  /** Secrets editor finished a save. Refresh the onboarding
+   *  snapshot so the kebab entry appears / disappears in real
+   *  time when the user clears or fills in Wi-Fi credentials by
+   *  hand instead of going through the wizard. */
+  private _onSecretsSaved = () => {
+    this._loadOnboardingState();
+  };
 
   // True while a ``setRemoteBuildSettings`` write is in flight. The
   // reload path on (re)connect skips when this is set so a write
@@ -850,6 +954,7 @@ export class ESPHomeApp extends LitElement {
         @open-firmware-jobs=${this._onOpenFirmwareJobs}
         @open-reset-build-env=${this._onOpenResetBuildEnv}
         @open-feedback=${this._onOpenFeedback}
+        @open-onboarding-wifi=${this._onOpenOnboarding}
       >
         ${this._router.outlet()}
       </esphome-layout>
@@ -868,8 +973,25 @@ export class ESPHomeApp extends LitElement {
         @firmware-history-cleared=${this._onFirmwareHistoryCleared}
       ></esphome-firmware-jobs-dialog>
       <esphome-feedback-dialog></esphome-feedback-dialog>
+      <esphome-onboarding-wifi-dialog
+        @onboarding-acknowledged=${this._onOnboardingAcknowledged}
+        @onboarding-dismissed-session=${this._onOnboardingDismissedSession}
+      ></esphome-onboarding-wifi-dialog>
     `;
   }
+
+  /** When ``_onboardingShouldShow`` flips true, programmatically
+   *  open the dialog. The dialog itself is mounted unconditionally
+   *  (so the ``@`` event listeners are wired) but starts closed. */
+  protected updated(changed: Map<string | number | symbol, unknown>) {
+    super.updated?.(changed);
+    if (changed.has("_onboardingShouldShow") && this._onboardingShouldShow) {
+      this._onboardingDialog?.open();
+    }
+  }
+
+  @query("esphome-onboarding-wifi-dialog")
+  private _onboardingDialog?: HTMLElement & { open(): void };
 
   private async _onLoginSubmit(
     e: CustomEvent<{ username: string; password: string }>,
