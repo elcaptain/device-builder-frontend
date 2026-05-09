@@ -11,7 +11,7 @@ import { customElement, query, state } from "lit/decorators.js";
 import toast from "sonner-js";
 import { APIError } from "../api/api-error.js";
 import type { ESPHomeAPI } from "../api/esphome-api.js";
-import { ErrorCode, type RemoteBuildPeer } from "../api/types.js";
+import { ErrorCode, type IdentityView, type RemoteBuildPeer } from "../api/types.js";
 import type { LocalizeFunc, SupportedLocale } from "../common/localize.js";
 import { readStoredLocale } from "../common/localize.js";
 
@@ -24,7 +24,11 @@ import {
   yamlDiffButtonContext,
 } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
+import { formatPinSha256 } from "../util/cert-pin-format.js";
+import { copyToClipboard } from "../util/copy-to-clipboard.js";
 import { registerMdiIcons } from "../util/register-icons.js";
+import "./confirm-dialog.js";
+import type { ESPHomeConfirmDialog } from "./confirm-dialog.js";
 
 import "@home-assistant/webawesome/dist/components/dialog/dialog.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
@@ -100,6 +104,29 @@ export class ESPHomeSettingsDialog extends LitElement {
   @state()
   private _remoteBuildAddInFlight = false;
 
+  // Phase 3c2b: receiver identity (cert pin + listener-bound + versions).
+  // Lazy-loaded the first time the user opens the section,
+  // refreshed after a successful rotate. ``null`` means
+  // "not yet loaded"; an explicit error state is tracked
+  // separately so the UI can render a "couldn't load — try
+  // re-opening Settings" message rather than spinning forever.
+  @state()
+  private _remoteBuildIdentity: IdentityView | null = null;
+
+  @state()
+  private _remoteBuildIdentityLoadFailed = false;
+
+  // Gates concurrent rotate clicks so a double-click can't
+  // fire two ``rotate_identity`` requests. The backend itself
+  // rejects the second with ``ALREADY_EXISTS`` (3c1's
+  // single-flight contract), but disabling the button is the
+  // user-facing equivalent.
+  @state()
+  private _remoteBuildRotateInFlight = false;
+
+  @query("#rotate-confirm")
+  private _rotateConfirmDialog!: ESPHomeConfirmDialog;
+
   @state()
   private _section: Section = "appearance";
 
@@ -116,9 +143,22 @@ export class ESPHomeSettingsDialog extends LitElement {
     this._theme = localStorage.getItem("esphome-theme") ?? "system";
     this._language = readStoredLocale() ?? "system";
     this._section = "appearance";
-    // Drop any stale peer list from a previous open so the user
-    // sees the loading state on each fresh dialog visit.
+    // Drop any stale peer list / identity from a previous open
+    // so the user sees the loading state on each fresh dialog
+    // visit. Identity in particular can change between opens
+    // (operator rotated the cert from another tab); the
+    // rotate flow refreshes locally, so a stale value here
+    // would look correct without actually being live.
     this._remoteBuildPeers = null;
+    this._remoteBuildIdentity = null;
+    this._remoteBuildIdentityLoadFailed = false;
+    // Reset rotate-in-flight too — the user could have closed
+    // the dialog mid-rotate (or while the confirm modal was
+    // open), and a stale ``true`` would leave the Rotate
+    // button disabled on the next visit. The shared
+    // ``<esphome-confirm-dialog>`` handles its own state, so
+    // we only reset the flag here.
+    this._remoteBuildRotateInFlight = false;
     this._dialog.open = true;
   }
 
@@ -128,16 +168,21 @@ export class ESPHomeSettingsDialog extends LitElement {
 
   private _selectSection(section: Section) {
     this._section = section;
-    if (section === "remote_build" && this._remoteBuildPeers === null) {
-      void (async () => {
-        const ok = await this._loadRemoteBuildPeers();
-        if (!ok && this._remoteBuildPeers === null) {
-          // First-load fallback only — a fresh-open with no prior
-          // list still needs *something* renderable. The mutation
-          // path below leaves the prior list intact instead.
-          this._remoteBuildPeers = [];
-        }
-      })();
+    if (section === "remote_build") {
+      if (this._remoteBuildPeers === null) {
+        void (async () => {
+          const ok = await this._loadRemoteBuildPeers();
+          if (!ok && this._remoteBuildPeers === null) {
+            // First-load fallback only — a fresh-open with no prior
+            // list still needs *something* renderable. The mutation
+            // path below leaves the prior list intact instead.
+            this._remoteBuildPeers = [];
+          }
+        })();
+      }
+      if (this._remoteBuildIdentity === null && !this._remoteBuildIdentityLoadFailed) {
+        void this._loadRemoteBuildIdentity();
+      }
     }
   }
 
@@ -166,6 +211,148 @@ export class ESPHomeSettingsDialog extends LitElement {
     } catch (err) {
       console.warn("Could not load remote-build hosts:", err);
       return false;
+    }
+  }
+
+  /**
+   * Fetch the receiver identity for the Build host card.
+   *
+   * Idempotent on the backend (``get_identity`` lazy-creates the
+   * cert + key on first call but never rotates), so re-firing on
+   * dialog re-open or after a rotate just refreshes the local
+   * state. Tracks failure separately from the null-while-loading
+   * state so the UI can render an explicit error message rather
+   * than spinning forever.
+   *
+   * **Cross-tab gap**: a rotation triggered from another tab
+   * won't refresh this tab's card until the user closes and
+   * reopens Settings. 3c2c will set up the
+   * ``remote_build_identity_rotated`` event subscription to
+   * cover that case; binding-mismatch alerts in 3c2c MUST
+   * fire while the user sits on the page (so the events
+   * plumbing is mandatory there), and the identity-refresh
+   * piggybacks on the same wiring.
+   */
+  private async _loadRemoteBuildIdentity(): Promise<void> {
+    if (this._api === undefined) {
+      return;
+    }
+    try {
+      this._remoteBuildIdentity = await this._api.getRemoteBuildIdentity();
+      this._remoteBuildIdentityLoadFailed = false;
+    } catch (err) {
+      console.warn("Could not load remote-build identity:", err);
+      this._remoteBuildIdentityLoadFailed = true;
+    }
+  }
+
+  private _onRotateRequest() {
+    // Open the shared ``<esphome-confirm-dialog>`` rather than
+    // rotating immediately. Rotation is a security-sensitive
+    // action that invalidates every paired offloader's pin;
+    // a single misclick shouldn't trigger that cascade. The
+    // confirm dialog (shared component, destructive style)
+    // spells out the consequence so the user has to
+    // acknowledge it; the rotate body lives in
+    // ``_onRotateConfirm`` and is wired via the dialog's
+    // ``@confirm`` event.
+    this._rotateConfirmDialog?.open();
+  }
+
+  /**
+   * Localised + ``richColors``-styled toast shorthand.
+   *
+   * The richColors-styled toast pattern repeats six times in
+   * the rotate / copy / mismatch flows; centralising it here
+   * keeps each call site to a single line and a single point
+   * of change for the styling contract.
+   *
+   * TODO: pre-3c2 callers in this file (the manual-host
+   * mutation paths, the master-toggle revert) still spell out
+   * the long form inline — they should be migrated to this
+   * helper as a separate cleanup PR. Doing it here would
+   * balloon the 3c2b diff for no behavior change. Risk if not
+   * migrated: the ``richColors: true`` styling contract
+   * silently drifts between call sites over time.
+   */
+  private _toast(level: "success" | "warning" | "error", key: string) {
+    toast[level](this._localize(key), { richColors: true });
+  }
+
+  private async _onRotateConfirm() {
+    if (this._api === undefined || this._remoteBuildRotateInFlight) {
+      return;
+    }
+    // Optimistic-update would be wrong here: a rotate hands
+    // back a wholly new pin that the frontend can't predict
+    // (it's the SHA-256 of the freshly-generated SPKI), so
+    // there's nothing we can pre-fill. Just gate the button
+    // on ``_remoteBuildRotateInFlight`` and toast the result.
+    this._remoteBuildRotateInFlight = true;
+    try {
+      this._remoteBuildIdentity = await this._api.rotateRemoteBuildIdentity();
+      this._remoteBuildIdentityLoadFailed = false;
+      if (this._remoteBuildIdentity.listener_bound) {
+        this._toast("success", "settings.remote_build_rotate_success");
+      } else {
+        // Listener didn't come back up after the rebuild.
+        // Backend's ``reload_remote_build_identity`` is
+        // fail-soft; the operator should check logs. Surface
+        // this distinct from generic failure so they don't
+        // think the rotation didn't happen.
+        this._toast("warning", "settings.remote_build_rotate_listener_down");
+      }
+    } catch (err) {
+      if (err instanceof APIError && err.errorCode === ErrorCode.ALREADY_EXISTS) {
+        // 3c1 single-flight: another rotation is in progress
+        // (possibly from another tab). The button is disabled
+        // while ``_remoteBuildRotateInFlight`` is true on this
+        // tab, but not the other tab's. Toast distinct from
+        // generic failure so the user knows to wait, not retry.
+        this._toast("warning", "settings.remote_build_rotate_already_in_progress");
+      } else {
+        this._toast("error", "settings.remote_build_rotate_failed");
+      }
+    } finally {
+      this._remoteBuildRotateInFlight = false;
+    }
+  }
+
+  private async _onCopyPin() {
+    // Defensive: refuse to "successfully" copy an empty value.
+    // A stale ``_remoteBuildIdentity`` or a state-glitch where
+    // ``pin_sha256`` is briefly empty would otherwise produce
+    // a "Copied!" toast while putting nothing on the clipboard
+    // — exactly the failure mode that's confusing to debug
+    // because the toast lies. If the pin is missing, surface
+    // the same error toast as a true copy failure so the user
+    // knows to refresh.
+    const pin = this._remoteBuildIdentity?.pin_sha256;
+    if (!pin) {
+      this._toast("warning", "settings.remote_build_pin_copy_failed");
+      return;
+    }
+    // Copy the unformatted (no-spaces) pin so a paste into a
+    // compare-with-receiver field doesn't pick up the OOB
+    // display formatting. The display formatting is for the
+    // human's eyes; programmatic comparison wants the raw form.
+    //
+    // Goes through ``copyToClipboard`` (rather than
+    // ``navigator.clipboard.writeText`` directly) because the
+    // modern Clipboard API requires a "secure context" — the
+    // dashboard is frequently reached on HTTP at non-localhost
+    // LAN IPs (HA-addon direct port, container deployments)
+    // where ``navigator.clipboard`` is undefined or throws
+    // ``NotAllowedError``. The helper falls back to a hidden
+    // ``<span>`` + Selection API + ``execCommand("copy")`` in
+    // those contexts (see ``util/copy-to-clipboard.ts``).
+    if (await copyToClipboard(pin)) {
+      this._toast("success", "settings.remote_build_pin_copied");
+    } else {
+      // Surface the failure rather than silently no-op; the
+      // user clicked a button and deserves feedback. They can
+      // still read the pin off the card and copy it manually.
+      this._toast("warning", "settings.remote_build_pin_copy_failed");
     }
   }
 
@@ -486,6 +673,107 @@ export class ESPHomeSettingsDialog extends LitElement {
         cursor: not-allowed;
       }
 
+      .build-host-card {
+        display: flex;
+        flex-direction: column;
+        gap: var(--wa-space-s);
+        padding: var(--wa-space-m);
+        margin: 0 var(--wa-space-m) var(--wa-space-m) var(--wa-space-m);
+        background: var(--wa-color-surface-default);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+        border-radius: var(--wa-border-radius-m);
+      }
+
+      .build-host-row {
+        display: flex;
+        align-items: baseline;
+        gap: var(--wa-space-s);
+        flex-wrap: wrap;
+      }
+
+      .build-host-label {
+        font-size: var(--wa-font-size-s);
+        font-weight: var(--wa-font-weight-semibold);
+        color: var(--wa-color-text-quiet);
+        min-width: 110px;
+      }
+
+      .build-host-pin {
+        font-family: var(--wa-font-family-mono, monospace);
+        font-size: var(--wa-font-size-xs);
+        word-break: break-all;
+        flex: 1;
+      }
+
+      .build-host-dashboard-id {
+        font-family: var(--wa-font-family-mono, monospace);
+        font-size: var(--wa-font-size-s);
+        word-break: break-all;
+        flex: 1;
+      }
+
+      .build-host-versions {
+        display: flex;
+        gap: var(--wa-space-l);
+        font-size: var(--wa-font-size-s);
+        color: var(--wa-color-text-quiet);
+      }
+
+      .build-host-versions code {
+        font-family: var(--wa-font-family-mono, monospace);
+        color: var(--wa-color-text-normal);
+        margin-left: var(--wa-space-xs);
+      }
+
+      .build-host-actions {
+        display: flex;
+        gap: var(--wa-space-s);
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .build-host-copy,
+      .build-host-rotate {
+        padding: 6px var(--wa-space-m);
+        background: var(--wa-color-surface-raised);
+        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+        border-radius: var(--wa-border-radius-s);
+        color: var(--wa-color-text-normal);
+        font-family: inherit;
+        font-size: var(--wa-font-size-s);
+        cursor: pointer;
+      }
+
+      .build-host-rotate {
+        color: var(--wa-color-danger-on-quiet, #b00020);
+        border-color: var(--wa-color-danger-on-quiet, #b00020);
+      }
+
+      .build-host-rotate:disabled,
+      .build-host-copy:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .build-host-listener-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px var(--wa-space-s);
+        border-radius: var(--wa-border-radius-pill, 999px);
+        font-size: var(--wa-font-size-xs);
+        font-weight: var(--wa-font-weight-semibold);
+      }
+
+      .build-host-listener-up {
+        background: var(--wa-color-success-quiet, #d6f5dd);
+        color: var(--wa-color-success-on-quiet, #036a1c);
+      }
+
+      .build-host-listener-down {
+        background: var(--wa-color-warning-quiet, #fff3cd);
+        color: var(--wa-color-warning-on-quiet, #8a6d3b);
+      }
+
       @media (max-width: 700px) {
         .layout {
           flex-direction: column;
@@ -654,6 +942,14 @@ export class ESPHomeSettingsDialog extends LitElement {
         ></button>
       </div>
 
+      <div class="section-heading">
+        ${this._localize("settings.remote_build_build_host")}
+      </div>
+      <div class="role-section-desc">
+        ${this._localize("settings.remote_build_build_host_desc")}
+      </div>
+      ${this._renderBuildHostCard()}
+
       <div class="role-section-heading">
         ${this._localize("settings.remote_build_role_offload")}
       </div>
@@ -717,6 +1013,96 @@ export class ESPHomeSettingsDialog extends LitElement {
           ${this._localize("settings.remote_build_add_manual_submit")}
         </button>
       </form>
+    `;
+  }
+
+  private _renderBuildHostCard() {
+    if (this._remoteBuildIdentityLoadFailed) {
+      return html`
+        <div class="row" role="alert">
+          <div class="row-label">
+            <span class="row-desc">
+              ${this._localize("settings.remote_build_identity_load_failed")}
+            </span>
+          </div>
+        </div>
+      `;
+    }
+    if (this._remoteBuildIdentity === null) {
+      return html`
+        <div class="row" role="status">
+          <div class="row-label">
+            <span class="row-desc">
+              ${this._localize("settings.remote_build_identity_loading")}
+            </span>
+          </div>
+        </div>
+      `;
+    }
+    const identity = this._remoteBuildIdentity;
+    const formattedPin = formatPinSha256(identity.pin_sha256);
+    return html`
+      <div class="build-host-card">
+        <div class="build-host-row">
+          <span class="build-host-label">
+            ${this._localize("settings.remote_build_pin_label")}
+          </span>
+          <code class="build-host-pin">${formattedPin}</code>
+        </div>
+        <div class="build-host-actions">
+          <button class="build-host-copy" type="button" @click=${this._onCopyPin}>
+            ${this._localize("settings.remote_build_pin_copy")}
+          </button>
+          <span
+            class=${`build-host-listener-badge build-host-listener-${
+              identity.listener_bound ? "up" : "down"
+            }`}
+            role="status"
+          >
+            ${identity.listener_bound
+              ? this._localize("settings.remote_build_listener_up")
+              : this._localize("settings.remote_build_listener_down")}
+          </span>
+        </div>
+        <div class="build-host-row">
+          <span class="build-host-label">
+            ${this._localize("settings.remote_build_dashboard_id_label")}
+          </span>
+          <code class="build-host-dashboard-id">${identity.dashboard_id}</code>
+        </div>
+        <div class="build-host-row build-host-versions">
+          <span>
+            ${this._localize("settings.remote_build_server_version_label")}
+            <code>${identity.server_version}</code>
+          </span>
+          <span>
+            ${this._localize("settings.remote_build_esphome_version_label")}
+            <code>${identity.esphome_version}</code>
+          </span>
+        </div>
+        <div class="build-host-actions">
+          <button
+            class="build-host-rotate"
+            type="button"
+            ?disabled=${this._remoteBuildRotateInFlight}
+            @click=${this._onRotateRequest}
+          >
+            ${this._remoteBuildRotateInFlight
+              ? this._localize("settings.remote_build_rotate_in_progress")
+              : this._localize("settings.remote_build_rotate")}
+          </button>
+        </div>
+      </div>
+      <esphome-confirm-dialog
+        id="rotate-confirm"
+        destructive
+        heading=${this._localize("settings.remote_build_rotate_confirm_title")}
+        message=${this._localize("settings.remote_build_rotate_confirm_body")}
+        confirm-label=${this._localize(
+          "settings.remote_build_rotate_confirm_confirm"
+        )}
+        @confirm=${this._onRotateConfirm}
+      ></esphome-confirm-dialog>
     `;
   }
 
@@ -900,14 +1286,11 @@ export class ESPHomeSettingsDialog extends LitElement {
         // ("this peer is already in your list" rather than a
         // vague "couldn't save") without string-matching the
         // details field.
-        if (
-          err instanceof APIError &&
-          err.errorCode === ErrorCode.ALREADY_EXISTS
-        ) {
+        if (err instanceof APIError && err.errorCode === ErrorCode.ALREADY_EXISTS) {
           return "settings.remote_build_add_manual_duplicate";
         }
         return "settings.remote_build_add_manual_failed";
-      },
+      }
     );
     if (ok) {
       this._remoteBuildHostInput = "";
@@ -917,11 +1300,12 @@ export class ESPHomeSettingsDialog extends LitElement {
 
   private _onRemoveManualHost(peer: RemoteBuildPeer) {
     return this._runManualHostMutation(
-      (api) => api.removeRemoteBuildManualHost({
-        hostname: peer.hostname,
-        port: peer.port,
-      }),
-      () => "settings.remote_build_remove_manual_failed",
+      (api) =>
+        api.removeRemoteBuildManualHost({
+          hostname: peer.hostname,
+          port: peer.port,
+        }),
+      () => "settings.remote_build_remove_manual_failed"
     );
   }
 }
