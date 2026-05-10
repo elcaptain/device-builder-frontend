@@ -969,12 +969,14 @@ export class ESPHomeApp extends LitElement {
       case DeviceEventType.REMOTE_BUILD_PAIR_REQUEST_RECEIVED: {
         // Upsert a PENDING row keyed on ``dashboard_id``. Carries
         // every field needed for a complete ``PeerSummary``-shape
-        // (the receiver fires this event with ``paired_at`` so
-        // the frontend doesn't need a follow-up read). A re-pair
-        // by the same offloader before admin clicked Accept lands
-        // a fresh event with the new pin / pubkey / paired_at;
-        // upsert overwrites in place. ``peer_ip`` is for inbox
-        // display only, not stored on the row.
+        // (the receiver fires this event with ``paired_at`` and
+        // ``peer_ip`` so the frontend doesn't need a follow-up
+        // read). A re-pair by the same offloader before admin
+        // clicked Accept lands a fresh event with the new pin /
+        // pubkey / paired_at / peer_ip; upsert overwrites in
+        // place. ``peer_ip`` is display-only — the inbox renders
+        // it as a clone-risk sanity-check, no decision logic
+        // keys on it.
         const evt = data as RemoteBuildPairRequestReceivedEventData;
         const incoming: PeerSummary = {
           dashboard_id: evt.dashboard_id,
@@ -982,6 +984,7 @@ export class ESPHomeApp extends LitElement {
           label: evt.label,
           paired_at: evt.paired_at,
           status: "pending",
+          peer_ip: evt.peer_ip,
         };
         const current = this._buildServerPeers ?? [];
         const idx = current.findIndex(
