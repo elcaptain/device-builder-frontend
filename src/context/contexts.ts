@@ -13,6 +13,7 @@ import type {
   Label,
   PairingWindowState,
   PeerSummary,
+  RemoteBuildPeer,
 } from "../api/types.js";
 import type { LocalizeFunc } from "../common/localize.js";
 
@@ -190,3 +191,34 @@ export const buildServerPairingWindowStateContext =
   createContext<PairingWindowState | null>(
     Symbol("esphome-build-server-pairing-window-state")
   );
+
+/**
+ * mDNS-discovered peer dashboards (offload-side discovery
+ * surface), seeded from ``subscribe_events``'s
+ * ``initial_state.hosts`` snapshot at subscribe time and
+ * mutated locally as ``remote_build_host_added`` (upsert by
+ * ``name``) / ``remote_build_host_removed`` (drop by ``name``)
+ * events arrive. Replaces the deleted ``remote_build/list_hosts``
+ * pull surface — RAM-only on the backend, push-driven on the
+ * frontend.
+ *
+ * ``null`` until the initial-state snapshot lands so consumers
+ * can distinguish "no controller / still loading" from "loaded
+ * with zero discovered hosts". The Send-builds Settings
+ * subsection (and the future offloader-side pair dialog)
+ * consume this directly. The shape is a :class:`Map` (rather
+ * than a plain object) keyed on ``name`` (the leftmost mDNS
+ * service-instance label) for two reasons: (a) ``name`` comes
+ * off the network and a malicious mDNS responder broadcasting
+ * a service-instance label like ``__proto__`` or
+ * ``constructor`` would collide with prototype keys on a plain
+ * ``{}``; (b) ``Map`` preserves insertion order verbatim,
+ * whereas plain objects re-order numeric-looking keys (e.g.
+ * a host literally named ``"42"`` would float ahead of the
+ * alphabetic neighbours during enumeration), which would
+ * surface as inconsistent UI ordering between snapshot and
+ * post-event renders.
+ */
+export const buildOffloadDiscoveredHostsContext = createContext<
+  Map<string, RemoteBuildPeer> | null
+>(Symbol("esphome-build-offload-discovered-hosts"));
