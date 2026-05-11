@@ -9,13 +9,14 @@ import {
   mdiKeyOutline,
   mdiPlaylistCheck,
   mdiRefresh,
+  mdiServerNetwork,
   mdiStop,
   mdiTimerSand,
 } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { ESPHomeAPI } from "../api/index.js";
-import { JobStatus, JobType } from "../api/types.js";
+import { JobSource, JobStatus, JobType } from "../api/types.js";
 import type { FirmwareJob } from "../api/types.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import type { ESPHomeAnsiLog } from "./ansi-log.js";
@@ -50,6 +51,7 @@ registerMdiIcons({
   "check-circle": mdiCheckCircle,
   "alert-circle": mdiAlertCircle,
   "playlist-check": mdiPlaylistCheck,
+  "server-network": mdiServerNetwork,
   "timer-sand": mdiTimerSand,
 });
 
@@ -161,6 +163,20 @@ export class ESPHomeCommandDialog extends LitElement {
    *  ``_isQueued`` below. */
   @state()
   private _jobStatus: JobStatus | null = null;
+  /** Locally-primed snapshot of the followed job's
+   *  ``{source, source_label}`` so the "Building on
+   *  <receiver>" sub-line can paint on the very first
+   *  frame — same priming pattern ``_jobStatus`` uses for
+   *  the queued overlay. The ``firmwareJobsContext`` only
+   *  delivers ``_jobs.get(id)`` after the next
+   *  ``job_queued`` / ``job_updated`` event, so without
+   *  this fallback a REMOTE-routed install dialog renders
+   *  blank chrome for the ~roundtrip-time before the
+   *  sub-line appears. Reset to ``null`` on ``open()`` so
+   *  the next dialog session starts clean; the renderer
+   *  prefers the live context entry when present, so a
+   *  stale prime is benign once ``_jobs`` catches up. */
+  private _primedSource: { source: JobSource; source_label: string } | null = null;
   /** Stream message ID (for both validate streaming and follow_job streaming). */
   private _streamId = "";
   /** Install target port — "OTA" for network, an actual port for server-serial. */
@@ -344,6 +360,28 @@ export class ESPHomeCommandDialog extends LitElement {
         color: var(--term-error);
       }
 
+      /* "Building on <receiver_label>" sub-line, visible while a
+         REMOTE-source job is in flight (queued / compiling /
+         installing). Surfaced above the log area so the user can
+         see at a glance which paired build server is doing the
+         work — transparent install routes the compile silently,
+         but the operator still wants to know where the bytes
+         are coming from. */
+      .remote-builder-sub-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 20px;
+        border-bottom: 1px solid var(--term-border);
+        font-family: "SF Mono", "Fira Code", "Fira Mono", "Cascadia Code", monospace;
+        font-size: 12px;
+        color: var(--wa-color-text-quiet, #888);
+      }
+      .remote-builder-sub-line wa-icon {
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+
       /* Reset-build-env suggestion — surfaced only on install/compile
          failures. Sits between the error banner and the toolbar so the
          user reads "what failed" first, then "what to try next". Visual
@@ -492,6 +530,7 @@ export class ESPHomeCommandDialog extends LitElement {
     this._statusMessage = "";
     this._jobId = "";
     this._jobStatus = null;
+    this._primedSource = null;
     this._failedDuringValidate = false;
     /* Always start with secrets redacted on a fresh open — the
        toggle is opt-in per session so a screen-share / pair-coding
@@ -541,8 +580,15 @@ export class ESPHomeCommandDialog extends LitElement {
     this._jobId = job.job_id;
     /* Prime from the job we were handed so the queued overlay can
        render on the very first paint instead of after the next
-       context update. */
+       context update. ``_primedSource`` does the same job for the
+       "Building on <receiver>" sub-line — without it, a REMOTE-
+       routed install dialog renders blank chrome for the
+       ~roundtrip-time before the next context update lands. */
     this._jobStatus = job.status;
+    this._primedSource = {
+      source: job.source,
+      source_label: job.source_label,
+    };
     // Cancel any prior follow before starting a new one. Without
     // this, every reopen of the dialog (clicking the busy spinner
     // again while a job is still running) layered on a fresh
@@ -631,6 +677,7 @@ export class ESPHomeCommandDialog extends LitElement {
     return html`
       <wa-dialog label=${this._title} light-dismiss @wa-after-hide=${this._onDialogHide}>
         <div class="content">
+          ${this._renderRemoteBuilderSubLine()}
           <div class="log-area">
             <esphome-ansi-log
               .lines=${this._lines}
@@ -642,6 +689,46 @@ export class ESPHomeCommandDialog extends LitElement {
           ${this._renderToolbar()}
         </div>
       </wa-dialog>
+    `;
+  }
+
+  /** "Building on <receiver_label>" sub-line for in-flight REMOTE jobs.
+   *
+   *  Reads ``FirmwareJob.source`` + ``source_label`` from the
+   *  jobs context (7a-2a / 7a-3). Visible while the job is non-
+   *  terminal so the operator can see at a glance which paired
+   *  build server the compile was routed to; the transparent
+   *  install flow dispatches silently otherwise. Falls back to
+   *  the locally-primed ``_primedSource`` snapshot for the gap
+   *  between ``followJob`` and the first context update —
+   *  without it, a REMOTE-routed install dialog renders blank
+   *  chrome for the ~roundtrip-time before the live entry
+   *  lands. Returns ``nothing`` for LOCAL jobs or when neither
+   *  source is available. */
+  private _renderRemoteBuilderSubLine() {
+    if (!this._jobId) return nothing;
+    const liveJob = this._jobs.get(this._jobId);
+    if (liveJob && isTerminalJobStatus(liveJob.status)) return nothing;
+    // Live entry wins when present — it's the canonical
+    // source the rest of the dialog reads from, so we
+    // prefer it over the locally-primed snapshot. The
+    // ``source_label`` field is a snapshot at job-creation
+    // time per the backend's wire contract (see
+    // ``FirmwareJob.source_label`` in ``api/types.ts``), so
+    // the two values agree once ``_jobs`` catches up; the
+    // prime only fills the paint-gap before that.
+    const source = liveJob?.source ?? this._primedSource?.source;
+    const label = liveJob?.source_label ?? this._primedSource?.source_label;
+    if (source !== JobSource.REMOTE || !label) return nothing;
+    return html`
+      <div class="remote-builder-sub-line" role="status">
+        <wa-icon library="mdi" name="server-network"></wa-icon>
+        <span
+          >${this._localize("command.remote_builder_sub_line", {
+            receiver: label,
+          })}</span
+        >
+      </div>
     `;
   }
 
@@ -1177,8 +1264,14 @@ export class ESPHomeCommandDialog extends LitElement {
     /* Prime status from the API response so the queued overlay shows
        up immediately. The matching ``job_queued`` event will lands in
        ``firmwareJobsContext`` shortly after and the getter will
-       prefer that live value going forward. */
+       prefer that live value going forward. Same priming pattern
+       carries ``{source, source_label}`` for the "Building on
+       <receiver>" sub-line. */
     this._jobStatus = job.status;
+    this._primedSource = {
+      source: job.source,
+      source_label: job.source_label,
+    };
     this._followJob(job.job_id);
   }
 
