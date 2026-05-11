@@ -1415,7 +1415,7 @@ export interface EditorValidateResponse {
 
 // Remote-build feature (issue #106).
 // Phase 2: peer dashboard discovery + receiver-side master switch.
-// Phase 3c1: receiver dashboard identity + cert rotation.
+// Phase 3c1: receiver dashboard identity + X25519 keypair rotation.
 // Phase 4a: Noise XX peer-link replaces the bearer-token surface;
 //           offloader-side pair flow + receiver-side pairing inbox.
 
@@ -1683,16 +1683,17 @@ export interface RemoteBuildPeer {
 
 /**
  * Receiver's stable identity, returned from
- * ``remote_build/get_identity`` and ``remote_build/rotate_identity``.
+ * 'remote_build/get_identity' and 'remote_build/rotate_identity'.
  *
- * The cert + key PEMs are intentionally NOT included — only the
- * SPKI fingerprint (``pin_sha256``, lowercase hex SHA-256 of the
- * SubjectPublicKeyInfo) is safe to ship, and it's what a peer
- * pins against anyway. ``listener_bound`` reports whether the
- * peer-link Noise WS is currently serving traffic; lets the
- * Settings UI distinguish "rotation succeeded AND the listener
- * is back up" from "rotation succeeded but the rebuild
- * fail-softed; check logs".
+ * The X25519 private key is intentionally NOT included -- only
+ * the public-key fingerprint ('pin_sha256', lowercase-hex
+ * SHA-256 of the X25519 public key) is safe to ship, and it's
+ * what a peer pins against during the Noise XX handshake.
+ * 'listener_bound' reports whether the peer-link Noise WS is
+ * currently serving traffic; lets the Settings UI distinguish
+ * "rotation succeeded AND the listener is back up" from
+ * "rotation succeeded but the rebuild fail-softed; check
+ * logs".
  */
 export interface IdentityView {
   dashboard_id: string;
