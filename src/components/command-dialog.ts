@@ -15,8 +15,9 @@ import {
 } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
+import { APIError } from "../api/api-error.js";
 import type { ESPHomeAPI } from "../api/index.js";
-import { JobSource, JobStatus, JobType } from "../api/types.js";
+import { ErrorCode, JobSource, JobStatus, JobType } from "../api/types.js";
 import type { FirmwareJob } from "../api/types.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import type { ESPHomeAnsiLog } from "./ansi-log.js";
@@ -177,6 +178,13 @@ export class ESPHomeCommandDialog extends LitElement {
    *  prefers the live context entry when present, so a
    *  stale prime is benign once ``_jobs`` catches up. */
   private _primedSource: { source: JobSource; source_label: string } | null = null;
+  /** True while the "Build locally instead" override is mid-flight
+   *  (cancel + resubmit pair). Disables the link so a fast double-
+   *  click can't queue two resubmits, and lets the renderer flip
+   *  the label to "Switching…" so the user sees something is
+   *  happening across the small ``firmware/cancel`` → ``firmware/install``
+   *  round-trip. */
+  @state() private _switchingToLocal = false;
   /** Stream message ID (for both validate streaming and follow_job streaming). */
   private _streamId = "";
   /** Install target port — "OTA" for network, an actual port for server-serial. */
@@ -380,6 +388,38 @@ export class ESPHomeCommandDialog extends LitElement {
       .remote-builder-sub-line wa-icon {
         font-size: 16px;
         flex-shrink: 0;
+      }
+      .remote-builder-sub-line .spacer {
+        flex: 1;
+      }
+
+      /* "Build locally instead" override link. Sits at the
+         right edge of the remote-builder sub-line and fires
+         the cancel-and-resubmit-locally flow when clicked.
+         Styled as an inline text link rather than a button —
+         the row is informational chrome, not a primary action
+         surface, so a full-fledged button would over-promise.
+         Disabled while a switch is mid-flight so a fast
+         double-click can't queue two resubmits. */
+      .force-local-link {
+        background: none;
+        border: none;
+        padding: 0;
+        font: inherit;
+        color: var(--esphome-primary, #1e88e5);
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      .force-local-link:hover:not(:disabled),
+      .force-local-link:focus-visible {
+        text-decoration-thickness: 2px;
+        outline: none;
+      }
+      .force-local-link:disabled {
+        color: var(--wa-color-text-quiet, #888);
+        cursor: not-allowed;
+        text-decoration: none;
       }
 
       /* Reset-build-env suggestion — surfaced only on install/compile
@@ -720,6 +760,15 @@ export class ESPHomeCommandDialog extends LitElement {
     const source = liveJob?.source ?? this._primedSource?.source;
     const label = liveJob?.source_label ?? this._primedSource?.source_label;
     if (source !== JobSource.REMOTE || !label) return nothing;
+    // Only allow the override while the install is mid-flight
+    // and only for the install command type — switching mid-
+    // upload doesn't make sense, and switching a compile job
+    // mid-flight is a power-user shape we don't have a UI for
+    // yet. For terminal jobs ``_renderRemoteBuilderSubLine``
+    // already returns ``nothing`` above; this guard is the
+    // remaining gate for "compile-only" and "command-dialog
+    // opened from non-Install entry points".
+    const canOverride = this._commandType === "install";
     return html`
       <div class="remote-builder-sub-line" role="status">
         <wa-icon library="mdi" name="server-network"></wa-icon>
@@ -728,8 +777,120 @@ export class ESPHomeCommandDialog extends LitElement {
             receiver: label,
           })}</span
         >
+        ${canOverride
+          ? html`
+              <span class="spacer"></span>
+              <button
+                class="force-local-link"
+                ?disabled=${this._switchingToLocal}
+                @click=${this._onForceLocalClick}
+              >
+                ${this._switchingToLocal
+                  ? this._localize("command.force_local_switching")
+                  : this._localize("command.force_local_action")}
+              </button>
+            `
+          : nothing}
       </div>
     `;
+  }
+
+  /** Cancel the in-flight REMOTE install and resubmit as LOCAL.
+   *
+   *  The dialog stays attached: after the cancel lands the
+   *  fresh ``firmwareInstall`` returns the new ``FirmwareJob``,
+   *  we re-prime ``_primedSource`` (so the sub-line disappears
+   *  on the very first paint), and call ``_followJob`` to
+   *  follow the new ``job_id``. The visible end-result for the
+   *  operator: "Building on X" sub-line replaced by the local
+   *  compile output stream, no dialog flicker.
+   *
+   *  Edge cases:
+   *  - Cancel-already-terminal race: if the in-flight job
+   *    flipped to a terminal state in the same tick, the
+   *    backend rejects with ``NOT_FOUND`` (already cleared) or
+   *    ``INVALID_ARGS`` (terminal). The override path swallows
+   *    those specifically and proceeds to the resubmit — the
+   *    operator's intent is "I want LOCAL now," which is still
+   *    achievable.
+   *  - Transport / unexpected cancel failure: surface the
+   *    error and abort the override so we don't queue a second
+   *    install while the original REMOTE keeps running.
+   *  - Resubmit failure: the dialog flips to the error banner
+   *    with a localized status message; ``APIError.details``
+   *    rides through as the secondary line via ``_lines`` so
+   *    the operator sees both the friendly copy and the wire
+   *    detail. Plain ``Error`` instances pass through their
+   *    ``.message`` verbatim.
+   *  - Double-click: ``_switchingToLocal`` gates the button
+   *    visually + functionally so the second click is a no-op. */
+  private _onForceLocalClick = async (): Promise<void> => {
+    if (this._switchingToLocal) return;
+    this._switchingToLocal = true;
+    const configuration = this.configuration;
+    const port = this._port;
+    const cancelJobId = this._jobId;
+    try {
+      if (cancelJobId) {
+        try {
+          await this._api.firmwareCancel(cancelJobId);
+        } catch (cancelErr) {
+          // Only swallow the cancel-already-terminal race —
+          // any other failure (transport, server bug, …)
+          // aborts the override so we don't queue a second
+          // install while the original REMOTE keeps running.
+          if (!this._isCancelAlreadyTerminal(cancelErr)) throw cancelErr;
+        }
+      }
+      const job = await this._api.firmwareInstall(configuration, port, true);
+      // Re-attach the dialog to the new job. ``followJob``
+      // resets the line buffer + primes ``_jobStatus`` /
+      // ``_primedSource`` so the "Building on" sub-line
+      // disappears on the next render without waiting for the
+      // jobs-context update.
+      this.followJob(job, this.name);
+    } catch (err) {
+      // Surface the failure on the existing error banner. The
+      // primary status message is the localized "couldn't
+      // switch" copy (so the operator sees user-facing language,
+      // not a wire error code); the secondary detail rides into
+      // ``_lines`` as a single line so the existing log surface
+      // carries the actionable detail. APIError.details is the
+      // server-provided actionable text; plain Error instances
+      // fall back to ``.message``.
+      this._state = "error";
+      this._statusMessage = this._localize("command.force_local_failed");
+      const detail = this._formatForceLocalError(err);
+      if (detail) this._lines = [...this._lines, detail];
+    } finally {
+      this._switchingToLocal = false;
+    }
+  };
+
+  /** Recognise the cancel-already-terminal race so the override
+   *  swallows only that specific failure path. ``NOT_FOUND`` =
+   *  the job already left ``_jobs``; ``INVALID_ARGS`` = the
+   *  backend's "Cannot cancel a {status} job" reject for a job
+   *  that already flipped to a terminal status in the same
+   *  tick. Anything else — transport error, server bug — gets
+   *  re-raised. */
+  private _isCancelAlreadyTerminal(err: unknown): boolean {
+    if (!(err instanceof APIError)) return false;
+    return (
+      err.errorCode === ErrorCode.NOT_FOUND ||
+      err.errorCode === ErrorCode.INVALID_ARGS
+    );
+  }
+
+  /** Format an override-flow error for the secondary detail
+   *  line. ``APIError.details`` is the server-provided
+   *  user-facing text (e.g. the configuration validator's line
+   *  number); plain ``Error`` instances fall back to
+   *  ``.message``. */
+  private _formatForceLocalError(err: unknown): string {
+    if (err instanceof APIError) return err.details || err.errorCode;
+    if (err instanceof Error) return err.message;
+    return String(err);
   }
 
   /** True when this dialog is following a job that's still in the
