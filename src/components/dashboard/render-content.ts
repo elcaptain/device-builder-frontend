@@ -4,7 +4,7 @@ import type { AdoptableDevice, ConfiguredDevice } from "../../api/types.js";
 import { downloadYaml, editDevice } from "./actions.js";
 import {
   renderAddDeviceCard,
-  renderFilterGroup,
+  renderFacets,
   renderNoResultsExtras,
   renderSearchInput,
   renderSelectToggle,
@@ -146,7 +146,7 @@ export function renderCardGrid(
 }
 
 export function renderTable(host: ESPHomePageDashboard): TemplateResult {
-  const filteredDevices = host._applyLabelFilter(host._devices);
+  const filteredDevices = host._applyFacetFilters(host._devices);
   return html`
     <esphome-device-table
       .devices=${filteredDevices}
@@ -202,10 +202,10 @@ export function renderTable(host: ESPHomePageDashboard): TemplateResult {
       <div slot="toolbar" class="toolbar-stack">
         <div class="toolbar-row">
           ${renderSearchInput(host)} ${renderViewToggle(host)}
-          <span class="toolbar-spacer"></span>
-          ${renderFilterGroup(host)} ${renderSelectToggle(host)}
+          ${renderFacets(host)}
         </div>
       </div>
+      <div slot="before-columns">${renderSelectToggle(host)}</div>
       <button
         slot="actions"
         class="table-create-btn"

@@ -211,29 +211,44 @@ export const dashboardStyles = css`
     display: flex;
     align-items: center;
     gap: var(--wa-space-s);
+    flex-wrap: wrap;
+    row-gap: var(--wa-space-xs);
   }
 
-  /* Pushes the filter group to the right edge of the toolbar so
-     view-toggles (left of the spacer) and filter affordances
-     (right of the spacer) read as separate clusters. Collapses to
-     zero on viewports too narrow to afford it — the row wraps via
-     'flex-wrap' higher up if individual buttons overflow. */
+  /* Pushes the select-toggle to the right edge of the toolbar.
+     The facet pills sit in the middle of the row (between the
+     view-toggle and the spacer) so they read as part of the
+     "view / filter" cluster; on narrow viewports the row wraps
+     so the facets flow onto a second line without crowding the
+     search input. */
   .toolbar-spacer {
     flex: 1 1 auto;
     min-width: var(--wa-space-s);
   }
 
+  /* Facet pills cluster inline with the view-toggle. flex-wrap
+     lets pills flow onto a second row of their own if too many
+     accumulate (large fleets with several areas / platforms). */
   .filter-group {
     display: inline-flex;
     align-items: center;
-    gap: var(--wa-space-xs);
-    flex-shrink: 0;
+    flex-wrap: wrap;
+    gap: var(--wa-space-2xs);
+    row-gap: var(--wa-space-2xs);
+    flex-shrink: 1;
+    min-width: 0;
   }
 
   .search-wrap {
     position: relative;
     max-width: 380px;
-    flex: 1;
+    /* The search input grows to fill the row, but never below
+       ~140px so the placeholder copy stays readable when the
+       facets row claims toolbar real estate. flex-basis seeds
+       the input wider than the floor; min-width is the hard
+       lower bound for the squeezed state. */
+    flex: 1 1 220px;
+    min-width: 140px;
   }
   /* Native <input class="search-input"> picks up the shared
      border / radius / focus-ring shape from inputStyles
@@ -310,20 +325,59 @@ export const dashboardStyles = css`
   .yaml-hits {
     display: flex;
     flex-direction: column;
-    padding: var(--wa-space-m) 0 var(--wa-space-l);
+    padding: var(--wa-space-m) var(--wa-space-l) var(--wa-space-l);
     gap: var(--wa-space-l);
   }
+  /* Title-only list (no search query): pack rows tightly so the
+     navigable file list reads as a dense browser. Search-results
+     mode keeps a larger inter-card gap so each device's snippet
+     stack reads as its own section. */
+  .yaml-hits:not(:has(.yaml-snippet)) {
+    gap: var(--wa-space-2xs);
+  }
+  /* Each device's hits live inside one unified card — the header
+     sits at the top and any snippet blocks stack below it within
+     the same border. Switching between title-only and search-result
+     mode swaps the *contents* of the card, not the card itself. */
   .yaml-hit-group {
     display: flex;
     flex-direction: column;
-    gap: var(--wa-space-xs);
+    border: 1px solid var(--wa-color-surface-border);
+    border-radius: var(--wa-border-radius-m);
+    background: var(--wa-color-surface-raised);
+    overflow: hidden;
+  }
+  /* Card-level hover only makes sense in title-only mode where the
+     entire card is one click target. In search-results mode the
+     card hosts multiple independently-clickable snippet rows, so
+     per-row hover (below) is what tracks the cursor. */
+  .yaml-hits:not(:has(.yaml-snippet)) .yaml-hit-group {
+    transition:
+      background-color 0.12s,
+      border-color 0.12s;
+  }
+  .yaml-hits:not(:has(.yaml-snippet)) .yaml-hit-group:hover {
+    border-color: color-mix(
+      in srgb,
+      var(--esphome-primary),
+      transparent 50%
+    );
+    background: var(--wa-color-surface-lowered);
   }
   .yaml-hit-group-header {
     display: flex;
     align-items: center;
     gap: var(--wa-space-s);
-    padding-bottom: var(--wa-space-xs);
+    padding: var(--wa-space-s) var(--wa-space-m);
+  }
+  /* Divider between the device header and the snippet stack inside
+     the same card. */
+  .yaml-hit-group:has(.yaml-snippet) .yaml-hit-group-header {
     border-bottom: 1px solid var(--wa-color-surface-border);
+  }
+  .yaml-hit-group-header wa-icon {
+    color: var(--wa-color-text-quiet);
+    font-size: var(--wa-font-size-l);
   }
   .yaml-hit-group-name {
     font-weight: var(--wa-font-weight-bold);
@@ -344,27 +398,24 @@ export const dashboardStyles = css`
     color: var(--wa-color-text-quiet);
     margin-left: auto;
   }
-  /* The legacy .yaml-hit / .yaml-hit-label rows (palette-style
-     flat per-match listing) are gone from the dashboard; the
-     snippet-block styles below replace them with a grouped
-     code-search shape. */
+  /* Snippet rows sit inside the parent .yaml-hit-group card —
+     no individual border / radius (the card already has them),
+     just dividers between rows and a per-row hover highlight. */
   .yaml-snippet {
     display: block;
-    background: var(--wa-color-surface-lowered);
-    border: 1px solid var(--wa-color-surface-border);
-    border-radius: 6px;
     color: var(--wa-color-text-normal);
     text-decoration: none;
     font-family: var(--wa-font-family-code, ui-monospace, monospace);
     font-size: var(--wa-font-size-s);
-    overflow: hidden;
-    transition:
-      border-color 0.1s ease,
-      background-color 0.1s ease;
+    padding: var(--wa-space-2xs) 0;
+    transition: background-color 0.12s;
+  }
+  .yaml-snippet + .yaml-snippet {
+    border-top: 1px solid var(--wa-color-surface-border);
   }
   .yaml-snippet:hover,
   .yaml-snippet:focus-visible {
-    border-color: var(--esphome-primary);
+    background: var(--wa-color-surface-lowered);
     outline: none;
   }
   .yaml-snippet-line {
@@ -455,45 +506,64 @@ export const dashboardStyles = css`
     font-size: 18px;
   }
 
-  /* Standalone toggle for "select multiple devices" mode. Sits next to
-   * the view-toggle and matches its size/feel, but is its own button so
-   * users don't read it as part of the view-type group. */
+  /* "Select multiple devices" toggle. Lives in the results row,
+   * styled as a quiet text-link with a leading icon — secondary to
+   * the filter pills above. Active state flips to primary so the
+   * mode-change reads at a glance. */
   .select-toggle-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    gap: 6px;
+    height: 28px;
+    padding: 0 8px;
     border-radius: var(--wa-border-radius-m);
-    border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
-    background: var(--wa-color-surface-raised);
+    border: var(--wa-border-width-s) solid transparent;
+    background: transparent;
     color: var(--wa-color-text-quiet);
+    font-family: inherit;
+    font-size: var(--wa-font-size-xs);
+    font-weight: var(--wa-font-weight-semibold, 600);
     cursor: pointer;
     transition:
       background 0.12s,
       color 0.12s,
       border-color 0.12s;
-    padding: 0;
     flex-shrink: 0;
   }
 
   .select-toggle-btn:hover {
-    background: var(--wa-color-surface-lowered);
+    background: color-mix(
+      in srgb,
+      var(--wa-color-text-normal),
+      transparent 94%
+    );
     color: var(--wa-color-text-normal);
   }
 
+  .select-toggle-btn:focus-visible {
+    outline: none;
+    color: var(--wa-color-text-normal);
+    box-shadow: 0 0 0 2px
+      color-mix(in srgb, var(--esphome-primary), transparent 70%);
+  }
+
   .select-toggle-btn.active {
-    background: var(--esphome-primary);
-    color: var(--esphome-on-primary);
-    border-color: var(--esphome-primary);
+    background: color-mix(in srgb, var(--esphome-primary), transparent 88%);
+    color: var(--esphome-primary);
+    border-color: color-mix(in srgb, var(--esphome-primary), transparent 60%);
   }
 
   .select-toggle-btn.active:hover {
-    background: color-mix(in srgb, var(--esphome-primary), black 10%);
+    background: color-mix(in srgb, var(--esphome-primary), transparent 80%);
   }
 
   .select-toggle-btn wa-icon {
-    font-size: 18px;
+    font-size: 15px;
+  }
+
+  .select-toggle-btn-label {
+    line-height: 1;
   }
 
   /* ─── Empty search state ─── */

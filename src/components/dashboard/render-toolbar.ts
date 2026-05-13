@@ -1,6 +1,12 @@
-import { html, type TemplateResult } from "lit";
+import { html, nothing, type TemplateResult } from "lit";
 import { DashboardView, type Label } from "../../api/types.js";
 import type { ESPHomePageDashboard } from "../../pages/dashboard.js";
+import {
+  computeAreaFacet,
+  computePlatformFacet,
+  computeStateFacet,
+} from "../../util/facets.js";
+import "../facets/facet-filter.js";
 import { renderYamlPreviewPivot } from "./render-yaml.js";
 
 export function renderViewToggle(host: ESPHomePageDashboard): TemplateResult {
@@ -53,8 +59,13 @@ export function renderViewToggle(host: ESPHomePageDashboard): TemplateResult {
 }
 
 export function renderLabelsFilter(host: ESPHomePageDashboard): TemplateResult {
+  // Labels facet keeps its own component because its popover
+  // hosts the inline rename / delete / create affordances that
+  // the generic ``<esphome-facet-filter>`` doesn't expose. Visual
+  // language is shared via the ``facetStyles`` stylesheet.
   return html`<esphome-labels-filter
     .selected=${host._selectedLabels}
+    .usageCounts=${host._computeLabelUsage()}
     @labels-filter-change=${(e: CustomEvent<string[]>) => {
       host._selectedLabels = e.detail;
     }}
@@ -64,8 +75,74 @@ export function renderLabelsFilter(host: ESPHomePageDashboard): TemplateResult {
   ></esphome-labels-filter>`;
 }
 
-export function renderFilterGroup(host: ESPHomePageDashboard): TemplateResult {
-  return html` <div class="filter-group">${renderLabelsFilter(host)}</div> `;
+/** Facets row — sits next to the view toggle in the toolbar and
+ *  carries one pill per active facet dimension. The labels pill
+ *  always renders (its popover is the create path even when the
+ *  catalog is empty); area / platform / status only render when
+ *  the configured-device list has at least one usable value to
+ *  filter by, so a fresh dashboard with a single-platform fleet
+ *  doesn't sprout an empty / single-bucket pill that adds no
+ *  signal.
+ *
+ *  In YAML-search mode the *labels* and *status* facets are
+ *  suppressed — labels are device metadata (not in the YAML) and
+ *  online/offline is runtime state (also not in the YAML), so
+ *  filtering YAML matches by either is misleading. Area and
+ *  platform stay because both come from the YAML itself. */
+export function renderFacets(host: ESPHomePageDashboard): TemplateResult {
+  const areaOptions = computeAreaFacet(host._devices);
+  const platformOptions = computePlatformFacet(host._devices);
+  const stateOptions = computeStateFacet(host._devices, host._localize);
+  const multiSelectedLabel = host._localize("dashboard.filter_multi_selected", {
+    count: "{count}",
+  });
+  const clearLabel = host._localize("dashboard.filter_clear_all");
+  const yamlMode = host._yamlMode;
+
+  return html`
+    <div class="filter-group">
+      ${yamlMode ? nothing : renderLabelsFilter(host)}
+      ${areaOptions.length > 0
+        ? html`<esphome-facet-filter
+            name=${host._localize("dashboard.filter_area")}
+            search-placeholder=${host._localize("dashboard.filter_area")}
+            clear-label=${clearLabel}
+            multi-selected-label=${multiSelectedLabel}
+            ?searchable=${areaOptions.length > 8}
+            .options=${areaOptions}
+            .selected=${host._selectedAreas}
+            @facet-change=${(e: CustomEvent<string[]>) => {
+              host._selectedAreas = e.detail;
+            }}
+          ></esphome-facet-filter>`
+        : nothing}
+      ${platformOptions.length > 1
+        ? html`<esphome-facet-filter
+            name=${host._localize("dashboard.filter_platform")}
+            search-placeholder=${host._localize("dashboard.filter_platform")}
+            clear-label=${clearLabel}
+            multi-selected-label=${multiSelectedLabel}
+            .options=${platformOptions}
+            .selected=${host._selectedPlatforms}
+            @facet-change=${(e: CustomEvent<string[]>) => {
+              host._selectedPlatforms = e.detail;
+            }}
+          ></esphome-facet-filter>`
+        : nothing}
+      ${yamlMode
+        ? nothing
+        : html`<esphome-facet-filter
+            name=${host._localize("dashboard.filter_status")}
+            clear-label=${clearLabel}
+            multi-selected-label=${multiSelectedLabel}
+            .options=${stateOptions}
+            .selected=${host._selectedStates}
+            @facet-change=${(e: CustomEvent<string[]>) => {
+              host._selectedStates = e.detail;
+            }}
+          ></esphome-facet-filter>`}
+    </div>
+  `;
 }
 
 export function renderSelectToggle(host: ESPHomePageDashboard): TemplateResult {
@@ -79,6 +156,7 @@ export function renderSelectToggle(host: ESPHomePageDashboard): TemplateResult {
       @click=${host._toggleSelectMode}
     >
       <wa-icon library="mdi" name="checkbox-multiple-marked-outline"></wa-icon>
+      <span class="select-toggle-btn-label">${label}</span>
     </button>
   `;
 }
@@ -123,14 +201,22 @@ export function renderToolbar(
       ? host._localize("dashboard.device_singular")
       : host._localize("dashboard.device_plural");
   const suffix = q ? " " + host._localize("dashboard.search_of", { total }) : "";
+  // Layout: [search] [view-toggle] [facets…] <spacer> [Select multiple]
+  //         [X devices]
+  // The spacer between the facet cluster and the select-mode
+  // toggle visually separates "filter the list" from "operate on
+  // the list" so the toggle no longer reads as another facet.
   return html`
     <div class="toolbar">
       <div class="toolbar-row">
         ${renderSearchInput(host)} ${renderViewToggle(host)}
+        ${renderFacets(host)}
         <span class="toolbar-spacer"></span>
-        ${renderFilterGroup(host)} ${renderSelectToggle(host)}
+        ${renderSelectToggle(host)}
       </div>
-      <span class="device-count"><strong>${matchCount}</strong> ${unit}${suffix}</span>
+      <span class="device-count"
+        ><strong>${matchCount}</strong> ${unit}${suffix}</span
+      >
     </div>
   `;
 }
@@ -147,8 +233,8 @@ export function renderYamlToolbar(host: ESPHomePageDashboard): TemplateResult {
     <div class="toolbar">
       <div class="toolbar-row">
         ${renderSearchInput(host)} ${renderViewToggle(host)}
+        ${renderFacets(host)}
         <span class="toolbar-spacer"></span>
-        ${renderFilterGroup(host)}
       </div>
       ${matchCount !== null
         ? html`<span class="device-count"><strong>${matchCount}</strong> ${unit}</span>`
@@ -158,29 +244,33 @@ export function renderYamlToolbar(host: ESPHomePageDashboard): TemplateResult {
 }
 
 export function renderNoResultsExtras(host: ESPHomePageDashboard): TemplateResult {
+  const hasSearch = host._search.trim().length > 0;
   return html`
-    ${renderYamlPreviewPivot(host._localize, host._yamlPreviewCount, () =>
-      host._setSearchMode(true)
-    )}
-    <button
-      class="empty-search-clear"
-      @click=${() => {
-        host._search = "";
-      }}
-    >
+    ${hasSearch
+      ? renderYamlPreviewPivot(host._localize, host._yamlPreviewCount, () =>
+          host._setSearchMode(true),
+        )
+      : ""}
+    <button class="empty-search-clear" @click=${host._clearAllFilters}>
       ${host._localize("dashboard.no_results_clear")}
     </button>
   `;
 }
 
 export function renderEmptySearch(host: ESPHomePageDashboard): TemplateResult {
+  const q = host._search.trim();
+  // Facet-only no-match needs different copy: "{query}" isn't
+  // meaningful here, and the user reads the message to figure out
+  // why the grid is empty — naming the cause directly beats
+  // generic "no devices found".
+  const desc = q
+    ? host._localize("dashboard.no_results_desc", { query: q })
+    : host._localize("dashboard.no_results_desc_filtered");
   return html`
     <div class="empty-search">
       <wa-icon class="empty-search-icon" library="mdi" name="magnify"></wa-icon>
       <h3 class="empty-search-title">${host._localize("dashboard.no_results_title")}</h3>
-      <p class="empty-search-desc">
-        ${host._localize("dashboard.no_results_desc", { query: host._search.trim() })}
-      </p>
+      <p class="empty-search-desc">${desc}</p>
       ${renderNoResultsExtras(host)}
     </div>
   `;
