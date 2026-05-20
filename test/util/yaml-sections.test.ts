@@ -274,30 +274,43 @@ sensor:
     expect(sectionAtLine("", 1)).toBeNull();
   });
 
-  // Pinning current behaviour for the known follow-up: when the
-  // cursor is inside an inline automation block (e.g. `on_press:`
-  // nested under a `binary_sensor` list item), `sectionAtLine`
-  // returns the enclosing component item, NOT the automation.
-  // Until the helper is extended to consult `parseYamlAutomations`
-  // and prefer the most-specific (smallest) range, this asymmetry
-  // means cursor-following picks the parent component while
-  // clicking the navigator's matching automation entry takes you
-  // to the automation. The test locks the contract so the
-  // follow-up doesn't accidentally regress the common case.
-  it("attributes inline automation lines to the enclosing component (known gap)", () => {
+  // Cursor inside an inline automation block (``on_press:`` nested
+  // under a ``binary_sensor`` list item) now resolves to the
+  // automation entry, not the enclosing component — the helper
+  // prefers the most-specific (smallest containing range) match so
+  // the YAML pane's cursor-follow lands on the same section the
+  // navigator routes to.
+  it("routes inline automation lines to the automation entry, not the component", () => {
     const yaml = `binary_sensor:
   - platform: gpio
+    id: door_sensor
     name: door
     pin: D2
     on_press:
       then:
         - logger.log: pressed
 `;
-    // `on_press:` itself is line 5; its body is lines 6-7.
+    // ``on_press:`` itself is line 6; its body is lines 7-8.
+    const m = sectionAtLine(yaml, 7);
+    expect(m?.key).toBe(
+      "automation:component_on:door_sensor:on_press",
+    );
+  });
+
+  // Click inside a top-level ``script:`` entry resolves to that
+  // entry's automation key, not the bare ``script:`` block.
+  it("routes a click inside a script entry to the script automation key", () => {
+    const yaml = `esphome:
+  name: dev
+script:
+  - id: my_routine
+    mode: single
+    then:
+      - logger.log: hello
+`;
+    // ``- id: my_routine`` is line 4; the ``then:`` body lives on 6-7.
     const m = sectionAtLine(yaml, 6);
-    expect(m?.key).toBe("binary_sensor");
-    expect(m?.platform).toBe("gpio");
-    expect(m?.name).toBe("door");
+    expect(m?.key).toBe("automation:script:my_routine");
   });
 });
 
@@ -344,33 +357,25 @@ describe("parseYamlAutomations", () => {
     expect(parseYamlAutomations(yaml)).toEqual([]);
   });
 
-  it("finds inline on_* handlers", () => {
+  it("emits a stable component_on key for inline on_* handlers", () => {
     const yaml = `binary_sensor:
   - platform: gpio
-    name: "my_button"
+    id: my_button
+    name: "My Button"
     on_press:
       - logger.log: "pressed"
 `;
     const result = parseYamlAutomations(yaml);
     expect(result).toHaveLength(1);
-    expect(result[0].key).toContain("on_press");
-  });
-
-  it("prefixes the nearest parent name:", () => {
-    const yaml = `binary_sensor:
-  - platform: gpio
-    name: "my_button"
-    on_press:
-      - logger.log: "pressed"
-`;
-    const [entry] = parseYamlAutomations(yaml);
-    expect(entry.key).toBe("my_button → on_press");
+    expect(result[0].key).toBe("automation:component_on:my_button:on_press");
+    expect(result[0].displayLabel).toBe("My Button → on_press");
   });
 
   it("handles multiple handlers on the same component", () => {
     const yaml = `switch:
   - platform: gpio
-    name: "light"
+    id: my_relay
+    name: "Light"
     on_turn_on:
       - logger.log: "on"
     on_turn_off:
@@ -378,17 +383,58 @@ describe("parseYamlAutomations", () => {
 `;
     const result = parseYamlAutomations(yaml);
     expect(result).toHaveLength(2);
-    expect(result[0].key).toBe("light → on_turn_on");
-    expect(result[1].key).toBe("light → on_turn_off");
+    expect(result[0].key).toBe("automation:component_on:my_relay:on_turn_on");
+    expect(result[0].displayLabel).toBe("Light → on_turn_on");
+    expect(result[1].key).toBe("automation:component_on:my_relay:on_turn_off");
+    expect(result[1].displayLabel).toBe("Light → on_turn_off");
   });
 
-  it("falls back to the event name when no parent name exists", () => {
+  it("recognises device-level on_* handlers under esphome:", () => {
     const yaml = `esphome:
   on_boot:
     - logger.log: "boot"
 `;
     const [entry] = parseYamlAutomations(yaml);
-    expect(entry.key).toBe("on_boot");
+    expect(entry.key).toBe("automation:device_on:on_boot");
+    expect(entry.displayLabel).toBe("esphome → on_boot");
+  });
+
+  it("enumerates top-level script: list items by their id", () => {
+    const yaml = `script:
+  - id: my_alarm
+    then:
+      - logger.log: "alarm"
+  - id: cleanup
+    then:
+      - logger.log: "cleanup"
+`;
+    const items = parseYamlAutomations(yaml).filter((s) =>
+      s.key.startsWith("automation:script:"),
+    );
+    expect(items.map((s) => s.key)).toEqual([
+      "automation:script:my_alarm",
+      "automation:script:cleanup",
+    ]);
+    expect(items[0].displayLabel).toBe("script: my_alarm");
+  });
+
+  it("enumerates top-level interval: list items by index", () => {
+    const yaml = `interval:
+  - interval: 60s
+    then:
+      - logger.log: "tick"
+  - interval: 5s
+    then:
+      - logger.log: "fast"
+`;
+    const items = parseYamlAutomations(yaml).filter((s) =>
+      s.key.startsWith("automation:interval:"),
+    );
+    expect(items.map((s) => s.key)).toEqual([
+      "automation:interval:0",
+      "automation:interval:1",
+    ]);
+    expect(items[0].displayLabel).toBe("interval #1");
   });
 });
 

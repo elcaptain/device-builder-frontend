@@ -1,41 +1,59 @@
+/**
+ * "+ Add automation" wizard dialog.
+ *
+ * Mirrors the add-component flow: ask only for the mandatory
+ * fields (target kind + component instance + trigger), save an
+ * empty ``AutomationTree`` to the backend, then close and route
+ * the navigator to the new section so the user lands in the
+ * inline edit pane for the rest (actions, conditions inside an
+ * if, …).
+ *
+ * Deliberately does NOT host the full automation editor — the
+ * edit pane is the discoverable space for adding actions, and the
+ * inline pane has the full width of the screen instead of the
+ * dialog's 640px clamp.
+ *
+ * Emits ``automation-added`` (``detail: { sectionKey, yamlDiff }``)
+ * on successful upsert so the parent navigator can switch to the
+ * new section.
+ */
 import { consume } from "@lit/context";
-import { mdiClose, mdiLightningBolt, mdiTargetVariant, mdiPlayCircleOutline } from "@mdi/js";
+import toast from "sonner-js";
+import { mdiClose } from "@mdi/js";
 import { css, html, LitElement, nothing } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
-import type { ConfigEntry } from "../../api/types.js";
 
-// Types for automation catalog — not yet available in the WebSocket backend
-interface AutomationTrigger {
-  id: string;
-  name: string;
-  description: string;
-  applicable_to: string[];
-  fields: ConfigEntry[];
-}
-
-interface AutomationAction {
-  id: string;
-  name: string;
-  description: string;
-  fields: ConfigEntry[];
-}
 import type { ESPHomeAPI } from "../../api/index.js";
+import type {
+  AutomationLocation,
+  AutomationTree,
+  AvailableAutomations,
+  AvailableComponentInstance,
+  AutomationTrigger,
+  BoardCatalogEntry,
+  YamlDiff,
+} from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
-import { localizeContext, apiContext } from "../../context/index.js";
-import { inputStyles } from "../../styles/inputs.js";
+import { apiContext, localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import { inputStyles } from "../../styles/inputs.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import { renderMarkdown } from "../../util/markdown.js";
+import { parseYamlAutomations } from "../../util/yaml-sections.js";
+import {
+  applyYamlDiff,
+  sectionKeyFromLocation,
+} from "./automation-editor/serialise.js";
 
 import "@home-assistant/webawesome/dist/components/dialog/dialog.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
+import "@home-assistant/webawesome/dist/components/option/option.js";
+import "@home-assistant/webawesome/dist/components/select/select.js";
 import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
 
-registerMdiIcons({
-  close: mdiClose,
-  "lightning-bolt": mdiLightningBolt,
-  "target-variant": mdiTargetVariant,
-  "play-circle-outline": mdiPlayCircleOutline,
-});
+registerMdiIcons({ close: mdiClose });
+
+type TargetKind = "device_on" | "component_on" | "interval";
 
 @customElement("esphome-add-automation-dialog")
 export class ESPHomeAddAutomationDialog extends LitElement {
@@ -46,470 +64,513 @@ export class ESPHomeAddAutomationDialog extends LitElement {
   @consume({ context: apiContext })
   private _api!: ESPHomeAPI;
 
-  @property()
-  boardName = "";
+  @property() boardName = "";
 
-  @property()
-  configuration = "";
+  @property() configuration = "";
+
+  @property() yaml = "";
+
+  @property({ attribute: false })
+  board: BoardCatalogEntry | null = null;
 
   @query("wa-dialog")
   private _dialog!: HTMLElement & { open: boolean };
 
-  @state()
-  private _triggers: AutomationTrigger[] = [];
-
-  @state()
-  private _actions: AutomationAction[] = [];
-
-  @state()
-  private _loading = true;
-
-  @state()
-  private _targetName = "";
-
-  @state()
-  private _triggerId = "";
-
-  @state()
-  private _actionId = "";
-
-  @state()
-  private _actionFields: Record<string, string> = {};
-
-  @state()
-  private _submitting = false;
-
-  @state()
-  private _error = "";
+  @state() private _kind: TargetKind = "device_on";
+  @state() private _componentId = "";
+  @state() private _triggerId: string | null = null;
+  /** Interval-only: numeric value the user typed. Paired with
+   *  ``_intervalUnit`` to compose ``trigger_params.interval`` as
+   *  "<value><unit>" on submit (mirrors the inline TIME_PERIOD
+   *  renderer's storage shape). */
+  @state() private _intervalValue = "";
+  @state() private _intervalUnit: "us" | "ms" | "s" | "min" | "h" | "d" = "s";
+  @state() private _available: AvailableAutomations | null = null;
+  @state() private _loading = true;
+  @state() private _saving = false;
+  @state() private _error = "";
 
   static styles = [
     espHomeStyles,
     inputStyles,
     css`
       wa-dialog {
-        --width: 540px;
+        --width: 560px;
       }
-
-      wa-dialog::part(header) {
-        background: var(--esphome-primary);
-        padding: 0 var(--wa-space-m);
-        height: 40px;
-        box-sizing: border-box;
-      }
-
-      wa-dialog::part(title) {
-        color: var(--esphome-on-primary);
-        font-size: var(--wa-font-size-s);
-        font-weight: var(--wa-font-weight-bold);
-      }
-
-      wa-dialog::part(close-button__base) {
-        background: transparent;
-        border: none;
-        box-shadow: none;
-        padding: 0;
-        min-width: unset;
-        min-height: unset;
-        color: var(--esphome-on-primary);
-        cursor: pointer;
-      }
-
       wa-dialog::part(body) {
         padding: var(--wa-space-l);
       }
-
-      wa-dialog::part(footer) {
-        display: none;
-      }
-
-      /* ── Form ── */
-
-      .form {
-        display: flex;
-        flex-direction: column;
-        gap: var(--wa-space-s);
-      }
-
-      /* ── Section blocks ── */
-
-      .section {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: var(--wa-space-m);
-        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
-        border-radius: var(--wa-border-radius-l);
-        background: var(--wa-color-surface-raised);
-      }
-
-      .section-header {
-        display: flex;
-        align-items: center;
-        gap: var(--wa-space-s);
-        margin-bottom: 2px;
-      }
-
-      .section-icon {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        border-radius: var(--wa-border-radius-s);
-        flex-shrink: 0;
-      }
-
-      .section-icon wa-icon {
-        font-size: 16px;
-      }
-
-      .section-icon--target {
-        background: color-mix(in srgb, var(--esphome-primary), transparent 85%);
-        color: var(--esphome-primary);
-      }
-
-      .section-icon--trigger {
-        background: color-mix(in srgb, var(--esphome-warning), transparent 85%);
-        color: var(--esphome-warning);
-      }
-
-      .section-icon--action {
-        background: color-mix(in srgb, var(--esphome-success), transparent 85%);
-        color: var(--esphome-success);
-      }
-
-      .section-title {
-        margin: 0;
-        font-size: var(--wa-font-size-xs);
-        font-weight: var(--wa-font-weight-bold);
-        color: var(--wa-color-text-normal);
-      }
-
-      /* ── Fields ── */
-
       .field {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: var(--wa-space-2xs);
+        margin-bottom: var(--wa-space-m);
       }
-
-      label {
-        font-size: var(--wa-font-size-2xs);
-        font-weight: var(--wa-font-weight-semibold);
-        color: var(--wa-color-text-quiet);
-      }
-
-      label .required {
-        color: var(--esphome-error);
-        margin-left: 2px;
-      }
-
-      select {
-        width: 100%;
-        padding: 9px 14px;
+      .field-label {
         font-size: var(--wa-font-size-s);
-        font-family: inherit;
+        font-weight: var(--wa-font-weight-semibold);
         color: var(--wa-color-text-normal);
-        background: var(--wa-color-surface-raised);
-        border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
-        border-radius: var(--wa-border-radius-l);
-        box-sizing: border-box;
-        outline: none;
-        transition:
-          border-color 0.15s,
-          box-shadow 0.15s;
       }
-
-      select:focus {
-        border-color: var(--esphome-primary);
-        box-shadow: 0 0 0 3px
-          color-mix(in srgb, var(--esphome-primary), transparent 80%);
+      .field-desc {
+        font-size: var(--wa-font-size-2xs);
+        color: var(--wa-color-text-quiet);
+        line-height: 1.5;
+        margin: 0;
       }
-
-      select {
-        appearance: auto;
+      .field-desc a {
+        color: var(--wa-color-brand-fill-loud, #0b5cad);
       }
-
-      /* ── Actions ── */
-
       .actions {
         display: flex;
         justify-content: flex-end;
         gap: var(--wa-space-s);
-        padding-top: var(--wa-space-m);
-        border-top: 1px solid var(--wa-color-surface-border);
+        margin-top: var(--wa-space-l);
       }
-
-      .dialog-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        padding: 8px 18px;
-        border-radius: var(--wa-border-radius-m);
-        font-size: var(--wa-font-size-s);
-        font-weight: var(--wa-font-weight-bold);
-        font-family: inherit;
+      .actions button {
+        appearance: none;
+        border: 1px solid transparent;
+        padding: var(--wa-space-2xs) var(--wa-space-m);
+        border-radius: var(--wa-border-radius-s);
         cursor: pointer;
-        border: none;
-        transition:
-          background 0.12s,
-          opacity 0.12s;
+        font-size: var(--wa-font-size-s);
+        font-weight: var(--wa-font-weight-semibold);
       }
-
-      .dialog-btn:disabled {
-        opacity: 0.5;
+      .actions .primary {
+        background: var(--wa-color-brand-fill-loud, #0b5cad);
+        color: white;
+      }
+      .actions .primary:disabled {
+        opacity: 0.6;
         cursor: not-allowed;
       }
-
-      .dialog-btn--primary {
-        background: var(--esphome-primary);
-        color: var(--esphome-on-primary);
-      }
-
-      .dialog-btn--primary:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--esphome-primary), black 10%);
-      }
-
-      /* ── States ── */
-
       .error {
-        color: var(--esphome-error);
-        font-size: var(--wa-font-size-xs);
-        background: color-mix(in srgb, var(--esphome-error), transparent 92%);
-        padding: var(--wa-space-s) var(--wa-space-m);
-        border-radius: var(--wa-border-radius-m);
+        color: var(--esphome-error, #d92d20);
+        font-size: var(--wa-font-size-2xs);
+        margin-top: var(--wa-space-2xs);
       }
-
-      .loading {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: var(--wa-space-m);
-        padding: var(--wa-space-xl);
-        color: var(--wa-color-text-quiet);
+      .intro {
         font-size: var(--wa-font-size-s);
+        color: var(--wa-color-text-quiet);
+        margin: 0 0 var(--wa-space-m) 0;
+        line-height: 1.5;
       }
-
-      .loading wa-spinner {
-        font-size: 24px;
-        --indicator-color: var(--esphome-primary);
-        --track-color: color-mix(
-          in srgb,
-          var(--esphome-primary),
-          transparent 80%
-        );
+      /* Interval-row pairing: matches the editor's inline
+         TIME_PERIOD layout so the dialog reads as the same
+         kind of compound input the user will see again in the
+         section editor. */
+      .interval-inputs {
+        display: flex;
+        align-items: center;
+        gap: var(--wa-space-s);
+      }
+      .interval-inputs > input {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .interval-inputs > wa-select {
+        flex: 0 0 auto;
+        min-width: 6rem;
       }
     `,
   ];
 
   public open() {
-    this._targetName = "";
-    this._triggerId = "";
-    this._actionId = "";
-    this._actionFields = {};
+    this._kind = "device_on";
+    this._componentId = "";
+    this._triggerId = null;
+    this._intervalValue = "";
+    this._intervalUnit = "s";
     this._error = "";
     this._dialog.open = true;
-    if (this._triggers.length === 0) this._loadCatalog();
+    void this._loadAvailable();
   }
 
-  private async _loadCatalog() {
+  private async _loadAvailable() {
+    if (!this._api || !this.configuration) return;
     this._loading = true;
     try {
-      // TODO: Replace with real API call when backend automation catalog is available
-      // For now, provide placeholder entries so the UI is functional
-      this._triggers = [
-        { id: "on_value", name: "On Value", description: "Triggered when the value changes", applicable_to: [], fields: [] },
-        { id: "on_press", name: "On Press", description: "Triggered when a button is pressed", applicable_to: [], fields: [] },
-        { id: "on_turn_on", name: "On Turn On", description: "Triggered when the component turns on", applicable_to: [], fields: [] },
-        { id: "on_turn_off", name: "On Turn Off", description: "Triggered when the component turns off", applicable_to: [], fields: [] },
-        { id: "on_boot", name: "On Boot", description: "Triggered when the device boots up", applicable_to: [], fields: [] },
-        { id: "on_time", name: "On Time", description: "Triggered at a specific time interval", applicable_to: [], fields: [] },
-      ];
-      this._actions = [
-        { id: "toggle", name: "Toggle", description: "Toggle the component state", fields: [] },
-        { id: "turn_on", name: "Turn On", description: "Turn the component on", fields: [] },
-        { id: "turn_off", name: "Turn Off", description: "Turn the component off", fields: [] },
-        { id: "logger.log", name: "Log Message", description: "Log a message to the console", fields: [
-          { key: "message", label: "Message", type: "string" as ConfigEntry["type"], required: true, default_value: "", hidden: false, description: "", options: null, allow_custom_value: false, range: null, display_format: null, unit_options: null, help_link: null, multi_value: false, templatable: false, locked: false, suggestions: null, depends_on: null, depends_on_value: null, depends_on_value_not: null, depends_on_component: null, references_component: null, pin_features: [], pin_mode: null, advanced: false, translation_key: null, translation_params: null, config_entries: null, platform_type: null },
-        ] },
-        { id: "delay", name: "Delay", description: "Wait for a specified duration", fields: [
-          { key: "delay", label: "Duration (ms)", type: "integer" as ConfigEntry["type"], required: true, default_value: "1000", hidden: false, description: "", options: null, allow_custom_value: false, range: null, display_format: null, unit_options: null, help_link: null, multi_value: false, templatable: false, locked: false, suggestions: null, depends_on: null, depends_on_value: null, depends_on_value_not: null, depends_on_component: null, references_component: null, pin_features: [], pin_mode: null, advanced: false, translation_key: null, translation_params: null, config_entries: null, platform_type: null },
-        ] },
-      ];
-      this._triggerId = this._triggers[0].id;
-      this._actionId = this._actions[0].id;
-    } catch (e) {
-      console.error("Failed to load automation catalog:", e);
+      this._available = await this._api.getAvailableAutomations(
+        this.configuration,
+      );
+    } catch (err) {
+      this._error = err instanceof Error ? err.message : String(err);
     } finally {
       this._loading = false;
     }
   }
 
   protected render() {
-    return html`
-      <wa-dialog
-        light-dismiss
-        label=${this.boardName
-          ? this._localize("device.add_automation_dialog_title", { name: this.boardName })
-          : this._localize("device.add_automation")}
-      >
-        ${this._loading
-          ? html`
-              <div class="loading">
-                <wa-spinner></wa-spinner>
-                ${this._localize("device.loading_automation_catalog")}
-              </div>
-            `
-          : this._renderForm()}
-      </wa-dialog>
-    `;
+    const title = this.boardName
+      ? this._localize("device.add_automation_dialog_title", {
+          name: this.boardName,
+        })
+      : this._localize("device.add_automation");
+    return html`<wa-dialog light-dismiss label=${title}>
+      ${this._loading
+        ? html`<div style="text-align: center; padding: 32px;">
+            <wa-spinner></wa-spinner>
+          </div>`
+        : this._renderForm()}
+    </wa-dialog>`;
   }
 
   private _renderForm() {
-    const selectedAction = this._actions.find((a) => a.id === this._actionId);
-    const disabled = this._submitting;
-
+    const filteredTriggers = this._filteredTriggers();
+    const componentLocked = this._kind !== "component_on";
+    const triggerLocked = this._kind === "interval";
     return html`
-      <div class="form">
-        <!-- Target section -->
-        <div class="section">
-          <div class="section-header">
-            <div class="section-icon section-icon--target">
-              <wa-icon library="mdi" name="target-variant"></wa-icon>
-            </div>
-            <p class="section-title">${this._localize("device.automation_target")}</p>
-          </div>
-          <div class="field">
-            <label>
-              ${this._localize("device.automation_target_name")}<span class="required">*</span>
-            </label>
-            <input
-              type="text"
-              ?disabled=${disabled}
-              .value=${this._targetName}
-              placeholder=${this._localize("device.automation_target_placeholder")}
-              @input=${(e: Event) => {
-                this._targetName = (e.target as HTMLInputElement).value;
-              }}
-            />
-          </div>
-        </div>
-
-        <!-- Trigger section -->
-        <div class="section">
-          <div class="section-header">
-            <div class="section-icon section-icon--trigger">
-              <wa-icon library="mdi" name="lightning-bolt"></wa-icon>
-            </div>
-            <p class="section-title">${this._localize("device.automation_trigger")}</p>
-          </div>
-          <div class="field">
-            <label>${this._localize("device.automation_trigger_label")}</label>
-            <select
-              ?disabled=${disabled}
-              @change=${(e: Event) => {
-                this._triggerId = (e.target as HTMLSelectElement).value;
-              }}
-            >
-              ${this._triggers.length === 0
-                ? html`<option disabled selected>No triggers available</option>`
-                : this._triggers.map(
-                    (t) => html`<option value=${t.id} ?selected=${t.id === this._triggerId}>${t.name}</option>`
-                  )}
-            </select>
-          </div>
-        </div>
-
-        <!-- Action section -->
-        <div class="section">
-          <div class="section-header">
-            <div class="section-icon section-icon--action">
-              <wa-icon library="mdi" name="play-circle-outline"></wa-icon>
-            </div>
-            <p class="section-title">${this._localize("device.automation_action")}</p>
-          </div>
-          <div class="field">
-            <label>${this._localize("device.automation_action_label")}</label>
-            <select
-              ?disabled=${disabled}
-              @change=${(e: Event) => {
-                this._actionId = (e.target as HTMLSelectElement).value;
-                this._actionFields = {};
-              }}
-            >
-              ${this._actions.length === 0
-                ? html`<option disabled selected>No actions available</option>`
-                : this._actions.map(
-                    (a) => html`<option value=${a.id} ?selected=${a.id === this._actionId}>${a.name}</option>`
-                  )}
-            </select>
-          </div>
-          ${selectedAction?.fields.map((f) => this._renderActionField(f, disabled)) ?? nothing}
-        </div>
-
-        ${this._error ? html`<p class="error">${this._error}</p>` : nothing}
-
-        <div class="actions">
-          <button
-            class="dialog-btn dialog-btn--primary"
-            ?disabled=${disabled || !this._targetName.trim()}
-            @click=${this._onSubmit}
-          >
-            ${this._submitting ? this._localize("device.adding") : this._localize("device.add_automation")}
-          </button>
-        </div>
-      </div>
-    `;
-  }
-
-  private _renderActionField(field: ConfigEntry, disabled: boolean) {
-    const value = this._actionFields[field.key] ?? String(field.default_value ?? "");
-    if (field.type === "select" && field.options) {
-      return html`
-        <div class="field">
-          <label>${field.label}${field.required ? html`<span class="required">*</span>` : nothing}</label>
-          <select
-            ?disabled=${disabled}
-            @change=${(e: Event) => this._setActionField(field.key, (e.target as HTMLSelectElement).value)}
-          >
-            ${field.options.map(
-              (opt) => html`<option value=${opt.value} ?selected=${opt.value === value}>${opt.label}</option>`
-            )}
-          </select>
-        </div>
-      `;
-    }
-    return html`
+      <p class="intro">
+        ${renderMarkdown(this._localize("device.automation_header_description"))}
+      </p>
       <div class="field">
-        <label>${field.label}${field.required ? html`<span class="required">*</span>` : nothing}</label>
-        <input
-          type=${field.type === "integer" || field.type === "float" ? "number" : "text"}
-          ?disabled=${disabled}
-          .value=${value}
-          placeholder=${String(field.default_value ?? "")}
-          @input=${(e: Event) => this._setActionField(field.key, (e.target as HTMLInputElement).value)}
-        />
+        <label class="field-label" id="kind-label">
+          ${this._localize("device.automation_wizard_pick_target")}
+        </label>
+        <wa-select
+          aria-labelledby="kind-label"
+          value=${this._kind}
+          ?disabled=${this._saving}
+          @change=${(e: Event) =>
+            this._onKindChange((e.target as HTMLSelectElement).value)}
+        >
+          <wa-option value="device_on" ?selected=${this._kind === "device_on"}>
+            ${this._localize("device.automation_target_device")}
+          </wa-option>
+          <wa-option value="component_on" ?selected=${this._kind === "component_on"}>
+            ${this._localize("device.automation_target_component")}
+          </wa-option>
+          <wa-option value="interval" ?selected=${this._kind === "interval"}>
+            ${this._localize("device.automation_target_interval")}
+          </wa-option>
+        </wa-select>
+      </div>
+      ${this._kind === "component_on"
+        ? this._renderComponentRow(componentLocked)
+        : nothing}
+      ${this._kind === "interval" ? this._renderIntervalRow() : nothing}
+      ${!triggerLocked ? this._renderTriggerRow(filteredTriggers) : nothing}
+      ${this._error ? html`<p class="error" role="alert">${this._error}</p>` : nothing}
+      <div class="actions">
+        <button
+          type="button"
+          class="primary"
+          ?disabled=${this._saving || !this._canContinue()}
+          @click=${this._onContinue}
+        >
+          ${this._saving
+            ? this._localize("device.adding")
+            : this._localize("device.add_automation_continue")}
+        </button>
       </div>
     `;
   }
 
-  private _setActionField(key: string, value: string) {
-    this._actionFields = { ...this._actionFields, [key]: value };
+  private _renderComponentRow(locked: boolean) {
+    const devices = this._available?.devices ?? [];
+    if (devices.length === 0) {
+      return html`<p class="error">
+        ${this._localize("device.automation_target_no_components")}
+      </p>`;
+    }
+    return html`<div class="field">
+      <label class="field-label" id="component-label">
+        ${this._localize("device.automation_wizard_pick_component")}
+      </label>
+      <wa-select
+        aria-labelledby="component-label"
+        value=${this._componentId}
+        ?disabled=${this._saving || locked}
+        @change=${(e: Event) =>
+          this._onComponentChange((e.target as HTMLSelectElement).value)}
+      >
+        ${devices.map(
+          (d) => html`<wa-option value=${d.id} ?selected=${d.id === this._componentId}>
+            ${d.name ?? d.id} (${d.component_id})
+          </wa-option>`,
+        )}
+      </wa-select>
+    </div>`;
   }
 
-  private async _onSubmit() {
-    if (!this.configuration || this._submitting || !this._targetName.trim()) return;
-    this._submitting = true;
+  /**
+   * Interval-only row: value + unit picker mirroring the inline
+   * TIME_PERIOD renderer's UX. Asks for the time up front so the
+   * user doesn't land in the editor with an empty interval block.
+   */
+  private _renderIntervalRow() {
+    const units = ["us", "ms", "s", "min", "h", "d"] as const;
+    return html`<div class="field">
+      <label class="field-label" id="interval-label">
+        ${this._localize("device.automation_interval_label")}
+      </label>
+      <div class="interval-inputs">
+        <input
+          type="text"
+          inputmode="decimal"
+          aria-labelledby="interval-label"
+          .value=${this._intervalValue}
+          placeholder="0"
+          ?disabled=${this._saving}
+          @input=${(e: Event) => {
+            this._intervalValue = (e.target as HTMLInputElement).value;
+          }}
+        />
+        <wa-select
+          aria-label=${this._localize("device.automation_action_delay_unit")}
+          ?disabled=${this._saving}
+          @change=${(e: Event) => {
+            this._intervalUnit = (e.target as HTMLSelectElement)
+              .value as typeof this._intervalUnit;
+          }}
+        >
+          ${units.map(
+            (u) => html`<wa-option
+              value=${u}
+              ?selected=${u === this._intervalUnit}
+              >${this._localize(`device.automation_action_delay_unit_${u}`)}</wa-option
+            >`,
+          )}
+        </wa-select>
+      </div>
+    </div>`;
+  }
+
+  private _renderTriggerRow(triggers: AutomationTrigger[]) {
+    if (triggers.length === 0) {
+      return html`<p class="error">
+        ${this._localize("device.automation_trigger_none_available")}
+      </p>`;
+    }
+    const active = triggers.find((t) => t.id === this._triggerId);
+    return html`<div class="field">
+      <label class="field-label" id="trigger-label">
+        ${this._localize("device.automation_wizard_pick_trigger")}
+      </label>
+      <wa-select
+        aria-labelledby="trigger-label"
+        value=${this._triggerId ?? ""}
+        ?disabled=${this._saving}
+        @change=${(e: Event) =>
+          (this._triggerId = (e.target as HTMLSelectElement).value)}
+      >
+        ${triggers.map(
+          (t) => html`<wa-option value=${t.id} ?selected=${t.id === this._triggerId}>
+            ${t.name}
+          </wa-option>`,
+        )}
+      </wa-select>
+      ${active?.description
+        ? html`<p class="field-desc">${renderMarkdown(active.description)}</p>`
+        : nothing}
+    </div>`;
+  }
+
+  private _filteredTriggers(): AutomationTrigger[] {
+    const all = this._available?.triggers ?? [];
+    if (this._kind === "device_on") {
+      // ESPHome's device-level lifecycle handlers (on_boot, on_loop,
+      // on_shutdown, ...) can only appear once under ``esphome:``,
+      // so once a handler exists the user adds more *actions* inside
+      // it from the inline editor — they don't add another
+      // automation. Hide those triggers from the picker.
+      const takenDeviceTriggers = this._existingDeviceTriggers();
+      return all.filter(
+        (t) => t.is_device_level && !takenDeviceTriggers.has(t.id),
+      );
+    }
+    if (this._kind === "component_on") {
+      if (!this._componentId) return [];
+      const device = this._available?.devices.find(
+        (d) => d.id === this._componentId,
+      );
+      if (!device) return [];
+      const [domain] = device.component_id.split(".");
+      // Same rule for component-bound triggers: an inline ``on_*:``
+      // block under a component only fires once, so don't offer
+      // triggers that already have a handler on this instance.
+      const takenComponentTriggers = this._existingComponentTriggers(
+        this._componentId,
+      );
+      return all.filter(
+        (t) =>
+          !t.is_device_level &&
+          (t.applies_to.includes(device.component_id) ||
+            t.applies_to.includes(domain)) &&
+          !takenComponentTriggers.has(this._bareTrigger(t.id)),
+      );
+    }
+    return [];
+  }
+
+  /** Set of catalog trigger ids ("on_boot", "on_loop", …) that
+   *  already have a handler under ``esphome:`` in the current
+   *  draft YAML. Source: parseYamlAutomations — eventKey is the
+   *  bare YAML key, which for device-level catalog entries is also
+   *  the catalog id (no domain prefix). */
+  private _existingDeviceTriggers(): Set<string> {
+    const set = new Set<string>();
+    for (const s of parseYamlAutomations(this.yaml)) {
+      if (s.parentKey === "esphome" && s.eventKey) set.add(s.eventKey);
+    }
+    return set;
+  }
+
+  /** Bare YAML keys (``on_press`` / ``on_turn_on`` / …) that
+   *  already have a handler on the given component instance. */
+  private _existingComponentTriggers(componentId: string): Set<string> {
+    const set = new Set<string>();
+    for (const s of parseYamlAutomations(this.yaml)) {
+      // ``id`` is the component instance id for inline component_on
+      // entries (set in parseYamlAutomations); ``eventKey`` is the
+      // bare ``on_*`` key. parentKey is the YAML domain ("switch")
+      // — irrelevant here, the id+event pair is unique on its own.
+      if (s.id === componentId && s.eventKey) set.add(s.eventKey);
+    }
+    return set;
+  }
+
+  /** Strip the ``<domain>.`` prefix off a component-level catalog
+   *  trigger id (``switch.on_turn_on`` → ``on_turn_on``). The bare
+   *  key is what shows up under the component instance in YAML. */
+  private _bareTrigger(catalogId: string): string {
+    const dot = catalogId.indexOf(".");
+    return dot >= 0 ? catalogId.slice(dot + 1) : catalogId;
+  }
+
+  private _onKindChange(kind: string) {
+    const k = kind as TargetKind;
+    this._kind = k;
+    this._triggerId = null;
+    if (k === "component_on") {
+      const devices = this._available?.devices ?? [];
+      this._componentId = devices[0]?.id ?? "";
+    } else {
+      this._componentId = "";
+    }
+  }
+
+  private _onComponentChange(id: string) {
+    this._componentId = id;
+    this._triggerId = null;
+  }
+
+  private _canContinue(): boolean {
+    if (this._kind === "interval") return this._intervalValue.trim() !== "";
+    if (!this._triggerId) return false;
+    if (this._kind === "component_on" && !this._componentId) return false;
+    return true;
+  }
+
+  private _onContinue = async () => {
+    if (!this._api || !this._canContinue() || this._saving) return;
+    this._saving = true;
     this._error = "";
     try {
-      // TODO: addAutomation is not yet available in the WebSocket backend
-      throw new Error(this._localize("device.add_automation_unavailable"));
+      const location = this._buildLocation();
+      const tree: AutomationTree = {
+        trigger_id: this._catalogTriggerId(location),
+        // Interval picks up the value+unit pair the user typed; for
+        // device_on / component_on the trigger's own config_entries
+        // are still empty at this point (filled in the inline editor
+        // after the wizard closes).
+        trigger_params:
+          this._kind === "interval"
+            ? { interval: `${this._intervalValue.trim()}${this._intervalUnit}` }
+            : {},
+        actions: [],
+      };
+      // Hand the backend our current draft yaml so the splice
+      // lands relative to any pending edits the user hasn't saved
+      // yet — matches the auto-apply path in the editor.
+      const { yaml_diff } = await this._api.upsertAutomation(
+        this.configuration,
+        tree,
+        location,
+        this.yaml,
+      );
+      this._dispatchAdded(location, yaml_diff);
+      this._dialog.open = false;
     } catch (err) {
-      this._error = err instanceof Error ? err.message : this._localize("device.add_automation_error");
+      const msg =
+        err instanceof Error
+          ? err.message
+          : this._localize("device.automation_save_error");
+      this._error = msg;
+      toast.error(this._localize("device.automation_save_error"), {
+        description: msg,
+        richColors: true,
+      });
     } finally {
-      this._submitting = false;
+      this._saving = false;
     }
+  };
+
+  private _buildLocation(): AutomationLocation {
+    if (this._kind === "device_on") {
+      return { kind: "device_on", trigger: this._triggerId! };
+    }
+    if (this._kind === "component_on") {
+      // Strip the ``<domain>.`` prefix to get the bare YAML key
+      // the writer splices under the component. ``component_on``
+      // catalog ids are always ``<domain>.<key>`` for non-device
+      // triggers.
+      const dotIdx = this._triggerId!.indexOf(".");
+      const bare =
+        dotIdx >= 0 ? this._triggerId!.slice(dotIdx + 1) : this._triggerId!;
+      return {
+        kind: "component_on",
+        component_id: this._componentId,
+        trigger: bare,
+      };
+    }
+    // interval — new blocks land at the end of the interval: list.
+    // The backend treats an out-of-range index as "append" (in-range
+    // as "replace"), so we have to pass the count of existing
+    // intervals as the new entry's index. Hardcoding 0 here used to
+    // overwrite the first interval whenever the device already had
+    // one. Parse the current draft yaml (which carries any pending
+    // edits the user hasn't saved yet) to count what's there.
+    const nextIndex = parseYamlAutomations(this.yaml).filter(
+      (s) => s.parentKey === "interval",
+    ).length;
+    return { kind: "interval", index: nextIndex };
+  }
+
+  /**
+   * The catalog-qualified trigger id for the AutomationTree.
+   * For ``device_on`` and ``interval`` this coincides with
+   * ``location.trigger`` (or is ``null`` for interval); for
+   * ``component_on`` it's the unprefixed ``this._triggerId``
+   * (which IS the catalog id) since we only stripped the prefix
+   * for the location field.
+   */
+  private _catalogTriggerId(location: AutomationLocation): string | null {
+    if (location.kind === "interval") return null;
+    return this._triggerId;
+  }
+
+  private _dispatchAdded(location: AutomationLocation, yamlDiff: YamlDiff) {
+    // Apply the backend-emitted splice to the device's YAML
+    // buffer so the new automation lands in the page's YAML state
+    // (and thus the YAML pane + the global save button see the
+    // change). The page listens to ``yaml-draft`` and advances
+    // ``_yaml`` without touching ``_savedYaml`` — that's the
+    // existing "dirty buffer, click Save to write" path.
+    const newYaml = applyYamlDiff(this.yaml, yamlDiff);
+    this.dispatchEvent(
+      new CustomEvent<{ yaml: string }>("yaml-draft", {
+        detail: { yaml: newYaml },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    this.dispatchEvent(
+      new CustomEvent<{ sectionKey: string }>("automation-added", {
+        detail: { sectionKey: sectionKeyFromLocation(location) },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 }
 

@@ -33,7 +33,10 @@ import { espHomeStyles } from "../../styles/shared.js";
 import {
   type ValidationError,
 } from "../../util/config-validation.js";
-import { filterRenderable } from "./config-entry-render-filter.js";
+import {
+  _isStructuralType,
+  filterRenderable,
+} from "./config-entry-render-filter.js";
 import { getIn, isPrimitiveOrNullish } from "../../util/nested-values.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 
@@ -60,8 +63,11 @@ import {
   renderSelectField,
   renderStringField,
   renderTextareaField,
+  renderTimePeriodField,
   type RenderCtx,
 } from "./config-entry-renderers.js";
+import { renderLambdaField } from "./config-entry-renderers/lambda.js";
+import { renderTemplatableField } from "./config-entry-renderers/templatable.js";
 
 registerMdiIcons({
   "alert-circle-outline": mdiAlertCircleOutline,
@@ -389,7 +395,26 @@ export class ESPHomeConfigEntryForm extends LitElement {
     entry: ConfigEntry,
     path: string[],
     ctx: RenderCtx,
-  ) {
+  ): unknown {
+    // Templatable wrapper pre-empts the type switch for any leaf
+    // entry that accepts a literal-or-lambda value. Structural
+    // types (NESTED / MAP / DIVIDER / LABEL / ALERT) opt out — a
+    // toggle on a group or annotation isn't a coherent control.
+    // The wrapper recurses by calling the inner renderer through
+    // a thunk so we don't need to duplicate the type switch here.
+    if (entry.templatable && !_isStructuralType(entry.type)) {
+      return renderTemplatableField(entry, path, ctx, () =>
+        this._renderEntryLeaf(entry, path, ctx),
+      );
+    }
+    return this._renderEntryLeaf(entry, path, ctx);
+  }
+
+  private _renderEntryLeaf(
+    entry: ConfigEntry,
+    path: string[],
+    ctx: RenderCtx,
+  ): unknown {
     if (entry.type === ConfigEntryType.DIVIDER) {
       return html`<wa-divider></wa-divider>`;
     }
@@ -437,6 +462,8 @@ export class ESPHomeConfigEntryForm extends LitElement {
         return renderNumberField(entry, path, ctx);
       case ConfigEntryType.FLOAT_WITH_UNIT:
         return renderFloatWithUnitField(entry, path, ctx);
+      case ConfigEntryType.TIME_PERIOD:
+        return renderTimePeriodField(entry, path, ctx);
       case ConfigEntryType.PIN:
         return renderPinField(entry, path, ctx);
       case ConfigEntryType.COLOR:
@@ -444,10 +471,24 @@ export class ESPHomeConfigEntryForm extends LitElement {
       case ConfigEntryType.MAC_ADDRESS:
         return renderStringField(entry, "text", path, ctx);
       case ConfigEntryType.LAMBDA:
+        return renderLambdaField(entry, path, ctx);
       case ConfigEntryType.JSON:
         return renderTextareaField(entry, path, ctx);
       case ConfigEntryType.ICON:
         return renderIconField(entry, path, ctx);
+      case ConfigEntryType.TRIGGER:
+        // Schema-extraction normally strips ``then:`` from
+        // ``config_entries`` so a TRIGGER never reaches here; a
+        // surfaced one means the recursive action list is meant to
+        // be edited via the automation editor tree, not as a form
+        // field. Render a disabled placeholder so the user is told
+        // why the field is inert.
+        return html`<div class="field" data-field-key=${path.join(".")}>
+          ${labelFor(entry, ctx)}
+          <p class="trigger-placeholder" role="status">
+            ${ctx.localize("device.automation_trigger_field_placeholder")}
+          </p>
+        </div>`;
       default:
         return renderStringField(entry, "text", path, ctx);
     }
@@ -494,6 +535,11 @@ export class ESPHomeConfigEntryForm extends LitElement {
       clearEditingMagnitude: (path) => {
         this._editingMagnitudes.delete(path.join("."));
       },
+      // Stable object identity for renderer-local WeakMap stashes
+      // (templatable literal/lambda recovery, currently). The host
+      // element survives the per-render ctx rebuild so it's the
+      // right key to hang cross-render scratch state on.
+      stashOwner: this,
       // Self-reference: assigned after object creation so the inner
       // renderer can recurse through the dispatch.
       renderEntry: () => nothing,

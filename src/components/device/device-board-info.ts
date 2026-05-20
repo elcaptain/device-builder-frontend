@@ -35,7 +35,10 @@ import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "./add-automation-dialog.js";
 import "./add-component-dialog.js";
 import "./add-config-dialog.js";
+import "./automation-editor/automation-editor.js";
+import "./automation-editor/script-editor.js";
 import "./device-section-config.js";
+import { locationFromSectionKey } from "./automation-editor/serialise.js";
 
 registerMdiIcons({
   "open-in-new": mdiOpenInNew,
@@ -397,16 +400,7 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
           `
         : nothing}
       ${this.selectedSection
-        ? html`
-            <esphome-device-section-config
-              .configuration=${this.configuration}
-              .sectionKey=${this.selectedSection}
-              .fromLine=${this.selectedFromLine}
-              .yaml=${this.yaml}
-              .board=${this.board}
-              ?yamlPaneVisible=${this.yamlPaneVisible}
-            ></esphome-device-section-config>
-          `
+        ? this._renderSelectedSection()
         : html`
             ${this.justCreated ? this._renderWelcomeBanner() : nothing}
             ${this._renderStepSection({
@@ -450,6 +444,8 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
         ? html`<esphome-add-automation-dialog
             .boardName=${board?.name ?? ""}
             .configuration=${this.configuration}
+            .board=${board}
+            .yaml=${this.yaml}
           ></esphome-add-automation-dialog>`
         : nothing}
     `;
@@ -463,6 +459,58 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
    * is to teach the user that the navigator is where you manage
    * these things, rather than handing them an add-button right here.
    */
+  /**
+   * Route an automation / script section key into the right
+   * structured editor; everything else lands in the regular
+   * ``<esphome-device-section-config>``.
+   *
+   * Three kinds today:
+   *
+   * - ``automation:script:<id>`` → ``<esphome-script-editor>``
+   *   (scripts have their own chrome — id + run mode + parameters
+   *   + actions, no trigger).
+   * - other ``automation:…`` keys → ``<esphome-automation-editor>``
+   *   (trigger-based automations).
+   * - anything else → component section editor.
+   *
+   * Each structured editor self-loads its parsed value from the
+   * backend on mount based on ``.location``; we just resolve the
+   * key into a typed location here so the editors don't have to
+   * know about navigator routing.
+   */
+  private _renderSelectedSection() {
+    const key = this.selectedSection!;
+    const location = key.startsWith("automation:")
+      ? locationFromSectionKey(key)
+      : null;
+    if (location?.kind === "script") {
+      return html`<esphome-script-editor
+        .configuration=${this.configuration}
+        .board=${this.board}
+        .platform=${this.board?.esphome.platform ?? ""}
+        .location=${location}
+        .yaml=${this.yaml}
+      ></esphome-script-editor>`;
+    }
+    if (location) {
+      return html`<esphome-automation-editor
+        .configuration=${this.configuration}
+        .board=${this.board}
+        .platform=${this.board?.esphome.platform ?? ""}
+        .location=${location}
+        .yaml=${this.yaml}
+      ></esphome-automation-editor>`;
+    }
+    return html`<esphome-device-section-config
+      .configuration=${this.configuration}
+      .sectionKey=${key}
+      .fromLine=${this.selectedFromLine}
+      .yaml=${this.yaml}
+      .board=${this.board}
+      ?yamlPaneVisible=${this.yamlPaneVisible}
+    ></esphome-device-section-config>`;
+  }
+
   private _renderStepSection(opts: {
     title: string;
     desc: string;
