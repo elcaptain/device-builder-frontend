@@ -134,6 +134,14 @@ export class ESPHomeDeviceNavigator extends LitElement {
   @property()
   platform = "";
 
+  /** ``true`` once the parent's platform resolution settles.
+   *  Without this gate the kickoff would routinely fire twice
+   *  (yaml-edge with ``platform=""``, then platform-edge with the
+   *  real value), landing in different ``BatchedCache`` buckets
+   *  so the first round-trip is orphaned. */
+  @property({ type: Boolean })
+  platformReady = false;
+
   @query("esphome-add-config-dialog")
   private _addConfigDialog!: ESPHomeAddConfigDialog;
 
@@ -380,9 +388,15 @@ export class ESPHomeDeviceNavigator extends LitElement {
   }
 
   protected willUpdate(changedProperties: Map<string, unknown>) {
+    // Fire on the edge that satisfies the gate — typically just
+    // the last of (yaml, platformReady) to land. A subsequent
+    // ``platform`` change (post-mount reconnect, etc.) refires.
     if (
-      (changedProperties.has("yaml") || changedProperties.has("platform")) &&
-      this.yaml
+      (changedProperties.has("yaml") ||
+        changedProperties.has("platform") ||
+        changedProperties.has("platformReady")) &&
+      this.yaml &&
+      this.platformReady
     ) {
       this._kickoffNameResolves();
     }

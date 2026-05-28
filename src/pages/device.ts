@@ -23,6 +23,7 @@ import {
   activeJobsContext,
   apiContext,
   devicesContext,
+  devicesLoadedContext,
   localizeContext,
 } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
@@ -63,6 +64,14 @@ export class ESPHomePageDevice extends LitElement {
   @state()
   private _devices: ConfiguredDevice[] = [];
 
+  /** ``true`` once the initial subscribe-events payload landed.
+   *  ``_platformReady`` uses this to tell "context still loading"
+   *  apart from "context delivered, our id isn't here" — a length
+   *  check would strand the gate on a zero-device dashboard. */
+  @consume({ context: devicesLoadedContext, subscribe: true })
+  @state()
+  private _devicesLoaded = false;
+
   @consume({ context: apiContext })
   private _api!: ESPHomeAPI;
 
@@ -94,6 +103,16 @@ export class ESPHomePageDevice extends LitElement {
    *  the device's `board_id` resolves — see `_loadBoard`. */
   @state()
   private _board: BoardCatalogEntry | null = null;
+
+  /** ``true`` once this device's platform is known (manifest
+   *  fetched, fetch failed, or no ``board_id``). The navigator
+   *  gates on this to avoid the typical mount-time double-fetch
+   *  (yaml-edge with ``platform=""``, then platform-edge with the
+   *  real value); the no-board branch below has a documented
+   *  narrow window where it can still flip early. Resets on
+   *  device-id change. */
+  @state()
+  private _platformReady = false;
 
   /** Last `board_id` we kicked off a fetch for. Used to dedupe so a
    *  re-render doesn't refetch the same board, and to detect board
@@ -429,6 +448,7 @@ export class ESPHomePageDevice extends LitElement {
       // next fetch can repopulate.
       this._loadedBoardId = null;
       this._board = null;
+      this._platformReady = false;
       this._loadYaml();
     }
     // Devices context arrives async after connect; kick off the board
@@ -437,11 +457,28 @@ export class ESPHomePageDevice extends LitElement {
     const boardId = this._device?.board_id ?? null;
     if (boardId && boardId !== this._loadedBoardId) {
       this._loadedBoardId = boardId;
-      this._loadBoard(boardId);
-    } else if (!boardId && this._loadedBoardId !== null && this._board) {
-      // Device dropped its board_id (rare — wizard re-run cleared it).
-      this._loadedBoardId = null;
+      // Drop the previous board now so derived props
+      // (``.platform``, ``.boardName``) don't lag the in-flight
+      // ``board_id``. Restored on success, left null on failure.
       this._board = null;
+      this._platformReady = false;
+      this._loadBoard(boardId);
+    } else if (!boardId) {
+      // No manifest to fetch (device has no ``board_id`` or our
+      // id isn't in the loaded context — deleted / stale link).
+      // Gate on ``_devicesLoaded`` rather than ``_devices.length
+      // > 0`` so a zero-device dashboard still releases. Known
+      // transient: a wizard-just-created device flips the gate
+      // here once with ``platform=""``, then the device-add
+      // event refires it with the real platform — self-correcting
+      // one-extra-fetch in that narrow window.
+      if (this._loadedBoardId !== null) {
+        this._loadedBoardId = null;
+        this._board = null;
+      }
+      if (this._device !== null || this._devicesLoaded) {
+        this._platformReady = true;
+      }
     }
   }
 
@@ -478,9 +515,17 @@ export class ESPHomePageDevice extends LitElement {
       // `_loadedBoardId` will already point at the new id.
       if (this._loadedBoardId === boardId) {
         this._board = board;
+        this._platformReady = true;
       }
     } catch (e) {
       console.error("Failed to load board:", e);
+      // Drop any stale ``_board`` so the navigator doesn't
+      // resolve labels against the wrong platform, then release
+      // the gate (labels come up with ``platform=undefined``).
+      if (this._loadedBoardId === boardId) {
+        this._board = null;
+        this._platformReady = true;
+      }
     }
   }
 
@@ -994,6 +1039,7 @@ export class ESPHomePageDevice extends LitElement {
       .boardName=${this._board?.name ?? ""}
       .configuration=${this.id}
       .platform=${this._board?.esphome.platform ?? ""}
+      .platformReady=${this._platformReady}
       .selectedKey=${this._selectedSection}
       .selectedFromLine=${this._selectedFromLine}
     ></esphome-device-navigator>`;
@@ -1197,7 +1243,12 @@ export class ESPHomePageDevice extends LitElement {
 
     const qs = params.toString();
     const newUrl = `${window.location.pathname}${qs ? `?${qs}` : ""}`;
-    window.history.replaceState(null, "", newUrl);
+    // Preserve the existing state object rather than nulling it: the
+    // header back button's _goHome() reads history.state to tell an
+    // in-app arrival ({} -> pop back to the filtered dashboard) from a
+    // deep-link / fresh load (null -> navigate("/")). Replacing only the
+    // URL keeps that distinction across section navigation.
+    window.history.replaceState(window.history.state, "", newUrl);
   }
 }
 
