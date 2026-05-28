@@ -2,7 +2,7 @@ import toast from "sonner-js";
 import type { ESPHomeAPI } from "../../api/index.js";
 import type {
   ArchivedDevice,
-  BoardCatalogEntry,
+  BoardCatalogIndex,
   BulkActionResult,
   ConfiguredDevice,
 } from "../../api/types.js";
@@ -301,7 +301,7 @@ export async function detectAndOpenWizard(
   api: ESPHomeAPI,
   createDialog: {
     open(step?: string): void;
-    openWithBoard(board: BoardCatalogEntry): void;
+    openWithBoard(board: BoardCatalogIndex): void;
     openAtBoardStep(filterLabel?: string): void;
   },
   options: {

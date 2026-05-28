@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { BoardCatalogEntry, PagedBoardsResponse } from "../../src/api/types.js";
 import {
-  hydrateBoard,
+  hydrateBoardBody,
   hydratePagedBoardsResponse,
 } from "../../src/util/board-hydrate.js";
+
+const hydrateBoard = hydrateBoardBody;
 
 /**
  * Stripped wire shape: the keys the backend's omit_default
@@ -194,13 +196,18 @@ describe("hydrateBoard", () => {
       is_generic: false,
       featured_components: [],
       featured_bundles: [],
+      default_components: [],
     };
     expect(hydrateBoard(entry)).toEqual(entry);
   });
 });
 
 describe("hydratePagedBoardsResponse", () => {
-  it("hydrates every board in the response", () => {
+  it("hydrates every slim board in the response", () => {
+    // ``boards/get_boards`` now ships slim ``BoardCatalogIndex``
+    // entries — body fields (pins, hardware, featured_components,
+    // featured_bundles, default_components) aren't in this payload
+    // and arrive on the per-board ``boards/get_board`` fetch.
     const response = {
       total: 1,
       offset: 0,
@@ -209,7 +216,8 @@ describe("hydratePagedBoardsResponse", () => {
     } as unknown as PagedBoardsResponse;
     const hydrated = hydratePagedBoardsResponse(response);
     expect(hydrated.boards).toHaveLength(1);
-    expect(hydrated.boards[0].pins).toEqual([]);
+    expect(hydrated.boards[0].tags).toEqual([]);
+    expect(hydrated.boards[0].images).toEqual([]);
     expect(hydrated.boards[0].docs_url).toBe("");
     // Top-level paging fields pass through.
     expect(hydrated.total).toBe(1);

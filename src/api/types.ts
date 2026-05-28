@@ -408,28 +408,57 @@ export interface FeaturedBundle {
   component_ids: string[];
 }
 
-export interface BoardCatalogEntry {
+/**
+ * One default-installed component on a board. The body's
+ * `default_components` lists these so the wizard's "create
+ * device" path can pre-populate the new device's YAML; the
+ * frontend doesn't read them today, but the type tracks the
+ * wire shape.
+ */
+export interface DefaultComponent {
+  id: string;
+  fields: Record<string, unknown>;
+}
+
+/**
+ * Slim board entry — what `boards/get_boards` ships. Carries the
+ * picker / list / search fields only. Body-only fields (hardware,
+ * pins, featured_components, featured_bundles, default_components)
+ * live on `BoardCatalogEntry` and load on demand via
+ * `boards/get_board`.
+ */
+export interface BoardCatalogIndex {
   id: string;
   name: string;
   description: string;
   manufacturer: string;
   esphome: BoardEsphomeConfig;
-  hardware: BoardHardware;
   images: string[];
   tags: string[];
-  pins: BoardPin[];
   docs_url: string;
   product_url: string;
   featured: boolean;
   is_generic: boolean;
+}
+
+/**
+ * Full board body — what `boards/get_board(id)` returns. The slim
+ * fields are duplicated so the body is self-describing without a
+ * separate merge against the index.
+ */
+export interface BoardCatalogEntry extends BoardCatalogIndex {
+  hardware: BoardHardware;
+  pins: BoardPin[];
   /** Components recommended for this board. */
   featured_components: FeaturedComponent[];
   /** Logical groups of featured components added together. */
   featured_bundles: FeaturedBundle[];
+  /** Components installed by default on every new device on this board. */
+  default_components: DefaultComponent[];
 }
 
 export interface PagedBoardsResponse extends PagedResponse {
-  boards: BoardCatalogEntry[];
+  boards: BoardCatalogIndex[];
 }
 
 // ─── Components ──────────────────────────────────────────────

@@ -12,7 +12,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import memoizeOne from "memoize-one";
 import { APIError } from "../../api/api-error.js";
 import type { ESPHomeAPI } from "../../api/index.js";
-import type { BoardCatalogEntry, SerialPort } from "../../api/types.js";
+import type { BoardCatalogIndex, SerialPort } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { apiContext, localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
@@ -64,14 +64,14 @@ export class ESPHomeWizardStepBoard extends LitElement {
   presetFilterLabel: string | null = null;
 
   @state()
-  private _boards: BoardCatalogEntry[] = [];
+  private _boards: BoardCatalogIndex[] = [];
 
   /** Split the live board catalog into the single featured tile +
    *  the rest. Memoised on the ``_boards`` reference so the find +
    *  filter pair shares one walk per catalog change (each search
    *  keystroke replaces ``_boards`` with a freshly-filtered list,
    *  so the cache invalidates exactly when the split needs to). */
-  private _splitBoards = memoizeOne((boards: BoardCatalogEntry[]) => ({
+  private _splitBoards = memoizeOne((boards: BoardCatalogIndex[]) => ({
     featured: boards.find((b) => b.featured),
     regular: boards.filter((b) => !b.featured),
   }));
@@ -625,7 +625,7 @@ export class ESPHomeWizardStepBoard extends LitElement {
     `;
   }
 
-  private _renderFeatured(board: BoardCatalogEntry) {
+  private _renderFeatured(board: BoardCatalogIndex) {
     const imageUrl =
       board.images.length > 0 ? board.images[0] : withBase("/assets/board/default.svg");
     return html`
@@ -665,7 +665,7 @@ export class ESPHomeWizardStepBoard extends LitElement {
     `;
   }
 
-  private _renderBoardCard(board: BoardCatalogEntry, expanded: boolean) {
+  private _renderBoardCard(board: BoardCatalogIndex, expanded: boolean) {
     const imageUrl =
       board.images.length > 0 ? board.images[0] : withBase("/assets/board/default.svg");
     return html`
@@ -729,7 +729,7 @@ export class ESPHomeWizardStepBoard extends LitElement {
     this._debouncedSearch();
   }
 
-  private _onToggleExpand(board: BoardCatalogEntry) {
+  private _onToggleExpand(board: BoardCatalogIndex) {
     this._expandedBoardId = this._expandedBoardId === board.id ? null : board.id;
   }
 
@@ -749,7 +749,7 @@ export class ESPHomeWizardStepBoard extends LitElement {
     return translated === key ? tag : translated;
   }
 
-  private _onAdd(board: BoardCatalogEntry) {
+  private _onAdd(board: BoardCatalogIndex) {
     this.dispatchEvent(
       new CustomEvent("next-step", {
         detail: { step: "setup", board },

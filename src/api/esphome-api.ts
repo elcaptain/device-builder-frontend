@@ -9,7 +9,7 @@
 import { APIError } from "./api-error.js";
 import { BASE_PATH } from "../util/base-path.js";
 import { clearStoredToken, getStoredToken, setStoredToken } from "../util/auth-token.js";
-import { hydrateBoard, hydratePagedBoardsResponse } from "../util/board-hydrate.js";
+import { hydrateBoardBody, hydratePagedBoardsResponse } from "../util/board-hydrate.js";
 import type {
   AddComponentResponse,
   ArchivedDevice,
@@ -1214,15 +1214,28 @@ export class ESPHomeAPI {
 
   // ─── Board Commands ───────────────────────────────────────
 
-  /** Get a single board by ID. */
+  /** Get a single board's full body (hardware, pins, featured components). */
   async getBoard(boardId: string): Promise<BoardCatalogEntry | null> {
     const board = await this.sendCommand<BoardCatalogEntry | null>("boards/get_board", {
       board_id: boardId,
     });
-    return board === null ? null : hydrateBoard(board);
+    return board === null ? null : hydrateBoardBody(board);
   }
 
-  /** Get boards with optional filtering, search, and pagination. */
+  /** Batch-fetch board bodies by id. Returns a `{board_id: body}` map. */
+  async getBoardBodies(ids: string[]): Promise<Record<string, BoardCatalogEntry>> {
+    const result = await this.sendCommand<Record<string, BoardCatalogEntry>>(
+      "boards/get_board_bodies",
+      { ids }
+    );
+    const hydrated: Record<string, BoardCatalogEntry> = {};
+    for (const [id, body] of Object.entries(result)) {
+      hydrated[id] = hydrateBoardBody(body);
+    }
+    return hydrated;
+  }
+
+  /** Get slim board index entries with optional filtering, search, and pagination. */
   async getBoards(args?: {
     query?: string;
     platform?: string;

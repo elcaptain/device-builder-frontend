@@ -3,7 +3,7 @@ import { mdiArrowLeft, mdiClose } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 import { APIError } from "../../api/api-error.js";
-import type { BoardCatalogEntry } from "../../api/types.js";
+import type { BoardCatalogIndex } from "../../api/types.js";
 import type { ESPHomeAPI } from "../../api/index.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext, apiContext } from "../../context/index.js";
@@ -30,7 +30,7 @@ type WizardStepDetail =
   | WizardStep
   | {
       step: WizardStep;
-      board?: BoardCatalogEntry | null;
+      board?: BoardCatalogIndex | null;
       method?: CreationMethod;
       file?: File;
     };
@@ -48,7 +48,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
   private _step: WizardStep = "method";
 
   @state()
-  private _selectedBoard: BoardCatalogEntry | null = null;
+  private _selectedBoard: BoardCatalogIndex | null = null;
 
   /** Initial platform-filter label for the board step. Set by
    *  ``openAtBoardStep`` when the caller knows the chip family
@@ -204,7 +204,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
   }
 
   /** Open directly at the setup step with a pre-selected board. */
-  public openWithBoard(board: BoardCatalogEntry) {
+  public openWithBoard(board: BoardCatalogIndex) {
     this._step = "setup";
     this._selectedBoard = board;
     this._initialBoardFilter = null;
@@ -452,7 +452,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
 
   private async _onFinishSetup(
     e: CustomEvent<{
-      board: BoardCatalogEntry | null;
+      board: BoardCatalogIndex | null;
       name: string;
       wifiSsid: string;
       wifiPassword: string;
@@ -494,7 +494,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
       psk?: string;
       file_content?: string;
     },
-    options: { board?: BoardCatalogEntry | null } = {}
+    options: { board?: BoardCatalogIndex | null } = {}
   ): Promise<void> {
     if (this._submitting) return;
     this._resetCreateErrors();
@@ -530,7 +530,7 @@ export class ESPHomeCreateConfigDialog extends LitElement {
    */
   private _extractCreateErrorMessage(
     err: unknown,
-    board: BoardCatalogEntry | null
+    board: BoardCatalogIndex | null
   ): string {
     let message: string;
     if (err instanceof APIError && err.details.trim()) {

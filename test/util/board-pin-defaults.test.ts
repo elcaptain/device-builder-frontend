@@ -42,6 +42,7 @@ function makeBoard(pins: BoardPin[]): BoardCatalogEntry {
     is_generic: false,
     featured_components: [],
     featured_bundles: [],
+    default_components: [],
   };
 }
 

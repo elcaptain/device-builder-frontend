@@ -1,8 +1,10 @@
 import type {
   BoardCatalogEntry,
+  BoardCatalogIndex,
   BoardEsphomeConfig,
   BoardHardware,
   BoardPin,
+  DefaultComponent,
   FeaturedBundle,
   FeaturedComponent,
   FieldPreset,
@@ -12,33 +14,48 @@ import type {
 /**
  * Re-default fields the backend stripped from the wire payload.
  *
- * The board-catalog dataclasses on the backend use mashumaro's
- * `omit_default = True` + `omit_none = True` config; ~40k empty
- * `suggestions: null` / `locked: false` rows per response stop
- * arriving (~36% off the catalog bytes, more once JS parses).
- * Default values mirror the Python dataclass declarations in
- * `models/boards.py` and `models/common.py` exactly — diverging
- * means a fresh fetch silently disagrees with what `from_dict`
- * round-trips on the backend.
+ * The board catalog dataclasses on the backend use mashumaro's
+ * `omit_default = True` + `omit_none = True` config, so `null` /
+ * `false` / `[]` / `""` fields drop off the wire. Two hydrators
+ * cover the two split surfaces:
  *
- * Each helper spreads the input before overriding defaults, so
- * a forward-compat field added to the wire shape carries through
+ * - `hydrateBoardIndex`: slim picker shape served by
+ *   `boards/get_boards` (no body fields). `hydratePagedBoardsResponse`
+ *   wraps it for the paged list endpoint.
+ * - `hydrateBoardBody`: full body shape served by `boards/get_board`,
+ *   adding hardware / pins / featured_components / featured_bundles /
+ *   default_components on top of the slim defaults.
+ *
+ * Default values mirror the Python dataclass declarations in
+ * `models/boards.py` exactly — diverging means a fresh fetch
+ * silently disagrees with what `from_dict` round-trips on the
+ * backend.
+ *
+ * Each helper spreads the input before overriding defaults so a
+ * forward-compat field added to the wire shape carries through
  * the hydrator instead of being silently dropped.
  */
-export function hydrateBoard(entry: BoardCatalogEntry): BoardCatalogEntry {
+export function hydrateBoardIndex(entry: BoardCatalogIndex): BoardCatalogIndex {
   return {
     ...entry,
     esphome: _hydrateEsphome(entry.esphome),
-    hardware: _hydrateHardware(entry.hardware),
     images: entry.images ?? [],
     tags: entry.tags ?? [],
-    pins: (entry.pins ?? []).map(_hydratePin),
     docs_url: entry.docs_url ?? "",
     product_url: entry.product_url ?? "",
     featured: entry.featured ?? false,
     is_generic: entry.is_generic ?? false,
+  };
+}
+
+export function hydrateBoardBody(entry: BoardCatalogEntry): BoardCatalogEntry {
+  return {
+    ...hydrateBoardIndex(entry),
+    hardware: _hydrateHardware(entry.hardware),
+    pins: (entry.pins ?? []).map(_hydratePin),
     featured_components: (entry.featured_components ?? []).map(_hydrateFeaturedComponent),
     featured_bundles: (entry.featured_bundles ?? []).map(_hydrateFeaturedBundle),
+    default_components: (entry.default_components ?? []).map(_hydrateDefaultComponent),
   };
 }
 
@@ -54,7 +71,7 @@ export function hydratePagedBoardsResponse(
     total: response.total ?? 0,
     offset: response.offset ?? 0,
     limit: response.limit ?? 50,
-    boards: (response.boards ?? []).map(hydrateBoard),
+    boards: (response.boards ?? []).map(hydrateBoardIndex),
   };
 }
 
@@ -112,5 +129,12 @@ function _hydrateFieldPreset(preset: FieldPreset): FieldPreset {
     value: preset.value ?? null,
     locked: preset.locked ?? false,
     suggestions: preset.suggestions ?? null,
+  };
+}
+
+function _hydrateDefaultComponent(dc: DefaultComponent): DefaultComponent {
+  return {
+    ...dc,
+    fields: dc.fields ?? {},
   };
 }
