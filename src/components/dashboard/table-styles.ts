@@ -9,6 +9,15 @@ export const tableLayoutStyles = css`
     min-height: 0;
   }
 
+  /* Slotted content uses content-driven height — flex-shrink:0
+     prevents the .table-device-count-row from collapsing below
+     its intrinsic height when the column is tight, so the row's
+     count + toggle stay legible while .table-wrap absorbs the
+     remaining space. */
+  ::slotted([slot="below-controls"]) {
+    flex-shrink: 0;
+  }
+
   /* When the dashboard's floating multi-select bar is visible, reserve
      space at the bottom of the table host so the pagination row sits
      above it rather than behind it. The bar pins itself to exactly
@@ -21,10 +30,19 @@ export const tableLayoutStyles = css`
 
   .controls {
     display: flex;
-    align-items: center;
+    /* Top-align the right-cluster (Columns + Create device) with
+       the toolbar-stack's first row (search + view-toggle +
+       facets). The slotted toolbar's right edge sits at the same
+       y as Columns / Create. */
+    align-items: flex-start;
     gap: var(--wa-space-s);
     padding: var(--wa-space-l) var(--wa-space-l) 0;
-    margin-bottom: var(--wa-space-l);
+    /* No bottom margin: the below-controls slot now carries the
+       device-count + Select-multiple row, and its own bottom
+       padding handles spacing to the .table-wrap. Keeping the
+       old --wa-space-l here would stack with the count row's
+       padding into ~32px of dead space. */
+    margin-bottom: 0;
     flex-shrink: 0;
   }
 

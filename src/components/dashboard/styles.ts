@@ -209,6 +209,15 @@ export const dashboardStyles = css`
     padding: var(--wa-space-l);
   }
 
+  /* When the grid follows the toolbar's count row (whether directly
+     or with the empty-search pivot wedged between), the count row
+     already provides spacing above the first card. Tighten the
+     grid's top padding so the two rows don't double up. */
+  .toolbar + .devices-grid,
+  .toolbar + .empty-search + .devices-grid {
+    padding-top: var(--wa-space-xs);
+  }
+
   /* Only the configured-device grid needs FAB clearance: it's the
      last block on the page in card view, and the FAB sits directly
      on top of its trailing card's actions on a single-column mobile
@@ -237,6 +246,19 @@ export const dashboardStyles = css`
     padding: var(--wa-space-l) var(--wa-space-l) 0;
     flex-shrink: 0;
   }
+
+  /* Table-view counterpart to .toolbar (sits inside the
+     device-table's named toolbar slot, where the slotted rule on
+     .controls handles the outer padding). Without this rule the
+     inner rows stacked at 0px gap while card view stacked at 2px,
+     so flipping the view-toggle made the X-devices row jump 2px
+     vertically. */
+  .toolbar-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
   .toolbar-row {
     display: flex;
     align-items: center;
@@ -490,6 +512,37 @@ export const dashboardStyles = css`
   .device-count strong {
     color: var(--wa-color-text-normal);
     font-weight: var(--wa-font-weight-bold);
+  }
+
+  /* Pairs the count with the Select-multiple toggle on a row of
+     their own — both reference the device list, so they belong
+     side-by-side. justify-content:space-between puts the count on
+     the left and the toggle on the right at every width. */
+  .device-count-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--wa-space-m);
+  }
+
+  /* Table view slots the device-count-row through esphome-device-
+     table's below-controls slot so the row spans the full table
+     width and Select-multiple right-aligns with Columns / Create
+     device in the row above. Horizontal padding matches .controls
+     and .table-wrap above/below so the count and toggle line up
+     with the column headers on the right. 2px top padding mirrors
+     card view's .toolbar gap:2px so the inter-row spacing reads
+     identically between views. */
+  .table-device-count-row {
+    padding: 2px var(--wa-space-l) var(--wa-space-xs);
+  }
+
+  /* Mobile: tighten the table-view count-row gutter to match the
+     .controls / .table-wrap trim in PR-H (see table-styles.ts). */
+  @media (max-width: 600px) {
+    .table-device-count-row {
+      padding: 2px var(--wa-space-s) var(--wa-space-xs);
+    }
   }
 
   /* ─── View Toggle ─── */
