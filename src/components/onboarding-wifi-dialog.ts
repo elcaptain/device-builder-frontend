@@ -64,6 +64,15 @@ export class ESPHomeOnboardingWifiDialog extends LitElement {
   @query("wa-dialog")
   private _dialog!: HTMLElement & { open: boolean };
 
+  // WPA/WPA2 passphrases are 8-63 characters; the maxlength=64 cap
+  // covers the 64-hex-digit PSK form. An empty password is a valid
+  // open network (the placeholder invites it), so only a non-empty
+  // value shorter than 8 is rejected. Whitespace is significant in
+  // a passphrase, so the length is taken from the raw value.
+  private get _passwordTooShort(): boolean {
+    return this._password.length > 0 && this._password.length < 8;
+  }
+
   /** True after the user has explicitly saved or declined inside
    *  the current open() — suppresses the close-via-X session-
    *  dismiss path so we don't both ``mark_acknowledged`` AND fire
@@ -207,11 +216,18 @@ export class ESPHomeOnboardingWifiDialog extends LitElement {
               .placeholder=${this._localize("onboarding.wifi.password_placeholder")}
               .maxlength=${64}
               .label=${this._localize("onboarding.wifi.password_label")}
+              .invalid=${this._passwordTooShort}
+              .describedby=${this._passwordTooShort ? "onboarding-password-error" : ""}
               ?disabled=${this._saving}
               @password-input-change=${(e: CustomEvent<PasswordInputValueChange>) => {
                 this._password = e.detail.value;
               }}
             ></esphome-password-input>
+            ${this._passwordTooShort
+              ? html`<p id="onboarding-password-error" class="error" role="alert">
+                  ${this._localize("onboarding.wifi.password_too_short")}
+                </p>`
+              : nothing}
           </div>
           ${this._error
             ? html`<p class="error" role="alert">${this._error}</p>`
@@ -238,7 +254,7 @@ export class ESPHomeOnboardingWifiDialog extends LitElement {
           <button
             type="button"
             class="btn btn--primary"
-            ?disabled=${this._saving || !this._ssid.trim()}
+            ?disabled=${this._saving || !this._ssid.trim() || this._passwordTooShort}
             @click=${this._save}
           >
             ${this._saving
@@ -257,7 +273,7 @@ export class ESPHomeOnboardingWifiDialog extends LitElement {
     // the device would fail to associate. The Save button is
     // already disabled on all-whitespace input via the same
     // check below.
-    if (!this._ssid.trim()) return;
+    if (!this._ssid.trim() || this._passwordTooShort) return;
     this._saving = true;
     this._error = null;
     try {
