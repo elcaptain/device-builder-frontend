@@ -15,13 +15,16 @@ import { LitElement, html, type PropertyValues } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 import memoizeOne from "memoize-one";
 import toast from "sonner-js";
+import { APIError } from "../api/api-error.js";
 import type { ESPHomeAPI } from "../api/index.js";
+import { ErrorCode } from "../api/types.js";
 import type {
   AdoptableDevice,
   ArchivedDevice,
   ConfiguredDevice,
   FirmwareJob,
   Label,
+  PairingSummary,
 } from "../api/types.js";
 import { DashboardView } from "../api/types.js";
 import type { LocalizeFunc } from "../common/localize.js";
@@ -82,12 +85,14 @@ import { YamlSearchController } from "../components/yaml-search-controller.js";
 import {
   activeJobsContext,
   apiContext,
+  buildOffloadPairingsContext,
   devicesContext,
   devicesLoadedContext,
   importableDevicesContext,
   labelsContext,
   localizeContext,
   recentJobsContext,
+  versionContext,
 } from "../context/index.js";
 import { inputStyles } from "../styles/inputs.js";
 import { espHomeStyles } from "../styles/shared.js";
@@ -96,6 +101,7 @@ import { matchesDeviceName } from "../util/device-search.js";
 import { DEVICE_SORT_COLLATOR, deviceSortKey } from "../util/device-sort.js";
 import { computeLabelUsage } from "../util/label-usage.js";
 import { navigate } from "../util/navigation.js";
+import { classifyNoCompatiblePeerReason } from "../util/version-mismatch.js";
 import { consumePendingHighlight } from "../util/pending-highlight.js";
 import { postInstallShowLogsHandler } from "../util/post-install-logs.js";
 import { registerMdiIcons } from "../util/register-icons.js";
@@ -174,6 +180,17 @@ export class ESPHomePageDashboard extends LitElement {
   @consume({ context: labelsContext, subscribe: true }) @state() _labelsCatalog: Label[] =
     [];
   @consume({ context: apiContext }) _api!: ESPHomeAPI;
+
+  // Used by the NO_COMPATIBLE_PEER toast classifier — see
+  // classifyNoCompatiblePeerReason. Same context the settings
+  // dialog reads; null until the subscribe_events seed lands.
+  @consume({ context: buildOffloadPairingsContext, subscribe: true })
+  @state()
+  _pairings: Map<string, PairingSummary> | null = null;
+
+  @consume({ context: versionContext, subscribe: true })
+  @state()
+  _appVersion = "";
 
   @state() _showDiscovered = false;
   @state() _search = "";
@@ -772,8 +789,21 @@ export class ESPHomePageDashboard extends LitElement {
     });
     try {
       await this._api.firmwareInstallBulk(selected);
-    } catch {
-      toast.error(this._localize("layout.update_all_error"), { richColors: true });
+    } catch (err) {
+      if (err instanceof APIError && err.errorCode === ErrorCode.NO_COMPATIBLE_PEER) {
+        const reason = classifyNoCompatiblePeerReason(
+          this._pairings?.values() ?? [],
+          this._appVersion
+        );
+        toast.error(
+          this._localize(`layout.update_all_no_compatible_peer_${reason}`, {
+            local: this._appVersion,
+          }),
+          { richColors: true }
+        );
+      } else {
+        toast.error(this._localize("layout.update_all_error"), { richColors: true });
+      }
     }
   };
 

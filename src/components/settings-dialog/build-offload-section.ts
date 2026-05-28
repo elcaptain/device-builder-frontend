@@ -1,6 +1,6 @@
 import { consume } from "@lit/context";
 import { mdiDelete, mdiLanConnect, mdiPencil } from "@mdi/js";
-import { LitElement, html, nothing } from "lit";
+import { LitElement, css, html, nothing } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 import toast from "sonner-js";
 
@@ -9,6 +9,7 @@ import type {
   OffloaderAlertSnapshotEntry,
   PairingSummary,
   RemoteBuildPeer,
+  VersionMatchPolicy,
 } from "../../api/types.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import {
@@ -18,8 +19,8 @@ import {
   buildOffloadJobsContext,
   buildOffloadPairingsContext,
   localizeContext,
-  offloaderAllowMajorVersionMismatchContext,
   offloaderRemoteBuildsEnabledContext,
+  offloaderVersionMatchPolicyContext,
   versionContext,
 } from "../../context/index.js";
 import type { RemoteBuildJobState } from "../../context/index.js";
@@ -46,12 +47,23 @@ import "../pair-build-server-dialog.js";
 import "../reauth-wizard-dialog.js";
 import "../remote-build-job-dialog.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
+import "@home-assistant/webawesome/dist/components/option/option.js";
+import "@home-assistant/webawesome/dist/components/select/select.js";
 
 registerMdiIcons({
   delete: mdiDelete,
   "lan-connect": mdiLanConnect,
   pencil: mdiPencil,
 });
+
+/** Canonical order of :type:`VersionMatchPolicy` values, lenient to strict.
+ *  Drives the wa-option render and the change-handler narrowing. */
+const _VERSION_MATCH_POLICIES: readonly VersionMatchPolicy[] = [
+  "any",
+  "release",
+  "exact",
+  "exact_required",
+];
 
 @customElement("esphome-settings-build-offload")
 export class ESPHomeSettingsBuildOffload extends LitElement {
@@ -79,11 +91,11 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
   private _remoteBuildsEnabled: boolean | null = null;
 
   @consume({
-    context: offloaderAllowMajorVersionMismatchContext,
+    context: offloaderVersionMatchPolicyContext,
     subscribe: true,
   })
   @state()
-  private _allowMajorVersionMismatch: boolean | null = null;
+  private _versionMatchPolicy: VersionMatchPolicy | null = null;
 
   @consume({ context: buildOffloadAlertsContext, subscribe: true })
   @state()
@@ -123,12 +135,21 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
     peerRowStyles,
     offloaderAlertStyles,
     pairingRowStyles,
+    css`
+      .policy-row wa-select {
+        width: 100%;
+        max-width: none;
+      }
+      .policy-selected-desc {
+        margin-top: var(--wa-space-2xs);
+      }
+    `,
   ];
 
   protected render() {
     return html`
       ${this._renderAlerts()} ${this._renderRemoteBuildsToggle()}
-      ${this._renderAllowMajorVersionMismatchToggle()}
+      ${this._renderVersionMatchPolicyPicker()}
 
       <div class="section-heading">
         ${this._localize("settings.paired_build_servers_heading")}
@@ -218,25 +239,32 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
     `;
   }
 
-  private _renderAllowMajorVersionMismatchToggle() {
-    if (this._allowMajorVersionMismatch === null) return nothing;
+  private _renderVersionMatchPolicyPicker() {
+    const selected = this._versionMatchPolicy ?? "any";
     return html`
-      <div class="row">
+      <div class="row row--stacked policy-row">
         <div class="row-label">
-          <span id="offloader-allow-major-version-mismatch-title" class="row-title">
-            ${this._localize("settings.offloader_allow_major_version_mismatch")}
-          </span>
-          <span class="row-desc">
-            ${this._localize("settings.offloader_allow_major_version_mismatch_desc")}
+          <span id="offloader-version-match-policy-title" class="row-title">
+            ${this._localize("settings.offloader_version_match_policy_heading")}
           </span>
         </div>
-        <button
-          class="toggle"
-          role="switch"
-          aria-labelledby="offloader-allow-major-version-mismatch-title"
-          aria-checked=${this._allowMajorVersionMismatch}
-          @click=${this._onToggleAllowMajorVersionMismatch}
-        ></button>
+        <wa-select
+          aria-labelledby="offloader-version-match-policy-title"
+          value=${selected}
+          ?disabled=${this._versionMatchPolicy === null}
+          @change=${this._onVersionMatchPolicyChange}
+        >
+          ${_VERSION_MATCH_POLICIES.map(
+            (p) => html`
+              <wa-option value=${p}>
+                ${this._localize(`settings.offloader_version_match_policy_${p}`)}
+              </wa-option>
+            `
+          )}
+        </wa-select>
+        <span class="row-desc policy-selected-desc">
+          ${this._localize(`settings.offloader_version_match_policy_${selected}_desc`)}
+        </span>
       </div>
     `;
   }
@@ -348,11 +376,15 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
     });
   }
 
-  private _onToggleAllowMajorVersionMismatch = () => {
-    if (this._allowMajorVersionMismatch === null) return;
+  private _onVersionMatchPolicyChange = (e: Event) => {
+    if (this._versionMatchPolicy === null) return;
+    const raw = (e.target as HTMLSelectElement).value;
+    if (!_VERSION_MATCH_POLICIES.includes(raw as VersionMatchPolicy)) return;
+    const policy = raw as VersionMatchPolicy;
+    if (policy === this._versionMatchPolicy) return;
     this.dispatchEvent(
-      new CustomEvent("set-offloader-allow-major-version-mismatch", {
-        detail: !this._allowMajorVersionMismatch,
+      new CustomEvent("set-offloader-version-match-policy", {
+        detail: policy,
         bubbles: true,
         composed: true,
       })
