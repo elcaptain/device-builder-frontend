@@ -1222,12 +1222,29 @@ export class ESPHomeAPI {
     return board === null ? null : hydrateBoardBody(board);
   }
 
-  /** Batch-fetch board bodies by id. Returns a `{board_id: body}` map. */
+  /** Batch-fetch board bodies by id. Returns a `{board_id: body}` map.
+   *
+   * Empty `ids` short-circuits without touching the socket so the
+   * caller doesn't have to. Any id that came back without a body
+   * is a backend contract violation (the slim index advertised
+   * it); surface a console.error so the call site doesn't silently
+   * degrade to a missing detail page.
+   */
   async getBoardBodies(ids: string[]): Promise<Record<string, BoardCatalogEntry>> {
+    if (ids.length === 0) {
+      return {};
+    }
     const result = await this.sendCommand<Record<string, BoardCatalogEntry>>(
       "boards/get_board_bodies",
       { ids }
     );
+    const missing = ids.filter((id) => !(id in result));
+    if (missing.length > 0) {
+      console.error(
+        "boards/get_board_bodies: backend omitted bodies for advertised ids",
+        missing
+      );
+    }
     const hydrated: Record<string, BoardCatalogEntry> = {};
     for (const [id, body] of Object.entries(result)) {
       hydrated[id] = hydrateBoardBody(body);
