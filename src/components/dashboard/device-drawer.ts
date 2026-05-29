@@ -2,10 +2,10 @@ import { consume } from "@lit/context";
 import {
   mdiCheckNetworkOutline,
   mdiClose,
-  mdiConsole,
   mdiHelpNetworkOutline,
   mdiNetworkOffOutline,
   mdiPencil,
+  mdiTextBoxOutline,
   mdiUpload,
 } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
@@ -24,7 +24,7 @@ import "./device-drawer-content.js";
 registerMdiIcons({
   "check-network-outline": mdiCheckNetworkOutline,
   close: mdiClose,
-  console: mdiConsole,
+  "text-box-outline": mdiTextBoxOutline,
   "help-network-outline": mdiHelpNetworkOutline,
   "network-off-outline": mdiNetworkOffOutline,
   pencil: mdiPencil,
@@ -381,7 +381,7 @@ export class ESPHomeDeviceDrawer extends LitElement {
             class="action action--ghost"
             @click=${() => this._emitAction("open-logs")}
           >
-            <wa-icon library="mdi" name="console"></wa-icon>
+            <wa-icon library="mdi" name="text-box-outline"></wa-icon>
             ${this._localize("dashboard.drawer_logs")}
           </button>
         </div>
