@@ -1,12 +1,18 @@
 // @vitest-environment happy-dom
 import { describe, expect, test, vi } from "vitest";
 
+import toast from "sonner-js";
+
 import type { ESPHomeAPI } from "../../src/api/index.js";
 import { ESPHomePageSecrets } from "../../src/pages/secrets.js";
 import {
   extractAttributeBindings,
   findTemplatesByAnchor,
 } from "../_lit-template-walker.js";
+
+vi.mock("sonner-js", () => ({
+  default: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+}));
 
 /**
  * Pin the secrets-page data-loss guards: don't render an editor
@@ -133,5 +139,70 @@ describe("esphome-page-secrets save-button disabled state", () => {
     expect(page._saving).toBe(false);
     // Post-success: dirty-check disables (yaml === savedYaml now).
     expect(saveDisabled(page)).toBe(true);
+  });
+});
+
+describe("esphome-page-secrets save toast ordering", () => {
+  test("_save() does not flash a success toast when the backend rejects the write", async () => {
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
+    const page = makePage({
+      _loaded: true,
+      _yaml: "wifi_password: new\n",
+      _savedYaml: "wifi_password: old\n",
+    });
+    page._api = {
+      updateConfig: vi.fn().mockRejectedValue(new Error("invalid secrets")),
+    } as unknown as ESPHomeAPI;
+
+    await page._save();
+
+    // A genuine (non-timeout) failure must surface exactly one error
+    // toast and never a "Saved" toast — otherwise the user sees a
+    // green "Secrets saved" immediately followed by a red failure
+    // toast on a credentials file (the issue #436 flash).
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    // The buffer rolls back so the dirty indicator returns.
+    expect(page._savedYaml).toBe("wifi_password: old\n");
+  });
+
+  test("_save() shows a single success toast after the write resolves", async () => {
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
+    const page = makePage({
+      _loaded: true,
+      _yaml: "wifi_password: new\n",
+      _savedYaml: "wifi_password: old\n",
+    });
+    page._api = {
+      updateConfig: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ESPHomeAPI;
+
+    await page._save();
+
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  test("_save() treats a WS timeout as success and keeps the buffer", async () => {
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
+    const page = makePage({
+      _loaded: true,
+      _yaml: "wifi_password: new\n",
+      _savedYaml: "wifi_password: old\n",
+    });
+    page._api = {
+      updateConfig: vi.fn().mockRejectedValue(new Error("command timed out")),
+    } as unknown as ESPHomeAPI;
+
+    await page._save();
+
+    // Timeout: the backend probably wrote the file, so don't claim
+    // failure — keep the optimistic buffer and show success.
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(page._savedYaml).toBe("wifi_password: new\n");
   });
 });
