@@ -157,13 +157,10 @@ describe("esphome-page-secrets save toast ordering", () => {
 
     await page._save();
 
-    // A genuine (non-timeout) failure must surface exactly one error
-    // toast and never a "Saved" toast — otherwise the user sees a
-    // green "Secrets saved" immediately followed by a red failure
-    // toast on a credentials file (the issue #436 flash).
+    // A real failure surfaces one error toast and no success toast,
+    // and rolls the buffer back so the dirty indicator returns.
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledTimes(1);
-    // The buffer rolls back so the dirty indicator returns.
     expect(page._savedYaml).toBe("wifi_password: old\n");
   });
 
@@ -199,8 +196,8 @@ describe("esphome-page-secrets save toast ordering", () => {
 
     await page._save();
 
-    // Timeout: the backend probably wrote the file, so don't claim
-    // failure — keep the optimistic buffer and show success.
+    // A timeout probably still wrote the file: keep the buffer and
+    // show success rather than claiming failure.
     expect(toast.success).toHaveBeenCalledTimes(1);
     expect(toast.error).not.toHaveBeenCalled();
     expect(page._savedYaml).toBe("wifi_password: new\n");
@@ -221,10 +218,9 @@ describe("esphome-page-secrets save toast ordering", () => {
     await page._save();
     window.removeEventListener("secrets-saved", onSaved);
 
-    // A timeout is treated as success (buffer kept, success toast),
-    // so listeners — app-shell's onboarding-state refresh, peer
-    // secrets pages — must be notified too. Otherwise the UI claims
-    // success while those listeners stay stale (the @copilot flag).
+    // A timeout is treated as success, so listeners (onboarding-state
+    // refresh, peer secrets pages) must be notified too; otherwise
+    // the UI claims success while they stay stale.
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 

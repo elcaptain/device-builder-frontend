@@ -297,30 +297,23 @@ export class ESPHomePageSecrets extends LitElement {
     // failure can revert and let the user retry.
     const previousSaved = this._savedYaml;
     this._savedYaml = this._yaml;
-    // ``_saving`` covers the in-flight window so a rapid second
-    // click can't queue a duplicate write; the dirty-check would
-    // also disable on the success path (savedYaml === yaml), but
-    // _saving stays true through both branches so the "Saving…"
-    // label and disabled state hold until the API call returns.
+    // ``_saving`` holds the "Saving…" label and disabled state
+    // until the API call returns, so a rapid second click can't
+    // queue a duplicate write.
     this._saving = true;
-    // Toast only after the backend round-trip resolves. Firing
-    // ``toast.success`` here optimistically would flash a green
-    // "Secrets saved" immediately followed by a red "Failed to
-    // save secrets" when the backend genuinely rejects the write —
-    // the same misleading sequence the device editor was fixed to
-    // eliminate under issue #436. On a credentials file, telling
-    // the user it saved when it didn't is a real correctness bug.
+    // Toast only after the round-trip resolves. Toasting success
+    // optimistically would flash "Secrets saved" then "Failed to
+    // save secrets" on a real backend rejection — the misleading
+    // sequence the device editor fixed under issue #436.
     let saved = true;
     try {
       await this._api.updateConfig(SECRETS_FILE, this._yaml);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
-      // WS commands may time out client-side while the server
-      // still completes the write — keep the optimistic buffer
-      // and treat it as success so the user isn't told their save
-      // failed when it probably succeeded. Any other error is a
-      // real failure: restore the previous saved buffer so the
-      // dirty state returns and the user can retry.
+      // A timeout likely still wrote the file, so keep the
+      // optimistic buffer and treat it as success. Any other error
+      // is real: restore the previous buffer so the dirty state
+      // returns and the user can retry.
       if (!msg.includes("timed out")) {
         saved = false;
         this._savedYaml = previousSaved;
@@ -329,13 +322,11 @@ export class ESPHomePageSecrets extends LitElement {
       this._saving = false;
     }
     if (saved) {
-      // Fire off the same ``saved`` flag that drives the toast so
-      // the timeout-as-success path stays consistent: a timeout
-      // keeps the buffer and toasts success, so it must also notify
-      // listeners. Window-level so other mounted components
-      // (app-shell's onboarding-state refresh, peer secrets-page
-      // instances) can react regardless of where they live in the
-      // tree. ``detail.source`` lets self-listeners short-circuit.
+      // Window-level so other mounted components (app-shell's
+      // onboarding-state refresh, peer secrets-page instances) can
+      // react wherever they live in the tree. ``detail.source``
+      // lets self-listeners short-circuit. The timeout-as-success
+      // path notifies too, matching the success toast.
       window.dispatchEvent(
         new CustomEvent("secrets-saved", { detail: { source: this } })
       );
