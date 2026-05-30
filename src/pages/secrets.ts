@@ -303,7 +303,14 @@ export class ESPHomePageSecrets extends LitElement {
     // _saving stays true through both branches so the "Saving…"
     // label and disabled state hold until the API call returns.
     this._saving = true;
-    toast.success(this._localize("secrets.saved"), { richColors: true });
+    // Toast only after the backend round-trip resolves. Firing
+    // ``toast.success`` here optimistically would flash a green
+    // "Secrets saved" immediately followed by a red "Failed to
+    // save secrets" when the backend genuinely rejects the write —
+    // the same misleading sequence the device editor was fixed to
+    // eliminate under issue #436. On a credentials file, telling
+    // the user it saved when it didn't is a real correctness bug.
+    let saved = true;
     try {
       await this._api.updateConfig(SECRETS_FILE, this._yaml);
       // Window-level so other mounted components (app-shell's
@@ -317,19 +324,20 @@ export class ESPHomePageSecrets extends LitElement {
       const msg = e instanceof Error ? e.message : "";
       // WS commands may time out client-side while the server
       // still completes the write — keep the optimistic buffer
-      // so the user isn't told their save failed when it
-      // probably succeeded. Any other error is a real failure:
-      // restore the previous saved buffer so the dirty state
-      // returns and the user can retry.
+      // and treat it as success so the user isn't told their save
+      // failed when it probably succeeded. Any other error is a
+      // real failure: restore the previous saved buffer so the
+      // dirty state returns and the user can retry.
       if (!msg.includes("timed out")) {
+        saved = false;
         this._savedYaml = previousSaved;
-        toast.error(this._localize("secrets.save_error"), {
-          richColors: true,
-        });
       }
     } finally {
       this._saving = false;
     }
+    const message = saved ? "secrets.saved" : "secrets.save_error";
+    const variant = saved ? toast.success : toast.error;
+    variant(this._localize(message), { richColors: true });
   }
 }
 
