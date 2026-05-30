@@ -313,13 +313,6 @@ export class ESPHomePageSecrets extends LitElement {
     let saved = true;
     try {
       await this._api.updateConfig(SECRETS_FILE, this._yaml);
-      // Window-level so other mounted components (app-shell's
-      // onboarding-state refresh, peer secrets-page instances)
-      // can react regardless of where they live in the tree.
-      // ``detail.source`` lets self-listeners short-circuit.
-      window.dispatchEvent(
-        new CustomEvent("secrets-saved", { detail: { source: this } })
-      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
       // WS commands may time out client-side while the server
@@ -334,6 +327,18 @@ export class ESPHomePageSecrets extends LitElement {
       }
     } finally {
       this._saving = false;
+    }
+    if (saved) {
+      // Fire off the same ``saved`` flag that drives the toast so
+      // the timeout-as-success path stays consistent: a timeout
+      // keeps the buffer and toasts success, so it must also notify
+      // listeners. Window-level so other mounted components
+      // (app-shell's onboarding-state refresh, peer secrets-page
+      // instances) can react regardless of where they live in the
+      // tree. ``detail.source`` lets self-listeners short-circuit.
+      window.dispatchEvent(
+        new CustomEvent("secrets-saved", { detail: { source: this } })
+      );
     }
     const message = saved ? "secrets.saved" : "secrets.save_error";
     const variant = saved ? toast.success : toast.error;

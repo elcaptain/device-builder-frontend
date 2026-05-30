@@ -205,4 +205,44 @@ describe("esphome-page-secrets save toast ordering", () => {
     expect(toast.error).not.toHaveBeenCalled();
     expect(page._savedYaml).toBe("wifi_password: new\n");
   });
+
+  test("_save() fires secrets-saved on the timeout-as-success path", async () => {
+    const page = makePage({
+      _loaded: true,
+      _yaml: "wifi_password: new\n",
+      _savedYaml: "wifi_password: old\n",
+    });
+    page._api = {
+      updateConfig: vi.fn().mockRejectedValue(new Error("command timed out")),
+    } as unknown as ESPHomeAPI;
+    const onSaved = vi.fn();
+    window.addEventListener("secrets-saved", onSaved);
+
+    await page._save();
+    window.removeEventListener("secrets-saved", onSaved);
+
+    // A timeout is treated as success (buffer kept, success toast),
+    // so listeners — app-shell's onboarding-state refresh, peer
+    // secrets pages — must be notified too. Otherwise the UI claims
+    // success while those listeners stay stale (the @copilot flag).
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  test("_save() does not fire secrets-saved on a real failure", async () => {
+    const page = makePage({
+      _loaded: true,
+      _yaml: "wifi_password: new\n",
+      _savedYaml: "wifi_password: old\n",
+    });
+    page._api = {
+      updateConfig: vi.fn().mockRejectedValue(new Error("invalid secrets")),
+    } as unknown as ESPHomeAPI;
+    const onSaved = vi.fn();
+    window.addEventListener("secrets-saved", onSaved);
+
+    await page._save();
+    window.removeEventListener("secrets-saved", onSaved);
+
+    expect(onSaved).not.toHaveBeenCalled();
+  });
 });
