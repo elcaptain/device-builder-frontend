@@ -7,8 +7,8 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { downloadBase64Binary } = vi.hoisted(() => ({ downloadBase64Binary: vi.fn() }));
-vi.mock("../../src/util/download-text.js", () => ({ downloadBase64Binary }));
+const { triggerDownload } = vi.hoisted(() => ({ triggerDownload: vi.fn() }));
+vi.mock("../../src/util/download-text.js", () => ({ triggerDownload }));
 vi.mock("../../src/util/web-serial.js", () => ({
   connectToPort: vi.fn(),
   detectChip: vi.fn(),
@@ -52,11 +52,9 @@ function makeHost(getBinariesResults: FirmwareBinary[][]) {
       return "s1";
     }),
     firmwareGetBinaries,
-    firmwareDownload: vi.fn().mockResolvedValue({
+    firmwareDownloadUrl: vi.fn().mockResolvedValue({
+      url: "/api/firmware/download?token=tok",
       filename: "device-firmware.elf",
-      data: "RUxG",
-      size: 3,
-      compressed: false,
     }),
   };
   const host = {
@@ -96,14 +94,14 @@ describe("download flow (startArtifactDownload)", () => {
     expect(api.firmwareCompile).not.toHaveBeenCalled();
     expect(host._step).toBe("choose-binary");
     expect(host._binaries).toEqual([FACTORY, OTA, ELF]);
-    expect(api.firmwareDownload).not.toHaveBeenCalled();
+    expect(api.firmwareDownloadUrl).not.toHaveBeenCalled();
   });
 
   it("downloads directly without compiling when one artefact exists", async () => {
     const { host, api } = makeHost([[FACTORY]]);
     await run(host);
     expect(api.firmwareCompile).not.toHaveBeenCalled();
-    expect(api.firmwareDownload).toHaveBeenCalledWith(
+    expect(api.firmwareDownloadUrl).toHaveBeenCalledWith(
       "device.yaml",
       "firmware.factory.bin"
     );
@@ -127,8 +125,12 @@ describe("download flow (startArtifactDownload)", () => {
       host as unknown as ESPHomeFirmwareInstallDialog,
       "firmware.elf"
     );
-    expect(api.firmwareDownload).toHaveBeenCalledWith("device.yaml", "firmware.elf");
-    expect(downloadBase64Binary).toHaveBeenCalledWith("RUxG", "device-firmware.elf");
+    expect(api.firmwareDownloadUrl).toHaveBeenCalledWith("device.yaml", "firmware.elf");
+    // Saved under the server-chosen filename (from firmware/download_token).
+    expect(triggerDownload).toHaveBeenCalledWith(
+      "/api/firmware/download?token=tok",
+      "device-firmware.elf"
+    );
     expect(host._step).toBe("download-ready");
   });
 
@@ -137,6 +139,6 @@ describe("download flow (startArtifactDownload)", () => {
     await run(host);
     expect(api.firmwareCompile).toHaveBeenCalledTimes(1);
     expect(host._step).toBe("error");
-    expect(api.firmwareDownload).not.toHaveBeenCalled();
+    expect(api.firmwareDownloadUrl).not.toHaveBeenCalled();
   });
 });

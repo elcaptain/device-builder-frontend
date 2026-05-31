@@ -45,7 +45,6 @@ import type {
 } from "./types/event-subscription.js";
 import type {
   FirmwareBinary,
-  FirmwareDownload,
   FirmwareJob,
   RemoteBuildSubmitTarget,
 } from "./types/firmware-jobs.js";
@@ -1212,17 +1211,43 @@ export class ESPHomeAPI {
     return this.sendCommand<FirmwareBinary[]>("firmware/get_binaries", { configuration });
   }
 
-  /** Download a compiled firmware binary as base64. */
-  async firmwareDownload(
+  /** Mint a single-use token authorizing the HTTP download of one artifact. */
+  async firmwareDownloadToken(
     configuration: string,
-    file: string,
-    compressed = false
-  ): Promise<FirmwareDownload> {
-    return this.sendCommand<FirmwareDownload>("firmware/download", {
-      configuration,
-      file,
-      compressed,
-    });
+    file: string
+  ): Promise<{ token: string; filename: string }> {
+    return this.sendCommand<{ token: string; filename: string }>(
+      "firmware/download_token",
+      { configuration, file }
+    );
+  }
+
+  /**
+   * Build the HTTP download URL for an artifact (mints a token first).
+   *
+   * Save-to-disk callers point an ``<a href>`` at this so the browser streams
+   * the file straight to disk — no in-memory buffering, works on mobile. The
+   * token is the route's auth, so the URL needs no ``Authorization`` header.
+   */
+  async firmwareDownloadUrl(
+    configuration: string,
+    file: string
+  ): Promise<{ url: string; filename: string }> {
+    const { token, filename } = await this.firmwareDownloadToken(configuration, file);
+    return {
+      url: `${BASE_PATH}api/firmware/download?token=${encodeURIComponent(token)}`,
+      filename,
+    };
+  }
+
+  /** Fetch an artifact's bytes (for in-browser Web Serial flashing). */
+  async firmwareDownloadBytes(configuration: string, file: string): Promise<ArrayBuffer> {
+    const { url } = await this.firmwareDownloadUrl(configuration, file);
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Firmware download failed: ${response.status}`);
+    }
+    return response.arrayBuffer();
   }
 
   // ─── Board Commands ───────────────────────────────────────
