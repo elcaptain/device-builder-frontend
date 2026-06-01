@@ -13,6 +13,14 @@ import { fillTerminal } from "./process-terminal/process-terminal.styles.js";
  * from the shared termTokens / termButtonStyles in the component's styles.
  */
 export const logsDialogStyles = css`
+  :host {
+    /* Single source for the header's monospace stack — shared by the title
+       part and the transport chip so the two can't drift. Inherits through
+       the base-dialog shadow boundary (and to the slotted chip) via the
+       flattened tree. */
+    --logs-mono-font: "SF Mono", "Fira Code", "Fira Mono", "Cascadia Code", monospace;
+  }
+
   esphome-base-dialog {
     /* Width history: 900 wrapped, 1100 still ~100px short, 1200 still wrapped
        on retina / HiDPI screens where ESPHome's ANSI-coloured output reads at
@@ -37,12 +45,32 @@ export const logsDialogStyles = css`
     color: var(--esphome-on-primary);
     font-size: var(--wa-font-size-s);
     font-weight: var(--wa-font-weight-bold);
-    font-family: "SF Mono", "Fira Code", "Fira Mono", "Cascadia Code", monospace;
+    font-family: var(--logs-mono-font);
   }
   esphome-base-dialog::part(body) {
     padding: 0;
     background: var(--term-bg);
     overflow: hidden;
+  }
+
+  /* Transport chip beside the title (OTA / serial path / Web Serial). A subtle
+     pill tuned for the primary-coloured header so two log windows on different
+     transports are tellable apart at a glance. Monospace to match the title
+     and keep a /dev/cu… path legible. Slotted from logs-dialog via the
+     base-dialog header-suffix slot, so it lives in this shadow tree. */
+  .source-chip {
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: var(--wa-space-s);
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-family: var(--logs-mono-font);
+    font-size: var(--wa-font-size-2xs);
+    font-weight: var(--wa-font-weight-normal);
+    color: var(--esphome-on-primary);
+    background: color-mix(in srgb, var(--esphome-on-primary) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--esphome-on-primary) 32%, transparent);
+    white-space: nowrap;
   }
   esphome-base-dialog::part(footer) {
     display: none;

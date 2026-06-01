@@ -60,6 +60,7 @@
     "update_stopped": "已被用户停止。",
     "update_uploading_header": "── 正在上传 ──",
     "logs_title": "日志 - {name}",
+    "logs_source_web_serial": "Web Serial",
     "logs_placeholder": "等待日志…",
     "logs_stop": "停止",
     "logs_start": "开始",

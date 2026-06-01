@@ -82,6 +82,11 @@ import { centeredMobileDialog } from "../styles/dialog-mobile.js";
  *   plain ``<div class="actions">`` at the end of the
  *   body, and forcing them to migrate to a slotted footer
  *   would balloon the diff for no behaviour change.
+ * - ``header-suffix`` slot: inline content rendered right
+ *   after the title text in the header (e.g. a status /
+ *   source chip). Empty for the common case, so existing
+ *   dialogs are visually unchanged; the consumer owns the
+ *   slotted element's styling.
  *
  * **Part forwarding**. The inner ``<wa-dialog>`` is wrapped
  * in this element's shadow DOM, so consumer styles that
@@ -170,7 +175,7 @@ export class ESPHomeBaseDialog extends LitElement {
         @wa-request-close=${this._onWaRequestClose}
         @wa-after-hide=${this._onWaAfterHide}
       >
-        <header slot="label">${this.label}</header>
+        <header slot="label">${this.label}<slot name="header-suffix"></slot></header>
         <slot></slot>
       </wa-dialog>
     `;

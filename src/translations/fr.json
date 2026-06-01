@@ -231,6 +231,7 @@
     "update_stopped": "Arrêté par l'utilisateur.",
     "update_uploading_header": "── Téléversement ──",
     "logs_title": "Journaux - {name}",
+    "logs_source_web_serial": "Web Serial",
     "logs_placeholder": "En attente des journaux…",
     "logs_stop": "Arrêter",
     "logs_start": "Démarrer",

@@ -60,6 +60,7 @@
     "update_stopped": "Felhasználó által leállítva.",
     "update_uploading_header": "── Feltöltés folyamatban ──",
     "logs_title": "Naplók – {name}",
+    "logs_source_web_serial": "Web Serial",
     "logs_placeholder": "Naplókra várakozás…",
     "logs_stop": "Leállítás",
     "logs_start": "Indítás",

@@ -231,6 +231,7 @@
     "update_stopped": "Gestopt door gebruiker.",
     "update_uploading_header": "── Uploaden ──",
     "logs_title": "Logs - {name}",
+    "logs_source_web_serial": "Web Serial",
     "logs_placeholder": "Wachten op logs…",
     "logs_stop": "Stoppen",
     "logs_start": "Starten",

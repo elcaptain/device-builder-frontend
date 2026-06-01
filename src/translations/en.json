@@ -60,6 +60,7 @@
     "update_stopped": "Stopped by user.",
     "update_uploading_header": "── Uploading ──",
     "logs_title": "Logs - {name}",
+    "logs_source_web_serial": "Web Serial",
     "logs_placeholder": "Waiting for logs…",
     "logs_stop": "Stop",
     "logs_start": "Start",

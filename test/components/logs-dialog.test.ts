@@ -4,7 +4,11 @@
  * The states-toggle restart awaits stopStream before respawning; a close
  * during that await must not spawn a stream onto the closed dialog.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@home-assistant/webawesome/dist/components/dialog/dialog.js", () => ({}));
+vi.mock("@home-assistant/webawesome/dist/components/icon/icon.js", () => ({}));
+
 import { ESPHomeLogsDialog } from "../../src/components/logs-dialog.js";
 
 interface DeferredStop {
@@ -77,5 +81,45 @@ describe("logs-dialog states-toggle restart", () => {
     expect(stopStream).toHaveBeenCalledTimes(1);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((el as any)._streamId).toBe("stream-2");
+  });
+});
+
+describe("logs-dialog header source chip", () => {
+  function mount(): ESPHomeLogsDialog {
+    const el = new ESPHomeLogsDialog();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (el as any)._api = { logs: () => "s1", stopStream: () => Promise.resolve() };
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function chipText(el: ESPHomeLogsDialog): string {
+    return el.shadowRoot!.querySelector(".source-chip")?.textContent?.trim() ?? "";
+  }
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("shows OTA for an OTA session", async () => {
+    const el = mount();
+    el.open("OTA");
+    await el.updateComplete;
+    expect(chipText(el)).toBe("OTA");
+  });
+
+  it("shows the serial path for a server-serial session", async () => {
+    const el = mount();
+    el.open("/dev/cu.usbserial-110");
+    await el.updateComplete;
+    expect(chipText(el)).toBe("/dev/cu.usbserial-110");
+  });
+
+  it("shows the Web Serial label for a passive (Web Serial) session", async () => {
+    const el = mount();
+    el.openPassive();
+    await el.updateComplete;
+    // Identity _localize in tests returns the key verbatim.
+    expect(chipText(el)).toBe("dashboard.logs_source_web_serial");
   });
 });
