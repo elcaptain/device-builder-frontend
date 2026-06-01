@@ -256,7 +256,7 @@ export class ESPHomeLogsDialog extends LitElement {
         @request-close=${this._onDialogRequestClose}
         @after-hide=${this._onDialogHide}
       >
-        <span slot="header-suffix" class="source-chip">${source}</span>
+        <span slot="header-suffix" class="source-chip" title=${source}>${source}</span>
         <esphome-process-terminal
           .lines=${this._lines}
           placeholder=${this._localize("dashboard.logs_placeholder")}

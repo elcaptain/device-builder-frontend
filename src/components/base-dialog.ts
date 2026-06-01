@@ -86,7 +86,13 @@ import { centeredMobileDialog } from "../styles/dialog-mobile.js";
  *   after the title text in the header (e.g. a status /
  *   source chip). Empty for the common case, so existing
  *   dialogs are visually unchanged; the consumer owns the
- *   slotted element's styling.
+ *   slotted element's styling. The header row and the title
+ *   text are exposed as the ``label-row`` / ``title-text``
+ *   parts (base-dialog's own, not forwarded from wa-dialog)
+ *   so a consumer that slots a suffix can lay the row out —
+ *   e.g. flex the row and ellipsize ``title-text`` so the
+ *   suffix stays legible when space is tight. Dialogs that
+ *   don't style these parts keep the default wrapping title.
  *
  * **Part forwarding**. The inner ``<wa-dialog>`` is wrapped
  * in this element's shadow DOM, so consumer styles that
@@ -175,7 +181,9 @@ export class ESPHomeBaseDialog extends LitElement {
         @wa-request-close=${this._onWaRequestClose}
         @wa-after-hide=${this._onWaAfterHide}
       >
-        <header slot="label">${this.label}<slot name="header-suffix"></slot></header>
+        <header slot="label" part="label-row">
+          <span part="title-text">${this.label}</span><slot name="header-suffix"></slot>
+        </header>
         <slot></slot>
       </wa-dialog>
     `;
