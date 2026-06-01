@@ -14,10 +14,7 @@ import { fillTerminal } from "./process-terminal/process-terminal.styles.js";
  */
 export const logsDialogStyles = css`
   :host {
-    /* Single source for the header's monospace stack — shared by the title
-       part and the transport chip so the two can't drift. Inherits through
-       the base-dialog shadow boundary (and to the slotted chip) via the
-       flattened tree. */
+    /* Shared by the title part and the chip so the two can't drift. */
     --logs-mono-font: "SF Mono", "Fira Code", "Fira Mono", "Cascadia Code", monospace;
   }
 
@@ -47,11 +44,8 @@ export const logsDialogStyles = css`
     font-weight: var(--wa-font-weight-bold);
     font-family: var(--logs-mono-font);
   }
-  /* Keep the title text and the transport chip on one row, and truncate the
-     device name first so the chip (the reason this header exists) stays whole
-     on a narrow / mobile header instead of a long /dev/cu… path overflowing.
-     Scoped to logs via base-dialog's own label-row / title-text parts, so
-     other dialogs keep their default wrapping title. */
+  /* Truncate the name before the chip so a long /dev/cu… path can't overflow
+     the narrow header. */
   esphome-base-dialog::part(label-row) {
     display: flex;
     align-items: center;
@@ -69,19 +63,13 @@ export const logsDialogStyles = css`
     overflow: hidden;
   }
 
-  /* Transport chip beside the title (OTA / serial path / Web Serial). A subtle
-     pill tuned for the primary-coloured header so two log windows on different
-     transports are tellable apart at a glance. Monospace to match the title
-     and keep a /dev/cu… path legible. Slotted from logs-dialog via the
-     base-dialog header-suffix slot, so it lives in this shadow tree. */
+  /* Transport chip beside the title: OTA / serial path / Web Serial. */
   .source-chip {
     display: inline-block;
     vertical-align: middle;
     margin-left: var(--wa-space-s);
-    /* The name yields first (title-text ellipsises); the chip holds its
-       size. max-width is the last-resort clamp so an extreme path on a tiny
-       screen ellipsises inside the chip rather than overflowing the header —
-       the full value is still available via the chip's title tooltip. */
+    /* Hold size so the name yields first; max-width is the last-resort clamp
+       (full value stays on the title tooltip). */
     flex-shrink: 0;
     max-width: 100%;
     overflow: hidden;

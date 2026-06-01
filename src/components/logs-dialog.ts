@@ -234,11 +234,7 @@ export class ESPHomeLogsDialog extends LitElement {
 
   protected render() {
     const title = this._localize("dashboard.logs_title", { name: this.name });
-    // Surface which transport this window is streaming over so a user with
-    // several log windows open can tell them apart at a glance. ``_port`` is
-    // already "OTA" or the serial path (/dev/cu…) for every open() path;
-    // passive sessions are browser Web Serial, whose _port is an unrelated
-    // "OTA" fallback, so key off ``_passive`` for those.
+    // Web Serial's _port is an unrelated "OTA" fallback, so key off _passive.
     const source = this._passive
       ? this._localize("dashboard.logs_source_web_serial")
       : this._port;
