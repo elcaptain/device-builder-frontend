@@ -16,6 +16,8 @@ export const logsDialogStyles = css`
   :host {
     /* Shared by the title part and the chip so the two can't drift. */
     --logs-mono-font: "SF Mono", "Fira Code", "Fira Mono", "Cascadia Code", monospace;
+    /* Tighter than the ansi-log default so the lines sit closer to the edge. */
+    --ansi-log-padding: 8px;
   }
 
   esphome-base-dialog {
