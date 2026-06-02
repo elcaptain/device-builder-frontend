@@ -1,5 +1,5 @@
 import { autocompletion } from "@codemirror/autocomplete";
-import { indentWithTab } from "@codemirror/commands";
+import { indentWithTab, undoDepth } from "@codemirror/commands";
 import { indentUnit } from "@codemirror/language";
 import { EditorState, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, keymap, type DecorationSet } from "@codemirror/view";
@@ -348,10 +348,23 @@ export class ESPHomeYamlEditor extends LitElement {
       parent: this._container,
     });
 
-    // Apply any pending highlight after mount
-    if (this.highlightRange) {
-      this._view.dispatch({ effects: setHighlight.of(this.highlightRange) });
-    }
+    // Remount paths in updated() return before the highlightRange
+    // branch, so re-apply a pending highlight (+ scroll) here.
+    if (this.highlightRange) this._applyHighlight();
+  }
+
+  /** Set (or clear) the highlight mark and scroll it into view. */
+  private _applyHighlight() {
+    if (!this._view) return;
+    this._view.dispatch({ effects: setHighlight.of(this.highlightRange) });
+    if (!this.highlightRange || !this.scrollToHighlight) return;
+    const line = Math.max(1, this.highlightRange.fromLine);
+    const pos = this._view.state.doc.line(
+      Math.min(line, this._view.state.doc.lines)
+    ).from;
+    this._view.dispatch({
+      effects: EditorView.scrollIntoView(pos, { y: "start", yMargin: 50 }),
+    });
   }
 
   /**
@@ -417,6 +430,14 @@ export class ESPHomeYamlEditor extends LitElement {
 
     if (changed.has("value") && this._view) {
       const current = this._view.state.doc.toString();
+      // First population of a never-edited editor: remount so the async
+      // value is the undo baseline, else Ctrl+Z unwinds to blank (#1150).
+      // The undoDepth gate keeps later external repopulates (after the
+      // user edits/clears) undoable.
+      if (current === "" && this.value !== "" && undoDepth(this._view.state) === 0) {
+        this._remountEditor();
+        return;
+      }
       if (current !== this.value) {
         // Same-document patch (section-editor save, …).
         //
@@ -482,16 +503,7 @@ export class ESPHomeYamlEditor extends LitElement {
     }
 
     if (changed.has("highlightRange") && this._view) {
-      this._view.dispatch({ effects: setHighlight.of(this.highlightRange) });
-      if (this.highlightRange && this.scrollToHighlight) {
-        const line = Math.max(1, this.highlightRange.fromLine);
-        const pos = this._view.state.doc.line(
-          Math.min(line, this._view.state.doc.lines)
-        ).from;
-        this._view.dispatch({
-          effects: EditorView.scrollIntoView(pos, { y: "start", yMargin: 50 }),
-        });
-      }
+      this._applyHighlight();
     }
 
     if (changed.has("revealSensitive") && this._view) {
