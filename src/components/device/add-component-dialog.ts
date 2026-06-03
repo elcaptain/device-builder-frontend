@@ -7,6 +7,7 @@ import type { BoardCatalogEntry, FeaturedBundle } from "../../api/types/boards.j
 import type { ComponentCatalogEntry } from "../../api/types/components.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { apiContext, localizeContext } from "../../context/index.js";
+import { fullscreenMobileDialog } from "../../styles/dialog-mobile.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { findAddedSection } from "../../util/yaml-sections.js";
@@ -143,7 +144,14 @@ export class ESPHomeAddComponentDialog extends LitElement {
    *  resolve time discards its result. */
   private _selectionSeq = 0;
 
-  static styles = [espHomeStyles, addComponentDialogStyles];
+  // Full-screen on mobile (overrides base-dialog's centered default): the
+  // catalog is a wide, content-heavy view that needs the whole viewport on a
+  // phone rather than being boxed into a centered column.
+  static styles = [
+    espHomeStyles,
+    fullscreenMobileDialog("esphome-base-dialog"),
+    addComponentDialogStyles,
+  ];
 
   public open() {
     this._resetDetourState();
