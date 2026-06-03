@@ -8,6 +8,7 @@ import type { ComponentCatalogEntry } from "../../api/types/components.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { apiContext, localizeContext } from "../../context/index.js";
 import { fullscreenMobileDialog } from "../../styles/dialog-mobile.js";
+import { primaryHeaderDialogStyles } from "../../styles/dialog-primary-header.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { findAddedSection } from "../../util/yaml-sections.js";
@@ -150,6 +151,9 @@ export class ESPHomeAddComponentDialog extends LitElement {
   static styles = [
     espHomeStyles,
     fullscreenMobileDialog("esphome-base-dialog"),
+    // Shared primary header + back button (also used by the create-config
+    // wizard) — see dialog-primary-header.ts.
+    primaryHeaderDialogStyles,
     addComponentDialogStyles,
   ];
 
