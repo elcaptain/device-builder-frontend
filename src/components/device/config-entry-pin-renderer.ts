@@ -52,8 +52,16 @@ interface PinOptionView {
   primary: string;
   secondary: string;
   titleText: string;
-  inUse: boolean;
-  disabled: boolean;
+  /** Warning icon + amber styling — for a pin in use elsewhere or input-only
+   *  on an output field. A missing capability is NOT warned (a board manifest
+   *  that doesn't tag the feature isn't proof the pin lacks it). */
+  warn: boolean;
+  /** Board-unavailable (occupied / tied to flash) — disabled + grouped under
+   *  "Reserved". */
+  reserved: boolean;
+  /** Positively carries the field's required features and has no direction
+   *  conflict — grouped under "Supports …". */
+  supported: boolean;
 }
 
 function buildPinOption(
@@ -68,9 +76,11 @@ function buildPinOption(
   const usedBy = usedPins.get(pin.gpio) || "";
   const needsOutput =
     entry.pin_mode === PinMode.OUTPUT || entry.pin_mode === PinMode.INPUT_OUTPUT;
-  const isInputOnly = pin.features.includes(PinFeature.INPUT_ONLY);
-  const inputOnlyConflict = needsOutput && isInputOnly;
-  const disabled = pin.available === false || inputOnlyConflict;
+  const inputOnlyConflict = needsOutput && pin.features.includes(PinFeature.INPUT_ONLY);
+  const hasAllFeatures = (entry.pin_features ?? []).every((f) =>
+    pin.features.includes(f)
+  );
+  const reserved = pin.available === false;
   const inUse = !!(occupiedBy || usedBy);
 
   const inUseText = occupiedBy
@@ -78,24 +88,94 @@ function buildPinOption(
     : usedBy
       ? ctx.localize("device.pin_used_by", { name: usedBy })
       : "";
-  const baseSupporting = inputOnlyConflict
-    ? ctx.localize("device.pin_input_only")
-    : pin.notes ||
-      (pin.available === false ? ctx.localize("device.pin_unavailable") : "");
+  const conflictText = inputOnlyConflict ? ctx.localize("device.pin_input_only") : "";
+  const baseSupporting =
+    pin.notes || (reserved ? ctx.localize("device.pin_unavailable") : "");
 
   const secondaryParts: string[] = [];
   if (pin.label && pin.label !== optValue) secondaryParts.push(optValue);
   if (inUseText) secondaryParts.push(inUseText);
+  if (conflictText) secondaryParts.push(conflictText);
   if (baseSupporting) secondaryParts.push(baseSupporting);
 
   return {
     optValue,
     primary,
     secondary: secondaryParts.join(" • "),
-    titleText: [inUseText, baseSupporting].filter(Boolean).join(" — "),
-    inUse,
-    disabled,
+    titleText: [inUseText, conflictText, baseSupporting].filter(Boolean).join(" — "),
+    warn: inUse || inputOnlyConflict,
+    reserved,
+    supported: hasAllFeatures && !inputOnlyConflict,
   };
+}
+
+/** Render the pin options in up to three sections: pins that positively carry
+ *  the field's required feature(s) under "Supports …" (only when those
+ *  features exist and some pin advertises them — never a quality claim on
+ *  untagged pins), the rest, and board-unavailable pins (disabled) under
+ *  "Reserved". A section header only appears when there's something to
+ *  contrast; with nothing to split it's one flat list. */
+function renderPinOptions(
+  pins: BoardPin[],
+  entry: ConfigEntry,
+  usedPins: Map<number, string>,
+  value: string,
+  ctx: RenderCtx
+): TemplateResult {
+  const supported: PinOptionView[] = [];
+  const other: PinOptionView[] = [];
+  const reserved: PinOptionView[] = [];
+  for (const pin of pins) {
+    const view = buildPinOption(pin, entry, usedPins, ctx);
+    (view.reserved ? reserved : view.supported ? supported : other).push(view);
+  }
+  // Only contrast supported-vs-other when both groups are non-empty; otherwise
+  // it's one flat list (no false "this is special" framing).
+  const splitByCapability = supported.length > 0 && other.length > 0;
+  const features = (entry.pin_features ?? []).map((f) => f.toUpperCase()).join(", ");
+  const header = (key: string, withDivider: boolean) =>
+    html`${withDivider
+        ? html`<wa-divider class="pin-group-divider"></wa-divider>`
+        : nothing} <small class="pin-group-label">${key}</small>`;
+  return html`
+    ${splitByCapability && features
+      ? header(ctx.localize("device.pin_group_supports", { features }), false)
+      : nothing}
+    ${supported.map((v) => renderPinOption(v, value))}
+    ${splitByCapability ? header(ctx.localize("device.pin_group_other"), true) : nothing}
+    ${other.map((v) => renderPinOption(v, value))}
+    ${reserved.length > 0
+      ? header(ctx.localize("device.pin_group_reserved"), true)
+      : nothing}
+    ${reserved.map((v) => renderPinOption(v, value))}
+  `;
+}
+
+function renderPinOption(v: PinOptionView, value: string): TemplateResult {
+  return html`<wa-option
+    class=${v.warn ? "pin-option pin-option--warn" : "pin-option"}
+    value=${v.optValue}
+    .label=${v.primary}
+    ?selected=${v.optValue === value}
+    ?disabled=${v.reserved}
+    title=${v.titleText}
+  >
+    <span class="pin-option-stack">
+      <span class="pin-option-primary">
+        ${v.primary}
+        ${v.warn
+          ? html`<wa-icon
+              class="pin-warn-icon"
+              library="mdi"
+              name="alert-circle-outline"
+            ></wa-icon>`
+          : nothing}
+      </span>
+      ${v.secondary
+        ? html`<span class="pin-option-secondary">${v.secondary}</span>`
+        : nothing}
+    </span>
+  </wa-option>`;
 }
 
 export function renderPinField(
@@ -127,15 +207,16 @@ export function renderPinField(
         ? String(rawValue ?? "")
         : "";
   const invalid = ctx.errorAt(path) !== null;
-  const required = entry.pin_features ?? [];
-  const matchesFeatures = (pin: BoardPin) =>
-    required.every((f) => pin.features.includes(f));
-  let visible = ctx.board.pins.filter(matchesFeatures);
+  // Show every board pin; a pin that doesn't match the field's required
+  // features (or direction) isn't hidden — it's grouped under "Other pins"
+  // with a warning, and stays selectable (issue #1012). Hiding it is too
+  // harsh for unusual boards and "I know what I'm doing" workflows.
+  let visible = ctx.board.pins;
   // A featured-component preset can narrow the pin set further — e.g.
   // pin the ESK-1 PIR motion sensor to one of the two FPC-connector
   // GPIOs. Skip the narrowing if no parseable GPIOs survive (a manifest
   // typo shouldn't blank the dropdown — the user will see the full
-  // feature-filtered set instead, with a visible error for the field).
+  // pin set instead, with a visible error for the field).
   if (entry.suggestions && entry.suggestions.length > 0) {
     const allowed = new Set(
       entry.suggestions.map(parsePinGpio).filter((g): g is number => g !== null)
@@ -199,33 +280,7 @@ export function renderPinField(
         ?disabled=${fieldDisabled}
         @change=${onPinChange}
       >
-        ${visible.map((pin) => {
-          const v = buildPinOption(pin, entry, usedPins, ctx);
-          return html`<wa-option
-            class="pin-option ${v.inUse ? "pin-option--warn" : ""}"
-            value=${v.optValue}
-            .label=${v.primary}
-            ?selected=${v.optValue === value}
-            ?disabled=${v.disabled}
-            title=${v.titleText}
-          >
-            <span class="pin-option-stack">
-              <span class="pin-option-primary">
-                ${v.primary}
-                ${v.inUse
-                  ? html`<wa-icon
-                      class="pin-warn-icon"
-                      library="mdi"
-                      name="alert-circle-outline"
-                    ></wa-icon>`
-                  : nothing}
-              </span>
-              ${v.secondary
-                ? html`<span class="pin-option-secondary">${v.secondary}</span>`
-                : nothing}
-            </span>
-          </wa-option>`;
-        })}
+        ${renderPinOptions(visible, entry, usedPins, value, ctx)}
       </wa-select>
       ${renderFieldError(path, ctx)}
       ${renderPinAdvanced(entry, path, ctx, rawValue, isLongForm, fieldDisabled)}
