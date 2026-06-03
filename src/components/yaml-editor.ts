@@ -8,12 +8,21 @@ import { basicSetup, EditorView } from "codemirror";
 import { css, html, LitElement } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import type { ESPHomeAPI } from "../api/esphome-api.js";
-import { type LocalizeFunc } from "../common/localize.js";
+import type { LocalizeFunc } from "../common/localize.js";
 import { apiContext, darkModeContext, localizeContext } from "../context/index.js";
 import { ESPHOME_YAML_INDENT, esphomeYaml } from "../util/esphome-yaml-lang.js";
 import { getKeyPath } from "../util/yaml-ast.js";
 import { createYamlCompletionSource } from "../util/yaml-completion.js";
-import { vscodeDark, vscodeLight } from "../util/yaml-editor-theme.js";
+import {
+  darkHighlight,
+  EDITOR_BG_DARK,
+  EDITOR_BG_LIGHT,
+  EDITOR_FONT_FAMILY,
+  EDITOR_FONT_SIZE,
+  lightHighlight,
+  vscodeDark,
+  vscodeLight,
+} from "../util/yaml-editor-theme.js";
 import { createYamlHoverTooltip } from "../util/yaml-hover.js";
 import {
   createBackendYamlLinter,
@@ -24,6 +33,7 @@ import {
   sensitiveValueMaskExtension,
   setRevealSensitiveEffect,
 } from "../util/yaml-sensitive-mask.js";
+import { yamlStickyScroll } from "../util/yaml-sticky-scroll.js";
 
 export type HighlightRange = Pick<YamlSection, "fromLine" | "toLine">;
 
@@ -147,13 +157,19 @@ export class ESPHomeYamlEditor extends LitElement {
       keymap.of([indentWithTab]),
       highlightField,
       sensitiveValueMaskExtension(this.revealSensitive, this.maskAllValues),
+      yamlStickyScroll({
+        highlightStyle: this._darkMode ? darkHighlight : lightHighlight,
+        background: this._darkMode ? EDITOR_BG_DARK : EDITOR_BG_LIGHT,
+        jumpToLineLabel: (line) =>
+          this._localize("yaml_editor.sticky_jump_to_line", { line: String(line) }),
+      }),
       EditorView.theme({
         "&": { height: "100%" },
         ".cm-scroller": {
           overflow: "auto",
-          fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+          fontFamily: EDITOR_FONT_FAMILY,
           fontVariantLigatures: "none",
-          fontSize: "13px",
+          fontSize: EDITOR_FONT_SIZE,
         },
         ".cm-esphome-highlight": {
           background: this._darkMode
