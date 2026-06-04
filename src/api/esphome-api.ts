@@ -761,9 +761,10 @@ export class ESPHomeAPI {
     return this.sendCommand<WizardResponse>("devices/create", args);
   }
 
-  /** Update device metadata. */
+  /** Update device metadata. Keyed by `configuration` (the YAML filename),
+   *  since a device's ESPHome name can differ from its filename stem. */
   async updateDevice(args: {
-    name: string;
+    configuration: string;
     friendly_name?: string;
     comment?: string;
     board_id?: string;
@@ -1275,6 +1276,18 @@ export class ESPHomeAPI {
       board_id: boardId,
     });
     return board === null ? null : hydrateBoard(board);
+  }
+
+  /**
+   * Boards interchangeable with this one (same PlatformIO target);
+   * includes `boardId` itself.
+   */
+  async getCompatibleBoards(boardId: string): Promise<BoardCatalogEntry[]> {
+    const response = await this.sendCommand<PagedBoardsResponse>(
+      "boards/get_compatible_boards",
+      { board_id: boardId }
+    );
+    return hydratePagedBoardsResponse(response).boards;
   }
 
   /** Get boards with optional filtering, search, and pagination. */

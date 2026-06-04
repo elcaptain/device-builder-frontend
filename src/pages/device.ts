@@ -510,6 +510,33 @@ export class ESPHomePageDevice extends LitElement {
     this._justCreated = false;
   };
 
+  /**
+   * Swap the device's board to the picked alternate, then reload the YAML
+   * pane (`devices/update` rewrote `board:`). The header refreshes itself
+   * via the `DEVICE_UPDATED` event.
+   */
+  private _onChangeBoard = async (e: CustomEvent<{ boardId: string }>) => {
+    const boardId = e.detail?.boardId;
+    const device = this._device;
+    if (!boardId || !device || boardId === device.board_id) return;
+    // Reloading YAML after the swap would discard unsaved edits.
+    if (this._isDirty) {
+      toast.error(this._localize("device.change_board_unsaved"), { richColors: true });
+      return;
+    }
+    try {
+      await this._api.updateDevice({
+        configuration: device.configuration,
+        board_id: boardId,
+      });
+      await this._loadYaml();
+      toast.success(this._localize("device.change_board_success"), { richColors: true });
+    } catch (err) {
+      console.error("Failed to change board:", err);
+      toast.error(this._localize("device.change_board_error"), { richColors: true });
+    }
+  };
+
   private async _loadPreferences() {
     // Editor layout stored locally (not in backend preferences)
     const savedLayout = localStorage.getItem("esphome-editor-layout");
@@ -889,6 +916,7 @@ export class ESPHomePageDevice extends LitElement {
             .focusFieldPath=${this._focusFieldPath}
             .justCreated=${this._justCreated}
             @just-created-dismiss=${this._dismissJustCreated}
+            @change-board=${this._onChangeBoard}
             ?hasUnsavedEdits=${this._isDirty}
             ?hasPendingChanges=${this._device?.has_pending_changes === true}
             ?hasUpdateAvailable=${this._device?.update_available === true}

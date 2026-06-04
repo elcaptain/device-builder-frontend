@@ -64,10 +64,30 @@ export const deviceBoardInfoStyles = css`
     font-size: var(--wa-font-size-xs);
     color: var(--esphome-primary);
     text-decoration: underline;
-    margin-left: 10px;
+    margin-left: var(--wa-space-s);
   }
 
   .board-info-link:hover {
+    text-decoration: none;
+  }
+
+  /* A <button> styled to read as a sibling link to "More info". */
+  .board-change-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wa-space-2xs);
+    font-size: var(--wa-font-size-xs);
+    font-family: inherit;
+    color: var(--esphome-primary);
+    text-decoration: underline;
+    margin-left: var(--wa-space-s);
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+  }
+
+  .board-change-link:hover {
     text-decoration: none;
   }
 

@@ -1715,6 +1715,95 @@ describe("ESPHomeAPI — getComponentBodies", () => {
   });
 });
 
+describe("ESPHomeAPI — getCompatibleBoards", () => {
+  beforeEach(() => {
+    installMockWebSocket();
+  });
+  afterEach(() => {
+    uninstallMockWebSocket();
+  });
+
+  it("sends ``boards/get_compatible_boards`` with board_id and hydrates the slim results", async () => {
+    const api = new ESPHomeAPI();
+    const ws = await connect(api);
+
+    const pending = api.getCompatibleBoards("generic-esp32c3");
+    const sent = ws.sentAs<{
+      command: string;
+      message_id: string;
+      args: Record<string, unknown>;
+    }>(0);
+
+    expect(sent.command).toBe("boards/get_compatible_boards");
+    expect(sent.args).toEqual({ board_id: "generic-esp32c3" });
+
+    // Same slim PagedBoardsResponse envelope as getBoards: the index
+    // entries carry id/name/description/manufacturer/esphome/tags/images/
+    // is_generic (what the picker renders), but omit the body-only fields
+    // (hardware/pins/...) that hydrateBoard re-defaults.
+    ws.receive({
+      message_id: sent.message_id,
+      result: {
+        total: 2,
+        offset: 0,
+        limit: 2,
+        boards: [
+          {
+            id: "seeed-xiao-esp32c3",
+            name: "Seeed XIAO ESP32-C3",
+            description: "Compact dev board",
+            manufacturer: "Seeed",
+            esphome: {
+              platform: "esp32",
+              board: "esp32-c3-devkitm-1",
+              variant: "esp32c3",
+            },
+            tags: ["compact"],
+            images: ["https://example.com/xiao.png"],
+            is_generic: false,
+          },
+          {
+            id: "generic-esp32c3",
+            name: "Generic ESP32-C3",
+            description: "Generic fallback",
+            manufacturer: "Generic",
+            esphome: {
+              platform: "esp32",
+              board: "esp32-c3-devkitm-1",
+              variant: "esp32c3",
+            },
+            is_generic: true,
+          },
+        ],
+      },
+    });
+
+    const boards = await pending;
+    expect(boards.map((b) => b.id)).toEqual(["seeed-xiao-esp32c3", "generic-esp32c3"]);
+    // Slim fields the picker renders survive hydration.
+    expect(boards[0].manufacturer).toBe("Seeed");
+    expect(boards[0].images).toEqual(["https://example.com/xiao.png"]);
+    expect(boards[1].is_generic).toBe(true);
+    // Body-only fields the slim entry omits hydrate to defaults.
+    expect(boards[0].pins).toEqual([]);
+    expect(boards[0].hardware.flash_size).toBeNull();
+  });
+
+  it("returns an empty list when the backend has no siblings", async () => {
+    const api = new ESPHomeAPI();
+    const ws = await connect(api);
+
+    const pending = api.getCompatibleBoards("m5stack-cores3");
+    const sent = ws.sentAs<{ message_id: string }>(0);
+    ws.receive({
+      message_id: sent.message_id,
+      result: { total: 0, offset: 0, limit: 0, boards: [] },
+    });
+
+    await expect(pending).resolves.toEqual([]);
+  });
+});
+
 describe("ESPHomeAPI — automations parse / upsert / delete", () => {
   beforeEach(() => {
     installMockWebSocket();

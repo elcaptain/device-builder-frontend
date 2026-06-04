@@ -11,11 +11,12 @@ import {
 } from "@mdi/js";
 import { html, LitElement, nothing } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
+import type { ESPHomeAPI } from "../../api/index.js";
 import type { BoardCatalogEntry } from "../../api/types/boards.js";
 import type { LocalizeFunc } from "../../common/localize.js";
-import { localizeContext } from "../../context/index.js";
+import { apiContext, localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
-import { withBase } from "../../util/base-path.js";
+import { boardImageUrl, onBoardImageError } from "../../util/board-image.js";
 import { renderMarkdown } from "../../util/markdown.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import type { ESPHomeAddAutomationDialog } from "./add-automation-dialog.js";
@@ -24,6 +25,7 @@ import type { ESPHomeAddConfigDialog } from "./add-config-dialog.js";
 import type { ESPHomeApiActionEditor } from "./automation-editor/api-action-editor.js";
 import type { ESPHomeAutomationEditor } from "./automation-editor/automation-editor.js";
 import type { ESPHomeScriptEditor } from "./automation-editor/script-editor.js";
+import type { ESPHomeChangeBoardDialog } from "./change-board-dialog.js";
 import { isEmptyToPopulatedYamlChange } from "./device-board-info-helpers.js";
 import { deviceBoardInfoStyles } from "./device-board-info.styles.js";
 import type { ESPHomeDeviceSectionConfig } from "./device-section-config.js";
@@ -38,6 +40,7 @@ import "./automation-editor/api-action-editor.js";
 import "./automation-editor/automation-editor.js";
 import "./automation-editor/script-editor.js";
 import { locationFromSectionKey } from "./automation-editor/serialise.js";
+import "./change-board-dialog.js";
 import "./device-section-config.js";
 
 registerMdiIcons({
@@ -60,8 +63,19 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
   @state()
   private _localize: LocalizeFunc = (key) => key;
 
+  @consume({ context: apiContext })
+  private _api!: ESPHomeAPI;
+
   @property({ attribute: false })
   board: BoardCatalogEntry | null = null;
+
+  /** Interchangeable boards (same PlatformIO target), current board
+   *  excluded; empty keeps the "Change board" link hidden. */
+  @state()
+  private _alternateBoards: BoardCatalogEntry[] = [];
+
+  /** Board id `_alternateBoards` was fetched for; guards a stale response. */
+  private _alternatesForBoardId: string | null = null;
 
   @property()
   yaml = "";
@@ -117,9 +131,15 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
   @query("esphome-add-config-dialog")
   private _addConfigDialog!: ESPHomeAddConfigDialog;
 
+  @query("esphome-change-board-dialog")
+  private _changeBoardDialog!: ESPHomeChangeBoardDialog;
+
   private _reloadTimer: ReturnType<typeof setTimeout> | null = null;
 
   updated(changedProperties: Map<string, unknown>) {
+    if (changedProperties.has("board")) {
+      this._refreshAlternateBoards();
+    }
     // Coalesce typing in the YAML editor pane to one
     // `reload()` per debounce window, but bypass the debounce
     // on the empty-to-populated transition (page-load arrival,
@@ -182,6 +202,52 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
     this._addComponentDialog?.openWithSearch(detail.domain);
   };
 
+  /**
+   * Fetch the current board's interchangeable alternates (excluding
+   * itself); guards against a stale response for a previous board.
+   */
+  private async _refreshAlternateBoards() {
+    const board = this.board;
+    if (!board) {
+      this._alternatesForBoardId = null;
+      this._alternateBoards = [];
+      return;
+    }
+    if (board.id === this._alternatesForBoardId) return;
+    this._alternatesForBoardId = board.id;
+    this._alternateBoards = [];
+    try {
+      const all = await this._api.getCompatibleBoards(board.id);
+      if (this._alternatesForBoardId !== board.id) return;
+      this._alternateBoards = all.filter((b) => b.id !== board.id);
+    } catch (e) {
+      console.error("Failed to load compatible boards:", e);
+      // Clear the marker so a later re-assignment of the same board id
+      // retries, rather than the link staying hidden after one transient
+      // miss (the guard above would otherwise short-circuit forever).
+      if (this._alternatesForBoardId === board.id) {
+        this._alternatesForBoardId = null;
+        this._alternateBoards = [];
+      }
+    }
+  }
+
+  private _openChangeBoard = () => {
+    this._changeBoardDialog?.open();
+  };
+
+  /** Re-emit the picker's selection as a page-level `change-board`. */
+  private _onSelectBoard = (e: CustomEvent<{ boardId: string }>) => {
+    e.stopPropagation();
+    this.dispatchEvent(
+      new CustomEvent("change-board", {
+        detail: e.detail,
+        bubbles: true,
+        composed: true,
+      })
+    );
+  };
+
   static styles = [espHomeStyles, deviceBoardInfoStyles];
 
   protected render() {
@@ -206,15 +272,24 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
                     ${this._localize("device.more_info")}
                     <wa-icon library="mdi" name="open-in-new"></wa-icon>
                   </a>
+                  ${this._alternateBoards.length > 0
+                    ? html`<button
+                        type="button"
+                        class="board-change-link"
+                        @click=${this._openChangeBoard}
+                      >
+                        ${this._localize("device.change_board_link")}
+                      </button>`
+                    : nothing}
                 </div>
                 <p class="board-description">${renderMarkdown(board.description)}</p>
               </div>
               <div class="board-image">
                 <img
-                  src=${this._boardImageUrl(board)}
+                  src=${boardImageUrl(board)}
                   alt=${board.name}
                   referrerpolicy="no-referrer"
-                  @error=${this._onImageError}
+                  @error=${onBoardImageError}
                 />
               </div>
             </div>
@@ -268,6 +343,11 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
         .board=${board}
         .yaml=${this.yaml}
       ></esphome-add-automation-dialog>
+      <esphome-change-board-dialog
+        .currentBoard=${board}
+        .boards=${this._alternateBoards}
+        @select-board=${this._onSelectBoard}
+      ></esphome-change-board-dialog>
     `;
   }
 
@@ -420,19 +500,6 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
         composed: true,
       })
     );
-  }
-
-  private _boardImageUrl(board: BoardCatalogEntry): string {
-    if (board.images.length > 0) return board.images[0];
-    return withBase("/assets/board/default.svg");
-  }
-
-  private _onImageError(e: Event) {
-    const img = e.target as HTMLImageElement;
-    const fallback = withBase("/assets/board/default.svg");
-    if (img.src !== window.location.origin + fallback && !img.src.endsWith(fallback)) {
-      img.src = fallback;
-    }
   }
 }
 
