@@ -9,6 +9,11 @@ export default defineConfig({
     environment: "node",
     globals: false,
     silent: true,
+    // Threads start far cheaper than the default forked processes. The suite's
+    // wall time is dominated by per-file worker/environment startup and module
+    // re-imports (happy-dom + lit/webawesome/codemirror), not by the assertions
+    // themselves, so a lighter worker model is a direct win on the CI runner.
+    pool: "threads",
   },
   resolve: {
     extensions: [".ts", ".js"],
