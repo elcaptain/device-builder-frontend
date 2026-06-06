@@ -8,6 +8,7 @@ import { mdiAlertCircleOutline, mdiClose, mdiPlus } from "@mdi/js";
 import { LitElement, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { live } from "lit/directives/live.js";
+import toast from "sonner-js";
 import type { ConfiguredDevice } from "../../api/types/devices.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { devicesContext, localizeContext } from "../../context/index.js";
@@ -172,8 +173,13 @@ export class ESPHomeSecretsStructuredEditor extends LitElement {
           <select
             class="add-select"
             .value=${live(this._addTarget)}
-            @change=${(e: Event) =>
-              (this._addTarget = (e.target as HTMLSelectElement).value)}
+            @change=${(e: Event) => {
+              this._addTarget = (e.target as HTMLSelectElement).value;
+              // A new target can resolve (or re-introduce) a duplicate via the
+              // ``<device>__`` prefix, but can't fix an invalid name; recompute
+              // only when an error is already shown so it isn't blanket-cleared.
+              if (this._addError) this._addError = this._addKeyError();
+            }}
           >
             <option value="">${this._localize("secrets.group_shared")}</option>
             ${this._devices.map(
@@ -204,6 +210,7 @@ export class ESPHomeSecretsStructuredEditor extends LitElement {
           >
           <esphome-password-input
             .value=${this._addValue}
+            .revealed=${this.revealSensitive}
             @password-input-change=${(e: CustomEvent<PasswordInputValueChange>) =>
               (this._addValue = e.detail.value)}
           ></esphome-password-input>
@@ -319,28 +326,42 @@ export class ESPHomeSecretsStructuredEditor extends LitElement {
     this._addOpen = false;
   };
 
+  private _addKey(): string {
+    return (this._addTarget ? `${this._addTarget}__` : "") + this._addName.trim();
+  }
+
+  // Validate the dialog's name against the chosen target; null when valid.
+  // The duplicate check depends on the ``<device>__`` prefix, so it can flip
+  // when the target changes — an invalid identifier never can.
+  private _addKeyError(): string | null {
+    if (!isValidSecretKey(this._addName.trim())) {
+      return this._localize("secrets.invalid_key");
+    }
+    if (parseSecretsEntries(this.value).some((entry) => entry.key === this._addKey())) {
+      return this._localize("secrets.duplicate_key");
+    }
+    return null;
+  }
+
   // Create the secret in one shot from the dialog fields, prefixing the key
   // with ``<device>__`` when a device was chosen so it lands in that group.
   private _confirmAdd = () => {
-    const name = this._addName.trim();
-    const key = (this._addTarget ? `${this._addTarget}__` : "") + name;
-    if (!isValidSecretKey(name)) {
-      this._addError = this._localize("secrets.invalid_key");
-      return;
-    }
-    if (parseSecretsEntries(this.value).some((entry) => entry.key === key)) {
-      this._addError = this._localize("secrets.duplicate_key");
+    const error = this._addKeyError();
+    if (error) {
+      this._addError = error;
       return;
     }
     this._addOpen = false;
-    this._emit(addSecret(this.value, key, this._addValue));
+    this._emit(addSecret(this.value, this._addKey(), this._addValue));
   };
 
   // A splice helper returns null when its target line no longer matches
   // (a stale index from a concurrent edit). Re-render so the optimistic
-  // input snaps back to the unchanged buffer rather than diverging from it.
+  // input snaps back to the unchanged buffer, and toast so the dropped
+  // edit is visible rather than a silent no-op.
   private _emit(value: string | null) {
     if (value === null) {
+      toast.error(this._localize("secrets.edit_out_of_sync"), { richColors: true });
       this.requestUpdate();
       return;
     }

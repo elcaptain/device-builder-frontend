@@ -1,10 +1,15 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import toast from "sonner-js";
+
 // wa-dialog / wa-button run form-validation lifecycle hooks happy-dom doesn't
 // implement; stub them so the add-secret dialog can render in the test.
 vi.mock("@home-assistant/webawesome/dist/components/dialog/dialog.js", () => ({}));
 vi.mock("@home-assistant/webawesome/dist/components/button/button.js", () => ({}));
+vi.mock("sonner-js", () => ({
+  default: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+}));
 
 import { ESPHomeSecretsStructuredEditor } from "../../../src/components/secrets/secrets-structured-editor.js";
 
@@ -105,6 +110,16 @@ describe("esphome-secrets-structured-editor", () => {
     expect(captured.value).toBe("api_key: abc\n");
   });
 
+  test("a null splice (stale index) toasts and emits nothing", async () => {
+    vi.mocked(toast.error).mockClear();
+    const el = await mount("wifi_ssid: home\n");
+    const captured = onChange(el);
+    // Removing an out-of-range line returns null from the splice helper.
+    (el as unknown as { _emit(v: string | null): void })._emit(null);
+    expect(captured.value).toBeNull();
+    expect(toast.error).toHaveBeenCalledTimes(1);
+  });
+
   interface AddView {
     _openAdd(): void;
     _confirmAdd(): void;
@@ -165,6 +180,45 @@ describe("esphome-secrets-structured-editor", () => {
     view._confirmAdd();
     expect(captured.value).toBeNull();
     expect(view._addOpen).toBe(true);
+  });
+
+  test("the add dialog's value field honors the page-level reveal", async () => {
+    const el = await mount("wifi_ssid: home\n", true);
+    const pw = el.shadowRoot!.querySelector(".add-body esphome-password-input");
+    expect((pw as unknown as { revealed: boolean }).revealed).toBe(true);
+  });
+
+  async function changeTarget(el: ESPHomeSecretsStructuredEditor, value: string) {
+    await el.updateComplete;
+    const select = el.shadowRoot!.querySelector<HTMLSelectElement>(".add-select")!;
+    select.value = value;
+    select.dispatchEvent(new Event("change"));
+  }
+
+  test("switching target clears a duplicate error it resolves", async () => {
+    const el = await mount("api: x\n", false, [
+      { name: "bw15", configuration: "bw15.yaml", friendly_name: "BW15" },
+    ]);
+    const view = el as unknown as AddView;
+    view._openAdd();
+    view._addName = "api";
+    view._confirmAdd(); // shared "api" duplicates the existing key
+    expect(view._addError).not.toBeNull();
+    await changeTarget(el, "bw15"); // bw15__api is unique
+    expect(view._addError).toBeNull();
+  });
+
+  test("switching target keeps an invalid-name error it can't fix", async () => {
+    const el = await mount("wifi_ssid: home\n", false, [
+      { name: "bw15", configuration: "bw15.yaml", friendly_name: "BW15" },
+    ]);
+    const view = el as unknown as AddView;
+    view._openAdd();
+    view._addName = "1bad";
+    view._confirmAdd();
+    expect(view._addError).not.toBeNull();
+    await changeTarget(el, "bw15");
+    expect(view._addError).not.toBeNull();
   });
 
   test("a tagged value renders read-only with no value input", async () => {
