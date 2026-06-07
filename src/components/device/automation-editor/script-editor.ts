@@ -54,6 +54,7 @@ import "./automation-action-list.js";
 import type { ESPHomeAutomationActionList } from "./automation-action-list.js";
 import { automationEditorStyles } from "./automation-editor.styles.js";
 import "./callable-params-editor.js";
+import { loadAndHydrateAvailable } from "./hydrate-available-bodies.js";
 import { ParseErrorController } from "./parse-error-controller.js";
 import { applyYamlDiff, emptyAutomationTree } from "./serialise.js";
 
@@ -236,10 +237,26 @@ export class ESPHomeScriptEditor extends LitElement {
 
   private async _loadAvailable() {
     if (!this._api || !this.configuration) return;
-    try {
-      this._available = await this._api.getAvailableAutomations(this.configuration);
-    } catch (err) {
-      this._error = err instanceof Error ? err.message : String(err);
+    // Hydrate config_entries (the slim catalog omits them); without
+    // this every action renders fieldless since the node bails on an
+    // empty config_entries list.
+    const outcome = await loadAndHydrateAvailable(this._api, this.configuration);
+    if (outcome.status === "stale") return;
+    if (outcome.status === "error") {
+      this._error =
+        outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+      return;
+    }
+    this._available = outcome.available;
+    const { missingBody, missingField, rejected } = outcome.hydration;
+    const failures = missingBody + missingField + rejected;
+    if (failures > 0) {
+      toast.error(
+        this._localize("device.automation_partial_hydration", {
+          count: String(failures),
+        }),
+        { richColors: true }
+      );
     }
   }
 
