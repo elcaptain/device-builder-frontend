@@ -1,3 +1,5 @@
+import toast from "sonner-js";
+
 import type { ESPHomeAPI } from "../../../api/index.js";
 import type {
   AutomationAction,
@@ -5,6 +7,7 @@ import type {
   AutomationTrigger,
   AvailableAutomations,
 } from "../../../api/types/automations.js";
+import type { LocalizeFunc } from "../../../common/localize.js";
 import {
   emptyHydrationResult,
   hydrateEntryConfigEntries,
@@ -112,4 +115,48 @@ export async function loadAndHydrateAvailable(
     if (options?.isStale?.()) return { status: "stale" };
     return { status: "error", error };
   }
+}
+
+/** Load + hydrate the catalog for an editor and return the
+ *  ``_available`` / ``_error`` it should assign. Used by the two
+ *  trigger-less editors (script, api-action), which differ only in
+ *  which reactive fields they write; the automation editor keeps its
+ *  bespoke paint+staleness orchestration. Returns an empty object
+ *  (assign nothing) when there's no api or configuration yet. */
+export async function loadAvailableFor(
+  api: ESPHomeAPI | undefined,
+  configuration: string,
+  localize: LocalizeFunc
+): Promise<{ available?: AvailableAutomations; error?: string }> {
+  if (!api || !configuration) return {};
+  return resolveLoadedAvailable(
+    await loadAndHydrateAvailable(api, configuration),
+    localize
+  );
+}
+
+/** Map a :func:`loadAndHydrateAvailable` outcome to the
+ *  ``_available`` / ``_error`` an editor assigns, surfacing partial
+ *  hydration as a non-blocking toast. A ``stale`` outcome yields
+ *  neither field so an overlapping load wins. */
+export function resolveLoadedAvailable(
+  outcome: LoadAndHydrateOutcome,
+  localize: LocalizeFunc
+): { available?: AvailableAutomations; error?: string } {
+  if (outcome.status === "stale") return {};
+  if (outcome.status === "error") {
+    return {
+      error:
+        outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+    };
+  }
+  const { missingBody, missingField, rejected } = outcome.hydration;
+  const failures = missingBody + missingField + rejected;
+  if (failures > 0) {
+    toast.error(
+      localize("device.automation_partial_hydration", { count: String(failures) }),
+      { richColors: true }
+    );
+  }
+  return { available: outcome.available };
 }

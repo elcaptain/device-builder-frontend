@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("sonner-js", () => ({ default: { error: vi.fn() } }));
+
+import toast from "sonner-js";
 import type { ESPHomeAPI } from "../../../../src/api/index.js";
 import type {
   AutomationAction,
@@ -12,6 +16,8 @@ import type { ConfigEntry } from "../../../../src/api/types/config-entries.js";
 import {
   hydrateAvailableBodies,
   loadAndHydrateAvailable,
+  resolveLoadedAvailable,
+  type LoadAndHydrateOutcome,
 } from "../../../../src/components/device/automation-editor/hydrate-available-bodies.js";
 
 const configEntry = (key: string): ConfigEntry => ({ key }) as ConfigEntry;
@@ -268,5 +274,49 @@ describe("loadAndHydrateAvailable", () => {
     });
 
     expect(outcome.status).toBe("stale");
+  });
+});
+
+describe("resolveLoadedAvailable", () => {
+  const localize = ((key: string) => key) as never;
+  const okOutcome = (failures = 0): LoadAndHydrateOutcome => ({
+    status: "ok",
+    available: slimAvailable(),
+    hydration: { succeeded: 1, missingBody: failures, missingField: 0, rejected: 0 },
+  });
+
+  it("returns the hydrated available on success", () => {
+    const av = slimAvailable();
+    const { available, error } = resolveLoadedAvailable(
+      {
+        status: "ok",
+        available: av,
+        hydration: { succeeded: 1, missingBody: 0, missingField: 0, rejected: 0 },
+      },
+      localize
+    );
+    expect(available).toBe(av);
+    expect(error).toBeUndefined();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("maps an error outcome to the message and yields no available", () => {
+    const { available, error } = resolveLoadedAvailable(
+      { status: "error", error: new Error("boom") },
+      localize
+    );
+    expect(available).toBeUndefined();
+    expect(error).toBe("boom");
+  });
+
+  it("yields neither field when stale", () => {
+    expect(resolveLoadedAvailable({ status: "stale" }, localize)).toEqual({});
+  });
+
+  it("toasts when some entries failed to hydrate", () => {
+    vi.mocked(toast.error).mockClear();
+    const { available } = resolveLoadedAvailable(okOutcome(2), localize);
+    expect(available).toBeDefined();
+    expect(toast.error).toHaveBeenCalledTimes(1);
   });
 });
