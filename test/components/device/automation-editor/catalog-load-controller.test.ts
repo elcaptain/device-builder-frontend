@@ -21,10 +21,10 @@ const emptySlim = (): AvailableAutomations =>
     devices: [],
   }) as unknown as AvailableAutomations;
 
-const slimWithTrigger = (): AvailableAutomations =>
+const slimWithAction = (): AvailableAutomations =>
   ({
-    triggers: [{ id: "on_boot", config_entries: [] }],
-    actions: [],
+    triggers: [],
+    actions: [{ id: "logger.log", config_entries: [] }],
     conditions: [],
     scripts: [],
     devices: [],
@@ -79,7 +79,7 @@ describe("CatalogLoadController", () => {
     // Missing body -> failures -> the winning load toasts once; the
     // superseded load must stay silent.
     const api = {
-      getAvailableAutomations: vi.fn().mockResolvedValue(slimWithTrigger()),
+      getAvailableAutomations: vi.fn().mockResolvedValue(slimWithAction()),
       getAutomationBodies: vi.fn().mockResolvedValue({}),
     } as unknown as ESPHomeAPI;
 

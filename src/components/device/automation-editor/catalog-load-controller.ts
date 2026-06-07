@@ -36,8 +36,11 @@ export class CatalogLoadController implements ReactiveController {
   ): Promise<{ available?: AvailableAutomations; error?: string }> {
     if (!api || !configuration) return {};
     const seq = ++this._seq;
+    // Trigger-less editors render actions + conditions only; skipping
+    // trigger-body hydration avoids needless get_bodies work on mount.
     const outcome = await loadAndHydrateAvailable(api, configuration, {
       isStale: () => seq !== this._seq,
+      lists: ["actions", "conditions"],
     });
     // Re-check after the await: a later load (or disconnect) bumped the
     // token, so this result is stale — drop it before it can toast or

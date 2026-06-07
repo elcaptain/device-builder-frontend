@@ -16,11 +16,17 @@ import {
   type HydrationResult,
 } from "../../../util/automation-body-hydration.js";
 
-type _AutomationListType = "triggers" | "actions" | "conditions";
+/** Which catalog lists to hydrate bodies for. A consumer that renders
+ *  only some of them (the trigger-less editors never show triggers)
+ *  passes a subset to skip the unused ``get_bodies`` work. */
+export type HydrateList = "triggers" | "actions" | "conditions";
 type _AutomationEntry = AutomationTrigger | AutomationAction | AutomationCondition;
 
+const _ALL_LISTS: readonly HydrateList[] = ["triggers", "actions", "conditions"];
+
 /** Hydrate ``config_entries`` for every entry in *available* via the
- *  shared per-entry helper. ``allSettled`` so a single rejection
+ *  shared per-entry helper. *lists* selects which catalog lists to
+ *  hydrate (default all three). ``allSettled`` so a single rejection
  *  doesn't abort the rest; the returned aggregate lets the caller
  *  surface partial-failure UI (the body cache's
  *  ``cacheMisses: false`` lets a re-mount retry contract-violation
@@ -28,11 +34,12 @@ type _AutomationEntry = AutomationTrigger | AutomationAction | AutomationConditi
 export async function hydrateAvailableBodies(
   api: ESPHomeAPI,
   available: AvailableAutomations,
-  fetchBody?: AutomationBodyFetcher
+  fetchBody?: AutomationBodyFetcher,
+  lists: readonly HydrateList[] = _ALL_LISTS
 ): Promise<HydrationResult> {
   const result = emptyHydrationResult();
   const jobs: Promise<unknown>[] = [];
-  const merge = (type: _AutomationListType, list: _AutomationEntry[]): void => {
+  const merge = (type: HydrateList, list: _AutomationEntry[]): void => {
     for (const entry of list) {
       jobs.push(
         hydrateEntryConfigEntries(api, type, entry, fetchBody).then((outcome) => {
@@ -41,9 +48,9 @@ export async function hydrateAvailableBodies(
       );
     }
   };
-  merge("triggers", available.triggers);
-  merge("actions", available.actions);
-  merge("conditions", available.conditions);
+  if (lists.includes("triggers")) merge("triggers", available.triggers);
+  if (lists.includes("actions")) merge("actions", available.actions);
+  if (lists.includes("conditions")) merge("conditions", available.conditions);
   const settled = await Promise.allSettled(jobs);
   for (const r of settled) {
     if (r.status === "rejected") {
@@ -82,6 +89,7 @@ export async function loadAndHydrateAvailable(
   options?: {
     onPaint?: (available: AvailableAutomations) => void;
     isStale?: () => boolean;
+    lists?: readonly HydrateList[];
   }
 ): Promise<LoadAndHydrateOutcome> {
   try {
@@ -99,7 +107,12 @@ export async function loadAndHydrateAvailable(
       conditions: slim.conditions.map((e) => ({ ...e })),
     };
     options?.onPaint?.(available);
-    const hydration = await hydrateAvailableBodies(api, available);
+    const hydration = await hydrateAvailableBodies(
+      api,
+      available,
+      undefined,
+      options?.lists
+    );
     if (options?.isStale?.()) return { status: "stale" };
     // Fresh array refs so identity-based ``hasChanged`` consumers
     // re-render with the hydrated entries (entries' object identity

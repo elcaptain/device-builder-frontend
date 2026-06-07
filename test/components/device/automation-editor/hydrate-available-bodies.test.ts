@@ -320,3 +320,17 @@ describe("resolveLoadedAvailable", () => {
     expect(toast.error).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("hydrateAvailableBodies list selection", () => {
+  it("skips lists not requested", async () => {
+    const fetchBody = vi.fn(async () => triggerBody("x", [configEntry("foo")]));
+    const available = slimAvailable(); // triggers only
+    const result = await hydrateAvailableBodies(makeApi(), available, fetchBody, [
+      "actions",
+    ]);
+    // No actions present and triggers not requested -> nothing fetched.
+    expect(fetchBody).not.toHaveBeenCalled();
+    expect(result.succeeded).toBe(0);
+    expect(available.triggers[0].config_entries).toEqual([]);
+  });
+});
