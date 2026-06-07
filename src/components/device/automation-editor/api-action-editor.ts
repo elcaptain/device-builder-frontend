@@ -45,7 +45,7 @@ import { registerMdiIcons } from "../../../util/register-icons.js";
 import "./automation-action-list.js";
 import { automationEditorStyles } from "./automation-editor.styles.js";
 import "./callable-params-editor.js";
-import { loadAvailableFor } from "./hydrate-available-bodies.js";
+import { CatalogLoadController } from "./catalog-load-controller.js";
 import { ParseErrorController } from "./parse-error-controller.js";
 import { applyYamlDiff, emptyAutomationTree } from "./serialise.js";
 
@@ -115,6 +115,11 @@ export class ESPHomeApiActionEditor extends LitElement {
   private _applyInFlight = false;
   private _applyDirty = false;
   private _lastSelfWrittenYaml: string | null = null;
+
+  /** Catalog loader; owns the concurrency guard so overlapping loads
+   *  (connectedCallback + updated both reaching ``_loadAvailable``)
+   *  can't clobber ``_available`` or double-fire the toast. */
+  private readonly _catalogLoad = new CatalogLoadController(this);
 
   /** Brief-window dirty flag covering the 200ms debounce gap so the
    *  global save button activates as soon as the user types. */
@@ -327,7 +332,8 @@ export class ESPHomeApiActionEditor extends LitElement {
     // Hydrates config_entries (the slim catalog omits them); without
     // it every action renders fieldless since the node bails on an
     // empty config_entries list.
-    const { available, error } = await loadAvailableFor(
+    this._error = "";
+    const { available, error } = await this._catalogLoad.load(
       this._api,
       this.configuration,
       this._localize

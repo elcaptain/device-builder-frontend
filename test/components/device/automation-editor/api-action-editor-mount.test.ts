@@ -21,6 +21,7 @@ vi.mock("@home-assistant/webawesome/dist/components/icon/icon.js", () => ({}));
 vi.mock("@home-assistant/webawesome/dist/components/spinner/spinner.js", () => ({}));
 vi.mock("sonner-js", () => ({ default: { error: vi.fn() } }));
 
+import toast from "sonner-js";
 import type { ESPHomeAPI } from "../../../../src/api/index.js";
 import type { AvailableAutomations } from "../../../../src/api/types/automations.js";
 import { ESPHomeApiActionEditor } from "../../../../src/components/device/automation-editor/api-action-editor.js";
@@ -61,7 +62,10 @@ async function mountEditor(
 }
 
 describe("api-action-editor action-catalog hydration (#1286)", () => {
-  beforeEach(() => _clearAutomationBodyCache());
+  beforeEach(() => {
+    _clearAutomationBodyCache();
+    vi.mocked(toast.error).mockClear();
+  });
   afterEach(() => {
     document.body.innerHTML = "";
   });
@@ -77,6 +81,8 @@ describe("api-action-editor action-catalog hydration (#1286)", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const actions = (editor as any)._available.actions as AvailableAutomations["actions"];
     expect(actions[0].config_entries.length).toBeGreaterThan(0);
+    // Fully-hydrated catalog -> no partial-hydration toast.
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("does not load without a configuration", async () => {

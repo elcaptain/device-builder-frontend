@@ -117,28 +117,12 @@ export async function loadAndHydrateAvailable(
   }
 }
 
-/** Load + hydrate the catalog for an editor and return the
- *  ``_available`` / ``_error`` it should assign. Used by the two
- *  trigger-less editors (script, api-action), which differ only in
- *  which reactive fields they write; the automation editor keeps its
- *  bespoke paint+staleness orchestration. Returns an empty object
- *  (assign nothing) when there's no api or configuration yet. */
-export async function loadAvailableFor(
-  api: ESPHomeAPI | undefined,
-  configuration: string,
-  localize: LocalizeFunc
-): Promise<{ available?: AvailableAutomations; error?: string }> {
-  if (!api || !configuration) return {};
-  return resolveLoadedAvailable(
-    await loadAndHydrateAvailable(api, configuration),
-    localize
-  );
-}
-
 /** Map a :func:`loadAndHydrateAvailable` outcome to the
  *  ``_available`` / ``_error`` an editor assigns, surfacing partial
  *  hydration as a non-blocking toast. A ``stale`` outcome yields
- *  neither field so an overlapping load wins. */
+ *  neither field so an overlapping load wins. The concurrency token
+ *  that makes the ``stale`` branch reachable is owned by
+ *  ``CatalogLoadController`` — editors never call this unguarded. */
 export function resolveLoadedAvailable(
   outcome: LoadAndHydrateOutcome,
   localize: LocalizeFunc
