@@ -1,7 +1,7 @@
 import { consume } from "@lit/context";
 import { mdiArchiveArrowUpOutline, mdiArchiveOutline, mdiTrashCanOutline } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { customElement, query, state } from "lit/decorators.js";
 import type { ESPHomeAPI } from "../api/index.js";
 import type { ArchivedDevice } from "../api/types/system.js";
 import type { LocalizeFunc } from "../common/localize.js";
@@ -9,9 +9,16 @@ import { apiContext, localizeContext } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
 import { getErrorMessage } from "../util/error-message.js";
 import { registerMdiIcons } from "../util/register-icons.js";
+import type { ESPHomeConfirmDialog } from "./confirm-dialog.js";
+import {
+  archivedDeviceName,
+  deleteArchivedDevice,
+  unarchiveDevice,
+} from "./dashboard/actions.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "./base-dialog.js";
+import "./confirm-dialog.js";
 
 registerMdiIcons({
   "archive-arrow-up-outline": mdiArchiveArrowUpOutline,
@@ -32,12 +39,12 @@ registerMdiIcons({
  *   * Pull the list off ``devices/list_archived`` on every open.
  *     The archive directory is on-disk state, not WS-event-driven,
  *     so this is the cheapest way to keep the dialog fresh.
- *   * Per-row Unarchive button — fires ``unarchive`` event with the
- *     ArchivedDevice. Caller restores via the WS API and signals
- *     us back to refresh / close.
- *   * Per-row Delete-permanently button — fires ``delete-archived``
- *     event so the dashboard can route through its existing
- *     confirm-dialog instance (we don't duplicate the dialog here).
+ *   * Per-row Unarchive button restores via the WS API, then
+ *     refreshes the list in place.
+ *   * Per-row Delete-permanently button opens a nested confirm, then
+ *     deletes via the WS API and refreshes. Self-contained (rather
+ *     than delegating to the dashboard) so the dialog works from any
+ *     route — the header opens it over the editor too (#1320).
  *   * Empty state when no archives — same dialog opens but tells
  *     the user there's nothing to restore. Keeps the menu entry
  *     always-visible without forcing a count-bridge plumbing.
@@ -56,6 +63,9 @@ export class ESPHomeArchivedDevicesDialog extends LitElement {
   @state() private _loading = false;
   @state() private _error: string | null = null;
   @state() private _open = false;
+  @state() private _pendingDelete: ArchivedDevice | null = null;
+
+  @query("esphome-confirm-dialog") private _confirmDialog?: ESPHomeConfirmDialog;
 
   static styles = [
     espHomeStyles,
@@ -288,6 +298,18 @@ export class ESPHomeArchivedDevicesDialog extends LitElement {
           </button>
         </div>
       </esphome-base-dialog>
+      <esphome-confirm-dialog
+        destructive
+        heading=${this._localize("dashboard.delete_archived_title")}
+        message=${this._pendingDelete
+          ? this._localize("dashboard.delete_archived_desc", {
+              name: archivedDeviceName(this._pendingDelete),
+            })
+          : ""}
+        confirm-label=${this._localize("dashboard.action_delete_permanently")}
+        @confirm=${this._onDeleteConfirm}
+        @cancel=${this._onDeleteCancel}
+      ></esphome-confirm-dialog>
     `;
   }
 
@@ -340,25 +362,30 @@ export class ESPHomeArchivedDevicesDialog extends LitElement {
     `;
   }
 
-  private _unarchive(device: ArchivedDevice) {
-    this.dispatchEvent(
-      new CustomEvent("unarchive", {
-        detail: device,
-        bubbles: true,
-        composed: true,
-      })
-    );
+  private async _unarchive(device: ArchivedDevice) {
+    if (!this._api) return;
+    if (await unarchiveDevice(device, this._api, this._localize)) {
+      await this.refresh();
+    }
   }
 
   private _deletePermanently(device: ArchivedDevice) {
-    this.dispatchEvent(
-      new CustomEvent("delete-archived", {
-        detail: device,
-        bubbles: true,
-        composed: true,
-      })
-    );
+    this._pendingDelete = device;
+    this._confirmDialog?.open();
   }
+
+  private _onDeleteConfirm = async (): Promise<void> => {
+    const device = this._pendingDelete;
+    this._pendingDelete = null;
+    if (!device || !this._api) return;
+    if (await deleteArchivedDevice(device, this._api, this._localize)) {
+      await this.refresh();
+    }
+  };
+
+  private _onDeleteCancel = (): void => {
+    this._pendingDelete = null;
+  };
 }
 
 declare global {

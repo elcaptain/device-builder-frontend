@@ -1,7 +1,6 @@
 import { html, type TemplateResult } from "lit";
 import type { ConfiguredDevice, Label } from "../../api/types/devices.js";
 import { DeviceState } from "../../api/types/devices.js";
-import type { ArchivedDevice } from "../../api/types/system.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import type { ESPHomePageDashboard } from "../../pages/dashboard.js";
 import { computeLabelUsage, deleteConfirmKey } from "../../util/label-usage.js";
@@ -9,7 +8,6 @@ import { archiveBulkDevices, deleteBulkDevices, deleteDevice } from "./actions.j
 
 export type PendingConfirm =
   | { kind: "delete-single"; device: ConfiguredDevice }
-  | { kind: "delete-archived"; device: ArchivedDevice }
   | { kind: "delete-bulk" }
   | { kind: "archive-single"; device: ConfiguredDevice }
   | { kind: "archive-bulk" }
@@ -51,18 +49,6 @@ export function confirmDialogCopy(
         heading: t("dashboard.delete_single_title"),
         message: t("dashboard.delete_single_desc", { name }),
         confirm: t("dashboard.delete_selected_confirm"),
-        destructive: true,
-      };
-    }
-    case "delete-archived": {
-      const name =
-        pending.device.friendly_name ||
-        pending.device.name ||
-        pending.device.configuration;
-      return {
-        heading: t("dashboard.delete_archived_title"),
-        message: t("dashboard.delete_archived_desc", { name }),
-        confirm: t("dashboard.action_delete_permanently"),
         destructive: true,
       };
     }
@@ -131,9 +117,6 @@ export function executeConfirm(
     case "delete-single":
       void deleteDevice(pending.device, host._api, host._localize);
       return;
-    case "delete-archived":
-      void host._deleteArchivedDevice(pending.device);
-      return;
     case "archive-single":
       void host._archiveDevice(pending.device);
       return;
@@ -196,10 +179,5 @@ export function renderDialogs(host: ESPHomePageDashboard): TemplateResult {
       }}
       @select-method=${host._onInstallMethodSelect}
     ></esphome-install-method-dialog>
-    <esphome-archived-devices-dialog
-      @unarchive=${(e: CustomEvent<ArchivedDevice>) => host._unarchiveDevice(e.detail)}
-      @delete-archived=${(e: CustomEvent<ArchivedDevice>) =>
-        host._confirmDeleteArchived(e.detail)}
-    ></esphome-archived-devices-dialog>
   `;
 }

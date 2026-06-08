@@ -80,6 +80,8 @@ import {
 } from "./app-shell/settings-actions.js";
 
 import "../pages/dashboard.js";
+import "./archived-devices-dialog.js";
+import type { ESPHomeArchivedDevicesDialog } from "./archived-devices-dialog.js";
 import "./command-palette.js";
 import "./esphome-layout.js";
 import "./esphome-login.js";
@@ -174,6 +176,8 @@ export class ESPHomeApp extends LitElement {
 
   private _router = createRouter(this);
 
+  @query("esphome-archived-devices-dialog")
+  private _archivedDialog?: ESPHomeArchivedDevicesDialog;
   @query("esphome-settings-dialog") private _settingsDialog!: ESPHomeSettingsDialog;
   @query("esphome-firmware-jobs-dialog")
   private _firmwareJobsDialog!: ESPHomeFirmwareJobsDialog;
@@ -500,6 +504,7 @@ export class ESPHomeApp extends LitElement {
         @set-yaml-diff-button=${(e: CustomEvent<boolean>) => onSetYamlDiffButton(this, e)}
         @set-language=${(e: CustomEvent<Parameters<typeof onSetLanguage>[1]["detail"]>) =>
           onSetLanguage(this, e as Parameters<typeof onSetLanguage>[1])}
+        @open-archived-devices=${() => this._archivedDialog?.open()}
         @open-settings=${() => this._settingsDialog?.open()}
         @open-firmware-jobs=${() => this._firmwareJobsDialog?.open()}
         @open-reset-build-env=${() => this._firmwareJobsDialog?.openResetBuildEnv()}
@@ -550,6 +555,7 @@ export class ESPHomeApp extends LitElement {
         @onboarding-acknowledged=${this._onOnboardingAcknowledged}
         @onboarding-dismissed-session=${this._onOnboardingDismissedSession}
       ></esphome-onboarding-wifi-dialog>
+      <esphome-archived-devices-dialog></esphome-archived-devices-dialog>
     `;
   }
 

@@ -58,6 +58,11 @@ export async function archiveDevice(
   return true;
 }
 
+/** Display label for an archived device: friendly name, else node name, else filename. */
+export function archivedDeviceName(device: ArchivedDevice): string {
+  return device.friendly_name || device.name || device.configuration;
+}
+
 /**
  * Restore an archived YAML back into the active config dir.
  *
@@ -76,7 +81,7 @@ export async function unarchiveDevice(
   api: ESPHomeAPI,
   localize: LocalizeFunc
 ): Promise<boolean> {
-  const name = device.friendly_name || device.name || device.configuration;
+  const name = archivedDeviceName(device);
   try {
     await api.unarchiveDevice(device.configuration);
   } catch (err) {
@@ -103,7 +108,7 @@ export async function deleteArchivedDevice(
   api: ESPHomeAPI,
   localize: LocalizeFunc
 ): Promise<boolean> {
-  const name = device.friendly_name || device.name || device.configuration;
+  const name = archivedDeviceName(device);
   try {
     await api.deleteArchivedDevice(device.configuration);
   } catch (err) {

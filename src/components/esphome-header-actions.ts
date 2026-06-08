@@ -442,10 +442,13 @@ export class ESPHomeHeaderActions extends LitElement {
   };
 
   private _openArchivedDevices = () => {
-    /* Dashboard hosts the dialog instance and listens for this
-       window event to open it. */
     this._close();
-    window.dispatchEvent(new Event("esphome-show-archived-dialog"));
+    this.dispatchEvent(
+      new CustomEvent("open-archived-devices", {
+        bubbles: true,
+        composed: true,
+      })
+    );
   };
 
   private _toggleShowIgnoredDiscoveries = () => {

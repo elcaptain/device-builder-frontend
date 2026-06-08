@@ -22,7 +22,6 @@ import type { AdoptableDevice, ConfiguredDevice, Label } from "../api/types/devi
 import type { FirmwareJob } from "../api/types/firmware-jobs.js";
 import { ErrorCode } from "../api/types/protocol.js";
 import type { PairingSummary } from "../api/types/remote-build.js";
-import type { ArchivedDevice } from "../api/types/system.js";
 import { DashboardView } from "../api/types/system.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import {
@@ -35,10 +34,8 @@ import {
 } from "../components/dashboard/actions-ui.js";
 import {
   archiveDevice,
-  deleteArchivedDevice,
   detectAndOpenWizard,
   fetchApiKey,
-  unarchiveDevice,
 } from "../components/dashboard/actions.js";
 import {
   onInstallMethodSelect,
@@ -109,8 +106,6 @@ import "../components/adopt-dialog.js";
 import type { ESPHomeAdoptDialog } from "../components/adopt-dialog.js";
 import "../components/api-key-dialog.js";
 import type { ESPHomeApiKeyDialog } from "../components/api-key-dialog.js";
-import "../components/archived-devices-dialog.js";
-import type { ESPHomeArchivedDevicesDialog } from "../components/archived-devices-dialog.js";
 import "../components/clone-device-dialog.js";
 import type { ESPHomeCloneDeviceDialog } from "../components/clone-device-dialog.js";
 import "../components/command-dialog.js";
@@ -254,8 +249,6 @@ export class ESPHomePageDashboard extends LitElement {
   );
 
   @query("esphome-api-key-dialog") _apiKeyDialog!: ESPHomeApiKeyDialog;
-  @query("esphome-archived-devices-dialog")
-  _archivedDialog?: ESPHomeArchivedDevicesDialog;
   @query("esphome-confirm-dialog") _confirmDialog!: ESPHomeConfirmDialog;
   @query("esphome-create-config-dialog") _createDialog!: ESPHomeCreateConfigDialog;
   @query("esphome-clone-device-dialog") _cloneDialog!: ESPHomeCloneDeviceDialog;
@@ -308,7 +301,6 @@ export class ESPHomePageDashboard extends LitElement {
     if (!this._showIgnored) this._showDiscovered = true;
     this._toggleShowIgnored();
   };
-  private _onShowArchivedDialog = () => this._archivedDialog?.open();
 
   _onEnterSelectMode = (configuration?: string) => {
     this._selectMode = true;
@@ -331,7 +323,6 @@ export class ESPHomePageDashboard extends LitElement {
       "esphome-show-ignored-from-menu",
       this._onShowIgnoredFromMenu
     );
-    window.addEventListener("esphome-show-archived-dialog", this._onShowArchivedDialog);
     const pending = consumePendingHighlight();
     if (pending !== null) {
       this._highlightFreshDevice(pending);
@@ -433,10 +424,6 @@ export class ESPHomePageDashboard extends LitElement {
     window.removeEventListener(
       "esphome-show-ignored-from-menu",
       this._onShowIgnoredFromMenu
-    );
-    window.removeEventListener(
-      "esphome-show-archived-dialog",
-      this._onShowArchivedDialog
     );
     if (this._adoptHighlightTimer !== null) {
       clearTimeout(this._adoptHighlightTimer);
@@ -898,8 +885,6 @@ export class ESPHomePageDashboard extends LitElement {
 
   _confirmDeleteSingle = (device: ConfiguredDevice) =>
     this._openConfirm({ kind: "delete-single", device });
-  _confirmDeleteArchived = (device: ArchivedDevice) =>
-    this._openConfirm({ kind: "delete-archived", device });
   _confirmArchive = (device: ConfiguredDevice) =>
     this._openConfirm({ kind: "archive-single", device });
 
@@ -912,16 +897,6 @@ export class ESPHomePageDashboard extends LitElement {
 
   _archiveDevice = (device: ConfiguredDevice) =>
     archiveDevice(device, this._api, this._localize);
-  _unarchiveDevice = async (device: ArchivedDevice) => {
-    if (await unarchiveDevice(device, this._api, this._localize)) {
-      await this._archivedDialog?.refresh();
-    }
-  };
-  _deleteArchivedDevice = async (device: ArchivedDevice) => {
-    if (await deleteArchivedDevice(device, this._api, this._localize)) {
-      await this._archivedDialog?.refresh();
-    }
-  };
   _deleteLabel = (label: Label) => deleteLabel(this, label);
   _toggleIgnore = (device: AdoptableDevice) => void toggleIgnore(this, device);
 }
