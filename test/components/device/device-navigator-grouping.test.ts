@@ -3,8 +3,8 @@
  *
  * Pins the Components domain grouping: a subgroup header per domain with
  * its count, collapsing a subgroup hides its rows, and other sections
- * stay flat. Dialog + search children are no-oped so the element
- * constructs in happy-dom; see ``device-navigator-coalesce.test.ts``.
+ * stay flat. Dialog children are no-oped so the element constructs in
+ * happy-dom; see ``device-navigator-coalesce.test.ts``.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -51,18 +51,6 @@ const subCounts = (nav: ESPHomeDeviceNavigator) =>
   );
 const navItemCount = (nav: ESPHomeDeviceNavigator) =>
   nav.shadowRoot?.querySelectorAll(".nav-item").length ?? 0;
-
-async function setQuery(nav: ESPHomeDeviceNavigator, value: string): Promise<void> {
-  const search = nav.shadowRoot!.querySelector("esphome-navigator-search")!;
-  search.dispatchEvent(
-    new CustomEvent("navigator-search", {
-      detail: { value },
-      bubbles: true,
-      composed: true,
-    })
-  );
-  await nav.updateComplete;
-}
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -125,17 +113,5 @@ describe("device-navigator domain grouping", () => {
     expect(single!.querySelector(".nav-item-subtitle")?.textContent?.trim()).toBe(
       "Status LED"
     );
-  });
-
-  it("force-opens a collapsed domain while filtering and drops empty ones", async () => {
-    const nav = await mountNavigator([1]);
-    // Collapse Sensor, then filter for a Sensor id.
-    nav.shadowRoot!.querySelector<HTMLElement>(".nav-subgroup-header")!.click();
-    await nav.updateComplete;
-    await setQuery(nav, "s1");
-    // Sensor survives and shows its match despite being collapsed; Switch
-    // (no match) drops out entirely.
-    expect(subTitles(nav)).toEqual(["Sensor"]);
-    expect(navItemCount(nav)).toBe(1);
   });
 });

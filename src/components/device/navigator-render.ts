@@ -1,5 +1,4 @@
 import { html, nothing, type TemplateResult } from "lit";
-import { ifDefined } from "lit/directives/if-defined.js";
 import { withBase } from "../../util/base-path.js";
 import type { YamlSection } from "../../util/yaml-sections.js";
 import type { NavGroup } from "./navigator-groups.js";
@@ -21,7 +20,6 @@ export interface NavSectionView {
   actions: NavAction[];
   rows: NavRow[];
   open: boolean;
-  filtering: boolean;
   selectedLine: number | null;
   hoveredLine: number | null;
   onToggle: () => void;
@@ -91,24 +89,19 @@ function renderNavRow(row: NavRow, v: NavSectionView, showIcon: boolean): Templa
 
 /** One collapsible domain subgroup: header (name + count) then its rows. */
 function renderNavGroup(group: NavGroup, v: NavSectionView): TemplateResult {
-  // Force open while filtering — you can't collapse a search result, so
-  // the header is a static label there (no toggle, no focus, no chevron).
-  const open = v.filtering || !v.collapsedGroups?.has(group.key);
-  const interactive = !v.filtering;
-  const toggle = () => {
-    if (interactive) v.onToggleGroup?.(group.key);
-  };
+  const open = !v.collapsedGroups?.has(group.key);
+  const toggle = () => v.onToggleGroup?.(group.key);
   const rowsId = `navgroup-${group.key}`;
   return html`
     <div
-      class="nav-subgroup-header ${interactive ? "" : "nav-subgroup-header--static"}"
-      role=${ifDefined(interactive ? "button" : undefined)}
-      tabindex=${ifDefined(interactive ? "0" : undefined)}
-      aria-expanded=${ifDefined(interactive ? String(open) : undefined)}
-      aria-controls=${ifDefined(interactive ? rowsId : undefined)}
+      class="nav-subgroup-header"
+      role="button"
+      tabindex="0"
+      aria-expanded=${String(open)}
+      aria-controls=${rowsId}
       @click=${toggle}
       @keydown=${(e: KeyboardEvent) => {
-        if (interactive && (e.key === "Enter" || e.key === " ")) {
+        if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           toggle();
         }
@@ -121,13 +114,11 @@ function renderNavGroup(group: NavGroup, v: NavSectionView): TemplateResult {
       ></wa-icon>
       <span class="nav-subgroup-title">${prettyDomain(group.key)}</span>
       <span class="nav-subgroup-count">${group.rows.length}</span>
-      ${interactive
-        ? html`<wa-icon
-            class="nav-subgroup-chevron"
-            library="mdi"
-            name=${open ? "chevron-up" : "chevron-down"}
-          ></wa-icon>`
-        : nothing}
+      <wa-icon
+        class="nav-subgroup-chevron"
+        library="mdi"
+        name=${open ? "chevron-up" : "chevron-down"}
+      ></wa-icon>
     </div>
     ${open
       ? html`<div id=${rowsId} class="nav-items nav-items--grouped">
@@ -157,36 +148,31 @@ function renderNavAction(action: NavAction): TemplateResult {
 }
 
 /**
- * One section block: header (collapsible when not filtering), its rows,
- * and the "+ Add X" actions. Returns ``nothing`` while filtering when the
- * section has no matches so it drops out of the list entirely.
+ * One section block: collapsible header, its rows, and the "+ Add X"
+ * actions.
  */
-export function renderNavSection(v: NavSectionView): TemplateResult | typeof nothing {
-  if (v.filtering && v.rows.length === 0) return nothing;
+export function renderNavSection(v: NavSectionView): TemplateResult {
   return html`
     <div class="nav-content" @click=${() => v.onToggle()}>
       <div class="nav-content-label">
         <wa-icon library="mdi" name=${v.icon}></wa-icon>
         <p>${v.label}</p>
       </div>
-      ${v.filtering
-        ? nothing
-        : html`<wa-icon
-            class="nav-content-chevron"
-            library="mdi"
-            name=${v.open ? "chevron-up" : "chevron-down"}
-          ></wa-icon>`}
+      <wa-icon
+        class="nav-content-chevron"
+        library="mdi"
+        name=${v.open ? "chevron-up" : "chevron-down"}
+      ></wa-icon>
     </div>
     ${v.open
       ? html`
           <div class="separator"></div>
-          ${v.filtering ? nothing : html`<p class="italic">${v.desc}</p>`}
+          <p class="italic">${v.desc}</p>
           ${v.groups
             ? v.groups.map((group) =>
-                // Collapse a single-of-a-kind domain to a flat row only when
-                // browsing; while filtering, keep the subgroup header so a
-                // lone search match still shows its domain context.
-                !v.filtering && group.rows.length === 1
+                // A single-of-a-kind domain collapses to a flat row in place
+                // of a subgroup header guarding one item.
+                group.rows.length === 1
                   ? renderNavSingleGroup(group, v)
                   : renderNavGroup(group, v)
               )
@@ -195,11 +181,9 @@ export function renderNavSection(v: NavSectionView): TemplateResult | typeof not
                   ${v.rows.map((row) => renderNavRow(row, v, true))}
                 </div>`
               : nothing}
-          ${v.filtering
-            ? nothing
-            : html`<div class="nav-items">
-                ${v.actions.map((action) => renderNavAction(action))}
-              </div>`}
+          <div class="nav-items">
+            ${v.actions.map((action) => renderNavAction(action))}
+          </div>
         `
       : nothing}
     <div class="separator"></div>

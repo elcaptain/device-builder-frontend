@@ -119,7 +119,6 @@ describe("NavigatorRevealController one-shot latch", () => {
       selectedLine: null,
       buckets,
       openSections: new Set(),
-      filtering: false,
     };
     const ctrl = new NavigatorRevealController(host, () => state);
 

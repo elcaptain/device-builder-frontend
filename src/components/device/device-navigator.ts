@@ -9,7 +9,7 @@ import {
   mdiPlusCircleOutline,
   mdiScriptTextOutline,
 } from "@mdi/js";
-import { html, LitElement, nothing } from "lit";
+import { html, LitElement } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import memoizeOne from "memoize-one";
 import type { ESPHomeAPI } from "../../api/index.js";
@@ -39,7 +39,6 @@ import { groupRowsByDomain } from "./navigator-groups.js";
 import { type NavRow, resolveBucketLabels } from "./navigator-labels.js";
 import { type NavAction, renderNavSection } from "./navigator-render.js";
 import { NavigatorRevealController } from "./navigator-reveal-controller.js";
-import { navItemMatches } from "./navigator-search-match.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "./add-automation-dialog.js";
@@ -50,7 +49,6 @@ import "./add-config-dialog.js";
 import type { ESPHomeAddConfigDialog } from "./add-config-dialog.js";
 import "./add-script-dialog.js";
 import type { ESPHomeAddScriptDialog } from "./add-script-dialog.js";
-import "./device-navigator-search.js";
 import { SECTION_ICON } from "./section-icons.js";
 import { TriggerCatalogController } from "./trigger-catalog-controller.js";
 
@@ -96,7 +94,6 @@ export class ESPHomeDeviceNavigator extends LitElement {
     selectedLine: this._selectedLine,
     buckets: this._deriveBuckets(this.yaml),
     openSections: this.openSections,
-    filtering: this._query.trim().length > 0,
   }));
 
   @property({ attribute: false })
@@ -116,9 +113,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
   /** Resolve every row's labels, indexed [core, components, automations]
    *  to match the section order. Memoised on the parsed buckets plus the
    *  inputs labels depend on (catalog ticks, platform, device name,
-   *  locale), so typing a query reuses the cached labels and only the
-   *  cheap ``navItemMatches`` predicate runs per keystroke. The trailing
-   *  args exist solely to invalidate the memo. */
+   *  locale). The trailing args exist solely to invalidate the memo. */
   private _resolveLabels = memoizeOne(
     (
       buckets: NavigatorBuckets,
@@ -193,10 +188,6 @@ export class ESPHomeDeviceNavigator extends LitElement {
 
   @state()
   private _hoveredLine: number | null = null;
-
-  /** Active navigator search query; empty string means "not filtering". */
-  @state()
-  private _query = "";
 
   /** Domains collapsed in the grouped Components list. */
   @state()
@@ -326,7 +317,7 @@ export class ESPHomeDeviceNavigator extends LitElement {
     ];
 
     // Labels resolve once per (yaml, catalog tick, platform, name, locale)
-    // via the memo, so typing only re-runs the cheap match predicate.
+    // via the memo.
     const resolved = this._resolveLabels(
       buckets,
       this._caches.tick,
@@ -334,25 +325,6 @@ export class ESPHomeDeviceNavigator extends LitElement {
       this.deviceName,
       this._localize
     );
-    const q = this._query.trim();
-    const filtering = q.length > 0;
-    const matches = filtering
-      ? resolved.map((rows) =>
-          rows.filter(({ item, labels }) =>
-            navItemMatches(q, labels.primary, labels.secondary, item.id, item.name)
-          )
-        )
-      : null;
-    const totalItems = sections.reduce((n, s) => n + s.items.length, 0);
-    const matchCount = matches ? matches.reduce((n, m) => n + m.length, 0) : 0;
-    // Stay silent on zero matches; the "No matches" empty state speaks.
-    const resultLabel =
-      filtering && matchCount > 0
-        ? this._localize("device.navigator_search_count", {
-            count: matchCount,
-            total: totalItems,
-          })
-        : "";
 
     return html`
       <section class="card">
@@ -407,53 +379,34 @@ export class ESPHomeDeviceNavigator extends LitElement {
           </button>
         </header>
         <div class="card-body">
-          <esphome-navigator-search
-            .value=${this._query}
-            .resultLabel=${resultLabel}
-            @navigator-search=${this._onSearchChange}
-          ></esphome-navigator-search>
-          ${filtering
-            ? nothing
-            : html`<p class="italic">${this._localize("device.navigator_desc")}</p>`}
+          <p class="italic">${this._localize("device.navigator_desc")}</p>
           <div class="separator"></div>
-          ${filtering && matchCount === 0
-            ? html`<p class="nav-empty" role="status">
-                ${this._localize("device.navigator_search_none")}
-              </p>`
-            : sections.map(({ label, desc, icon, category, actions }, i) => {
-                const rows = matches?.[i] ?? resolved[i];
-                return renderNavSection({
-                  label,
-                  desc,
-                  icon,
-                  actions,
-                  rows,
-                  // Components group by domain; other sections stay flat.
-                  groups:
-                    category === "component" ? this._groupComponents(rows) : undefined,
-                  collapsedGroups: this._collapsedGroups,
-                  onToggleGroup: (key) => this._toggleGroup(key),
-                  open: filtering ? true : this.openSections.has(i),
-                  filtering,
-                  selectedLine: this._selectedLine,
-                  hoveredLine: this._hoveredLine,
-                  onToggle: () => {
-                    if (!filtering) this._toggleSection(i);
-                  },
-                  onItemEnter: (item) =>
-                    this._onItemHover(item.fromLine, item.fromLine, item.toLine),
-                  onItemLeave: () => this._onItemLeave(),
-                  onItemClick: (item) => this._onItemClick(item),
-                });
-              })}
+          ${sections.map(({ label, desc, icon, category, actions }, i) => {
+            const rows = resolved[i];
+            return renderNavSection({
+              label,
+              desc,
+              icon,
+              actions,
+              rows,
+              // Components group by domain; other sections stay flat.
+              groups: category === "component" ? this._groupComponents(rows) : undefined,
+              collapsedGroups: this._collapsedGroups,
+              onToggleGroup: (key) => this._toggleGroup(key),
+              open: this.openSections.has(i),
+              selectedLine: this._selectedLine,
+              hoveredLine: this._hoveredLine,
+              onToggle: () => this._toggleSection(i),
+              onItemEnter: (item) =>
+                this._onItemHover(item.fromLine, item.fromLine, item.toLine),
+              onItemLeave: () => this._onItemLeave(),
+              onItemClick: (item) => this._onItemClick(item),
+            });
+          })}
         </div>
       </section>
     `;
   }
-
-  private _onSearchChange = (e: CustomEvent<{ value: string }>) => {
-    this._query = e.detail.value;
-  };
 
   private _toggleSection(index: number) {
     this.dispatchEvent(

@@ -8,8 +8,6 @@ export interface RevealState {
   buckets: NavigatorBuckets;
   /** Indices (0 core / 1 components / 2 automations) currently expanded. */
   openSections: Set<number>;
-  /** A search query is active (sections force-open); don't toggle them. */
-  filtering: boolean;
 }
 
 /** Host surface the controller drives: render root, event dispatch, plumbing. */
@@ -53,7 +51,7 @@ export class NavigatorRevealController implements ReactiveController {
   }
 
   hostUpdated(): void {
-    const { selectedLine, buckets, openSections, filtering } = this._read();
+    const { selectedLine, buckets, openSections } = this._read();
     if (selectedLine === null) {
       this._scrolledLine = null;
       this._revealedLine = null;
@@ -74,7 +72,7 @@ export class NavigatorRevealController implements ReactiveController {
       this._scrolledLine = selectedLine;
       return;
     }
-    if (!filtering && !openSections.has(index) && this._revealedLine !== selectedLine) {
+    if (!openSections.has(index) && this._revealedLine !== selectedLine) {
       // Ask the page to open it once, then bail; the re-render re-enters with
       // the row. Latch *before* dispatch (below) so a manual re-close of this
       // section can't re-trigger the forced open on a later render.
@@ -89,8 +87,8 @@ export class NavigatorRevealController implements ReactiveController {
       return;
     }
     // Past the reveal gate: the section is already open (URL ``open=`` restore,
-    // accordion), we're filtering, or we already asked once. Latch the line
-    // here too — without it a section opened by URL never marks the line
+    // accordion) or we already asked once. Latch the line here too — without
+    // it a section opened by URL never marks the line
     // handled, so closing it (by opening another section) re-fires the reveal
     // and snaps it back open.
     this._revealedLine = selectedLine;

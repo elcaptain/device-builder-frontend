@@ -112,14 +112,6 @@ export const deviceNavigatorStyles = css`
     flex-shrink: 0;
   }
 
-  .nav-empty {
-    padding: var(--wa-space-l) var(--wa-space-m);
-    margin: 0;
-    font-size: var(--wa-font-size-s);
-    color: var(--wa-color-text-quiet);
-    text-align: center;
-  }
-
   .nav-content {
     display: flex;
     align-items: center;
@@ -169,7 +161,7 @@ export const deviceNavigatorStyles = css`
     flex-shrink: 0;
   }
 
-  .nav-subgroup-header:not(.nav-subgroup-header--static):hover .nav-subgroup-title {
+  .nav-subgroup-header:hover .nav-subgroup-title {
     color: var(--esphome-primary);
   }
 
@@ -177,11 +169,6 @@ export const deviceNavigatorStyles = css`
     outline: none;
     box-shadow: var(--esphome-focus-ring-tight);
     border-radius: var(--wa-border-radius-s);
-  }
-
-  /* While filtering the subgroup can't collapse, so it isn't interactive. */
-  .nav-subgroup-header--static {
-    cursor: default;
   }
 
   /* Muted leading domain glyph — on a domain subgroup header and on an
