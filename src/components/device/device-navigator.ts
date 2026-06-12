@@ -1,10 +1,10 @@
 import { consume } from "@lit/context";
 import {
   mdiChevronDown,
-  mdiChevronLeft,
   mdiChevronRight,
   mdiChevronUp,
   mdiCog,
+  mdiMagnify,
   mdiMenu,
   mdiPlusCircleOutline,
   mdiScriptTextOutline,
@@ -51,19 +51,24 @@ import type { ESPHomeAddConfigDialog } from "./add-config-dialog.js";
 import "./add-script-dialog.js";
 import type { ESPHomeAddScriptDialog } from "./add-script-dialog.js";
 import "./device-navigator-search.js";
+import type { ESPHomeNavigatorSearch } from "./device-navigator-search.js";
 import { SECTION_ICON } from "./section-icons.js";
 import { TriggerCatalogController } from "./trigger-catalog-controller.js";
 
 registerMdiIcons({
   "chevron-down": mdiChevronDown,
-  "chevron-left": mdiChevronLeft,
   "chevron-up": mdiChevronUp,
   "chevron-right": mdiChevronRight,
   cog: mdiCog,
+  magnify: mdiMagnify,
   menu: mdiMenu,
   "plus-circle-outline": mdiPlusCircleOutline,
   "script-text-outline": mdiScriptTextOutline,
 });
+
+/** Item count across all sections at or above which the search toggle is
+ * offered (15 is where the header bar starts to overflow). */
+const SEARCH_TOGGLE_THRESHOLD = 15;
 
 @customElement("esphome-device-navigator")
 export class ESPHomeDeviceNavigator extends LitElement {
@@ -179,6 +184,9 @@ export class ESPHomeDeviceNavigator extends LitElement {
   @query("esphome-add-script-dialog")
   private _addScriptDialog!: ESPHomeAddScriptDialog;
 
+  @query("esphome-navigator-search")
+  private _search!: ESPHomeNavigatorSearch;
+
   @property({ attribute: false })
   selectedKey: string | null = null;
 
@@ -197,6 +205,10 @@ export class ESPHomeDeviceNavigator extends LitElement {
   /** Active navigator search query; empty string means "not filtering". */
   @state()
   private _query = "";
+
+  /** Whether the user manually revealed the search box via the header toggle. */
+  @state()
+  private _searchOpen = false;
 
   /** Domains collapsed in the grouped Components list. */
   @state()
@@ -344,6 +356,12 @@ export class ESPHomeDeviceNavigator extends LitElement {
         )
       : null;
     const totalItems = sections.reduce((n, s) => n + s.items.length, 0);
+    // Long lists earn the search box's space; short ones hide it behind
+    // the header magnifier until the user (or a query) reveals it.
+    // Offer the toggle only once the list is long enough to be worth
+    // filtering; keep it while open so an expanded box can still be closed.
+    const showSearchToggle = totalItems >= SEARCH_TOGGLE_THRESHOLD || this._searchOpen;
+    const showSearch = this._searchOpen || filtering;
     const matchCount = matches ? matches.reduce((n, m) => n + m.length, 0) : 0;
     // Stay silent on zero matches; the "No matches" empty state speaks.
     const resultLabel =
@@ -386,18 +404,33 @@ export class ESPHomeDeviceNavigator extends LitElement {
         ></esphome-add-script-dialog>
         <header class="card-header">
           <h2 class="card-title">${this._localize("device.navigator_title")}</h2>
-          <button
-            type="button"
-            class="ghost-icon-btn collapse-btn"
-            @click=${this._onCollapseClick}
-            title=${this._localize("device.hide_navigator")}
-            aria-label=${this._localize("device.hide_navigator")}
-          >
-            <wa-icon library="mdi" name="menu"></wa-icon>
-          </button>
+          <div class="header-actions">
+            ${showSearchToggle
+              ? html`<button
+                  type="button"
+                  class="ghost-icon-btn search-btn"
+                  aria-pressed=${showSearch}
+                  @click=${this._toggleSearch}
+                  title=${this._localize("device.navigator_search_toggle")}
+                  aria-label=${this._localize("device.navigator_search_toggle")}
+                >
+                  <wa-icon library="mdi" name="magnify"></wa-icon>
+                </button>`
+              : nothing}
+            <button
+              type="button"
+              class="ghost-icon-btn collapse-btn"
+              @click=${this._onCollapseClick}
+              title=${this._localize("device.hide_navigator")}
+              aria-label=${this._localize("device.hide_navigator")}
+            >
+              <wa-icon library="mdi" name="menu"></wa-icon>
+            </button>
+          </div>
         </header>
         <div class="card-body">
           <esphome-navigator-search
+            ?hidden=${!showSearch}
             .value=${this._query}
             .resultLabel=${resultLabel}
             @navigator-search=${this._onSearchChange}
@@ -443,6 +476,17 @@ export class ESPHomeDeviceNavigator extends LitElement {
 
   private _onSearchChange = (e: CustomEvent<{ value: string }>) => {
     this._query = e.detail.value;
+  };
+
+  /** Header magnifier: reveal + focus the search, or collapse and clear it. */
+  private _toggleSearch = () => {
+    if (this._searchOpen || this._query) {
+      this._searchOpen = false;
+      this._query = "";
+      return;
+    }
+    this._searchOpen = true;
+    void this.updateComplete.then(() => this._search?.focusInput());
   };
 
   private _toggleSection(index: number) {

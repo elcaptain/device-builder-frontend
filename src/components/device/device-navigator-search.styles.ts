@@ -1,5 +1,11 @@
 import { css } from "lit";
 
+import {
+  inputFocusRing,
+  searchControlBox,
+  searchControlText,
+} from "../../styles/inputs.js";
+
 /**
  * Styles for <esphome-navigator-search>. Kept in its own file to mirror
  * the navigator's split layout (see device-navigator.styles.ts).
@@ -7,6 +13,10 @@ import { css } from "lit";
 export const navigatorSearchStyles = css`
   :host {
     display: block;
+  }
+
+  :host([hidden]) {
+    display: none;
   }
 
   .search {
@@ -18,16 +28,12 @@ export const navigatorSearchStyles = css`
     border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
     border-radius: var(--wa-border-radius-m);
     background: var(--wa-color-surface-default);
+    /* Wrapper draws the border, so it carries the shared control height. */
+    ${searchControlBox}
   }
 
   .search:focus-within {
-    border-color: var(--esphome-primary);
-  }
-
-  .search-icon {
-    font-size: var(--wa-font-size-l);
-    color: var(--wa-color-text-quiet);
-    flex-shrink: 0;
+    ${inputFocusRing}
   }
 
   input {
@@ -36,10 +42,12 @@ export const navigatorSearchStyles = css`
     border: none;
     background: transparent;
     color: var(--wa-color-text-normal);
-    /* 16px floor avoids iOS focus-zoom in the mobile drawer. */
+    ${searchControlText}
+    /* 16px floor avoids iOS focus-zoom in the mobile drawer (overrides the
+       shared 14px); the wrapper holds the height, so this doesn't grow it. */
     font-size: max(16px, var(--wa-font-size-s));
     font-family: inherit;
-    padding: var(--wa-space-s) 0;
+    padding: 0;
     outline: none;
   }
 
