@@ -14,10 +14,12 @@ import { ESPHOME_YAML_INDENT } from "./esphome-yaml-lang.js";
 import { LIST_SECTIONS } from "./section-entry-overrides.js";
 import { indentOf, RE_PAIR_LINE, stripComment } from "./yaml-line-walker.js";
 import { splitInlineComment, stripQuotes } from "./yaml-scalar.js";
-import { endsBlockAtIndent } from "./yaml-section-lexer.js";
+import {
+  _skipBlankAndCommentLines,
+  endsBlockAtIndent,
+  LIST_ITEM_START_RE,
+} from "./yaml-section-lexer.js";
 
-/** A YAML list-item line: leading indent, a dash, then a space or EOL. */
-export const RE_LIST_ITEM = /^\s*-(\s|$)/;
 /** A field-path segment that addresses a list index (``["areas","0",…]``). */
 const RE_PATH_INDEX = /^\d+$/;
 
@@ -187,7 +189,7 @@ export function _clearYamlSectionsMemo(): void {
 }
 
 /**
- * If a top-level section contains YAML list items (`  - `), expand each into
+ * If a top-level section contains YAML list items, expand each into
  * its own YamlSection with name, platform, and parentKey metadata.
  * Otherwise return the section as-is.
  */
@@ -211,11 +213,22 @@ function _expandListItems(
   const keyIdx = section.fromLine - 1; // 0-indexed line of the top-level key
   const endIdx = section.toLine - 1; // 0-indexed last line (inclusive)
 
-  // Find list item starts (`  - ` or `  -\n`)
+  // The section is a list iff its first content line is a dash. Its
+  // indent — column 0 (YAML's zero-indented sequence), 2, 4, ... —
+  // is the item indent; deeper dashes belong to nested sequences.
+  const firstContentIdx = _skipBlankAndCommentLines(lines, keyIdx + 1);
+  const firstContentIndent =
+    firstContentIdx <= endIdx ? lineIndent(lines[firstContentIdx]) : -1;
+
   const listStarts: number[] = [];
-  for (let i = keyIdx + 1; i <= endIdx; i++) {
-    if (/^  -\s/.test(lines[i]) || /^  -$/.test(lines[i])) {
-      listStarts.push(i);
+  if (firstContentIdx <= endIdx && LIST_ITEM_START_RE.test(lines[firstContentIdx])) {
+    for (let i = firstContentIdx; i <= endIdx; i++) {
+      if (
+        LIST_ITEM_START_RE.test(lines[i]) &&
+        lineIndent(lines[i]) === firstContentIndent
+      ) {
+        listStarts.push(i);
+      }
     }
   }
 
@@ -227,9 +240,11 @@ function _expandListItems(
     let name = "";
     let id = "";
     for (let i = keyIdx + 1; i <= endIdx; i++) {
-      // Only the block's own direct keys; deeper nested keys aren't the
-      // singleton's id/name.
-      if (lineIndent(lines[i]) !== ESPHOME_YAML_INDENT.length) continue;
+      // Only the block's own direct keys; deeper nested keys aren't
+      // the singleton's id/name, and a compact child sequence's
+      // `- id:` at the direct-child indent isn't either.
+      if (lineIndent(lines[i]) !== firstContentIndent) continue;
+      if (LIST_ITEM_START_RE.test(lines[i])) continue;
       name = readInstanceScalar(lines[i], "name") ?? name;
       id = readInstanceScalar(lines[i], "id") ?? id;
     }
@@ -395,7 +410,7 @@ export function findFieldLine(
   // A dash item's inline key (``- name: x``) sits at the content column
   // after ``- ``, not the dash column.
   const keyIndentOf = (line: string): number =>
-    RE_LIST_ITEM.test(line) ? listItemChildIndent(line) : indentOf(line);
+    LIST_ITEM_START_RE.test(line) ? listItemChildIndent(line) : indentOf(line);
   const firstChildIndent = (lo: number, hi: number): number | null => {
     for (let i = lo; i <= hi; i++) {
       const s = stripComment(lines[i]);
@@ -418,7 +433,7 @@ export function findFieldLine(
       const dashes: number[] = [];
       for (let i = lo; i <= hi; i++) {
         const s = stripComment(lines[i]);
-        if (s.trim() && indentOf(s) === baseIndent && RE_LIST_ITEM.test(s))
+        if (s.trim() && indentOf(s) === baseIndent && LIST_ITEM_START_RE.test(s))
           dashes.push(i);
       }
       // A numeric segment is a list index only where this level actually has
@@ -453,7 +468,7 @@ export function findFieldLine(
     return null;
   };
 
-  if (RE_LIST_ITEM.test(lines[start])) {
+  if (LIST_ITEM_START_RE.test(lines[start])) {
     // List-item section: keys live at the item's child indent, and the
     // header line itself carries the inline key.
     return descend(start, end, listItemChildIndent(lines[start]), relPath);
