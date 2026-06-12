@@ -5,12 +5,14 @@ import {
 } from "../../api/types/firmware-jobs.js";
 import { chipNameToVariant } from "../../util/chip-variant.js";
 import { triggerDownload } from "../../util/download-text.js";
+import { getErrorMessage } from "../../util/error-message.js";
 import { dispatchShowLogsAfterInstall } from "../../util/post-install-logs.js";
 import {
   connectToPort,
   detectChip,
   disconnect,
   flashFirmware,
+  isPortPickerCancel,
   resetAndDisconnect,
   type DetectedChip,
 } from "../../util/web-serial.js";
@@ -50,8 +52,14 @@ export async function startWebSerialInstall(
   let detected: DetectedChip;
   try {
     detected = await detectChip(onLog);
-  } catch {
-    host._close(); // User cancelled port selection
+  } catch (err) {
+    if (isPortPickerCancel(err)) {
+      host._close();
+      return;
+    }
+    // The picker succeeded but the chip never answered — fail loud with
+    // the esptool log expanded instead of silently closing (#1414).
+    host._fail(host._localize("serial.connect_failed"), getErrorMessage(err));
     return;
   }
   host._detected = detected;
