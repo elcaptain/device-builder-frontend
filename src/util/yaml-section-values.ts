@@ -72,6 +72,29 @@ export function findSectionRange(
   return { start, end };
 }
 
+/** Indent of the deepest non-blank, non-comment line in ``[start, end)``
+ *  — the section's deepest real value line, used to tell a trailing
+ *  comment apart from block-scalar body text. Must be the maximum, not
+ *  the last line's: a nested mapping earlier in the section can be deeper
+ *  than the final value, and a trailing comment between the two indents
+ *  is a real comment to preserve, not block text. Falls back to the
+ *  section's child indent when the section has no such line. */
+function _deepestValueLineIndent(
+  lines: string[],
+  start: number,
+  end: number,
+  fallback: number
+): number {
+  let deepest = -1;
+  for (let i = start + 1; i < end; i++) {
+    const line = lines[i];
+    if (line.trim() === "" || isCommentLine(line)) continue;
+    const indent = _leadingIndent(line).length;
+    if (indent > deepest) deepest = indent;
+  }
+  return deepest < 0 ? fallback : deepest;
+}
+
 /**
  * Replace the body of a section in a YAML document with `values`.
  *
@@ -99,27 +122,35 @@ export function updateSectionInYaml(
   const childIndent = _detectSectionChildIndent(lines, start, isListItem);
 
   // The range runs to the next top-level key, swallowing trailing
-  // comments the splice would then wipe. Walk the trailing run back
-  // from `end`; if it holds a section-level comment, stop the splice
-  // before the run so those lines survive. A `#` line indented deeper
-  // than the section's children is block-scalar body content, not a
-  // YAML comment — break there so it stays on the byte-identical path
-  // rather than being duplicated. Pure-blank runs (incl. the terminal
-  // newline) also stay on that path. (`> start + 1` keeps the header.)
+  // blank lines and trailing comments the splice would then wipe. Stop
+  // the splice before that run so those lines survive verbatim. This
+  // indent heuristic is the fallback for the `globals` path below, which
+  // has no per-key spans; the main per-key path overrides `spliceEnd`
+  // with the parser's exact value end once it has parsed (see below).
+  // A trailing comment counts as a YAML comment (preserve) when it's at
+  // the section's child indent or shallower OR shallower than the deepest
+  // value line's indent (a block scalar's body sits deeper than its key,
+  // so a comment between the two is a real comment, not block text).
+  // (`> start + 1` keeps the header.)
+  const bodyIndent = _deepestValueLineIndent(lines, start, end, childIndent.length);
   let runStart = end;
-  let trailingHasComment = false;
   while (runStart > start + 1) {
     const prev = lines[runStart - 1];
     if (prev.trim() === "") {
       runStart--;
-    } else if (isCommentLine(prev) && _leadingIndent(prev).length <= childIndent.length) {
-      trailingHasComment = true;
+      continue;
+    }
+    const prevIndent = _leadingIndent(prev).length;
+    if (
+      isCommentLine(prev) &&
+      (prevIndent <= childIndent.length || prevIndent < bodyIndent)
+    ) {
       runStart--;
     } else {
       break;
     }
   }
-  const spliceEnd = trailingHasComment ? runStart : end;
+  let spliceEnd = runStart;
 
   // Top-level list-bodied section (globals): re-emit through the
   // mapping serializer's array branch — { sectionKey: array } yields
@@ -148,6 +179,20 @@ export function updateSectionInYaml(
   // Re-parse the original to recover each key's source-line span and
   // on-disk value — the diff below needs both.
   const parsed = parseSectionCore(lines, sectionKey, fromLine);
+
+  // The parser already pinned each value's exact end — block scalars via
+  // `_blockScalarBodyEnd`, so a `#` indented at/past the block content
+  // indent is body and a less-indented one is a trailing comment. The
+  // last value's span end is therefore the real start of the trailing
+  // run, exactly where the indent heuristic above can only approximate
+  // (it underestimates an all-`#` block body and can't see a nested
+  // mapping deeper than the final value). Use it so the splice boundary
+  // and the parse extent agree on every block body.
+  let lastContentEnd = -1;
+  for (const span of parsed.spans.values()) {
+    if (span.end > lastContentEnd) lastContentEnd = span.end;
+  }
+  if (lastContentEnd >= 0) spliceEnd = lastContentEnd;
 
   // `childIndent` (detected above) also matches the user's existing
   // indent step on save, so 4-space (or other consistent) YAML isn't

@@ -33,6 +33,7 @@ import {
   TOP_LEVEL_KEY_START_RE,
 } from "./yaml-section-lexer.js";
 import {
+  _blockScalarBodyEnd,
   _detectFirstDashIndent,
   _matchFlatMappingField,
   _scanValueBlock,
@@ -219,10 +220,10 @@ const collectBlockListMappings = (
       const blockHeader = parseBlockScalarHeader(headerRaw);
       if (blockHeader) {
         if (!isEditableLambdaBlock(blockHeader)) return null;
-        const { endIdx } = _scanValueBlock(
+        const endIdx = _blockScalarBodyEnd(
           lines,
           at + 1,
-          `${dashIndent}${ESPHOME_YAML_INDENT}`
+          `${dashIndent}${ESPHOME_YAML_INDENT}`.length
         );
         // A sibling sub-key after the lambda body would be lost by the
         // early return; bail to the whole-list YamlRawValue fallback
@@ -469,9 +470,10 @@ export function parseSectionCore(
     // through `YamlRawValue` (header replayed on serialize).
     const blockHeader = parseBlockScalarHeader(raw);
     if (blockHeader) {
-      const { endIdx } = _scanValueBlock(lines, i + 1, childIndent);
+      const endIdx = _blockScalarBodyEnd(lines, i + 1, childIndent.length);
       values[key] = blockScalarValue(blockHeader, raw, lines.slice(i + 1, endIdx));
       recordSpan(key, i, endIdx);
+      // Auto-increment ``for`` loop: resume so the next ``i++`` lands on endIdx.
       i = endIdx - 1;
       continue;
     }
@@ -596,8 +598,11 @@ function parseNestedBlock(
     // `"|-"` / `"!lambda |-"` string.
     const nestedBlockHeader = parseBlockScalarHeader(raw);
     if (nestedBlockHeader) {
-      const { endIdx } = _scanValueBlock(lines, i + 1, indent);
+      const endIdx = _blockScalarBodyEnd(lines, i + 1, indent.length);
       values[key] = blockScalarValue(nestedBlockHeader, raw, lines.slice(i + 1, endIdx));
+      // This is a manual-increment ``while`` loop; ``continue`` skips the
+      // trailing ``i++``, so resume *at* endIdx (not endIdx - 1) or the last
+      // body line gets re-scanned as a nested key.
       i = endIdx;
       continue;
     }

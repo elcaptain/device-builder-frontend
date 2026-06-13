@@ -636,6 +636,46 @@ describe("parseYamlSectionValues / updateSectionInYaml — block scalars and com
     expect(after.match(/lambda:/g)).toHaveLength(1);
   });
 
+  it("stops a list-item lambda block at a less-indented trailing comment", () => {
+    // The block scalar must end where its indentation does; the blank
+    // lines and the column-0 `# ...` belong to the next section, not the
+    // lambda body (which would otherwise become literal C++ on save).
+    const before = `binary_sensor:
+  - platform: template
+    id: opening_sensor
+    lambda: |-
+      return id(x) && id(y);
+
+
+# Enable logging
+logger:
+  level: DEBUG
+`;
+    const values = parseYamlSectionValues(before, "binary_sensor.template", 2);
+    expect(JSON.stringify(values.lambda)).not.toContain("Enable logging");
+    const after = updateSectionInYaml(before, "binary_sensor.template", values, 2);
+    expect(after).toBe(before);
+    expect(after.match(/# Enable logging/g)).toHaveLength(1);
+  });
+
+  it("stops a direct block scalar at a less-indented trailing comment", () => {
+    // Same boundary for the `key: |-` (non-list) path; the comment stays
+    // outside the raw block and isn't duplicated on round-trip.
+    const before = `mqtt:
+  topic: foo
+  log_format: |-
+    line one
+    line two
+
+# next section
+sensor:
+`;
+    const values = parseYamlSectionValues(before, "mqtt", 1);
+    const after = updateSectionInYaml(before, "mqtt", values, 1);
+    expect(after).toBe(before);
+    expect(after.match(/# next section/g)).toHaveLength(1);
+  });
+
   it("overrides raw preservation when the form writes a new value to that key", () => {
     // Contract pin: YamlRawValue is the parser's "I can't model
     // this, paste it back unchanged" sentinel. If the form does
@@ -2088,6 +2128,126 @@ sensor:
       static_ip: "10.0.0.5",
       gateway: "10.0.0.1",
     });
+  });
+
+  it("bounds a block scalar nested under a mapping key by indent", () => {
+    // ``parseNestedBlock``'s block-scalar branch slices the body with
+    // ``_blockScalarBodyEnd`` and resumes the manual-increment ``while``
+    // loop *at* endIdx (not endIdx - 1) so the last body line isn't
+    // re-scanned as a key. Pin the contract: the nested ``inner: |-``
+    // stops at its two body lines, ``sibling`` parses as its own field,
+    // there is no spurious key from the body, and the section round-trips
+    // byte-identically with the next top-level key untouched.
+    const yaml = [
+      "outer:",
+      "  level1:",
+      "    inner: |-",
+      "      body one",
+      "      body two",
+      "    sibling: keep",
+      "next_section:",
+      "  level: DEBUG",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "outer");
+    const level1 = values.level1 as Record<string, unknown>;
+    expect(Object.keys(level1)).toEqual(["inner", "sibling"]);
+    const inner = level1.inner as YamlRawValue;
+    expect(inner.body.replace(/\n+$/, "")).toBe("body one\nbody two");
+    expect(level1.sibling).toBe("keep");
+    expect(updateSectionInYaml(yaml, "outer", values)).toBe(yaml);
+  });
+
+  it("preserves an oddly-indented trailing comment when the deepest line is an earlier nested mapping", () => {
+    // The trailing-comment trim keys off the section's *deepest* value
+    // line, not its last one. A nested mapping (deep) followed by a
+    // shallow scalar leaves the last value shallower than the deepest;
+    // a trailing comment indented between the shallow last value and the
+    // deeper nested line is a real comment, so it must survive the save.
+    const yaml = [
+      "esphome:",
+      "  nested:",
+      "    deep: 1",
+      "  name: test",
+      "   # weird trailing comment at indent 3",
+      "logger:",
+      "  level: DEBUG",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "esphome");
+    expect(updateSectionInYaml(yaml, "esphome", values)).toBe(yaml);
+  });
+
+  it("preserves a trailing comment after a block scalar whose body is all # lines", () => {
+    // The splice boundary comes from the parser's exact value end, not an
+    // indent heuristic that skips `#` lines. PyYAML 6.0.3 parses `key` as
+    // exactly the indent-6 line ('# body is only comment lines'); the
+    // less-indented indent-4 `#` is a real trailing comment, so it must
+    // survive a no-op save.
+    const yaml = [
+      "parent:",
+      "  key: |-",
+      "      # body is only comment lines",
+      "    # trailing comment, indent 4",
+      "next:",
+      "  level: DEBUG",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "parent");
+    expect((values.key as YamlRawValue).body.replace(/\n+$/, "")).toBe(
+      "# body is only comment lines"
+    );
+    expect(updateSectionInYaml(yaml, "parent", values)).toBe(yaml);
+  });
+
+  it("does not duplicate a # body line shallower than a deeper one on save", () => {
+    // A block body of `x` / deeper `# deep` / shallower `# shallow` is
+    // entirely literal text (PyYAML 6.0.3: 'x\n  # deep\n# shallow'); the
+    // splice must keep all of it inside the value, never pulling the
+    // shallower `# shallow` out as a trailing comment and emitting it
+    // twice.
+    const yaml = [
+      "mqtt:",
+      "  log_format: |-",
+      "    x",
+      "      # deep",
+      "    # shallow",
+      "next:",
+      "  level: DEBUG",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "mqtt");
+    expect((values.log_format as YamlRawValue).body.replace(/\n+$/, "")).toBe(
+      "x\n  # deep\n# shallow"
+    );
+    const after = updateSectionInYaml(yaml, "mqtt", values);
+    expect(after).toBe(yaml);
+    expect(after.match(/# shallow/g)).toHaveLength(1);
+  });
+
+  it("keeps a literal # line at the block content indent inside the value when a deeper body line precedes it", () => {
+    // A deeper non-comment body line (`b`) must not inflate the splice's
+    // idea of where the body ends: the `# literal` at the block content
+    // indent is scalar text (PyYAML 6.0.3: 'a\n  b\n# literal'), so it
+    // stays in the value and is emitted exactly once, never pulled out as
+    // a trailing comment.
+    const yaml = [
+      "mqtt:",
+      "  log_format: |-",
+      "    a",
+      "      b",
+      "    # literal",
+      "sensor:",
+      "  x: 1",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "mqtt");
+    expect((values.log_format as YamlRawValue).body.replace(/\n+$/, "")).toBe(
+      "a\n  b\n# literal"
+    );
+    const after = updateSectionInYaml(yaml, "mqtt", values);
+    expect(after).toBe(yaml);
+    expect(after.match(/# literal/g)).toHaveLength(1);
   });
 
   it("round-trips 4-space user YAML through update without mixing indents", () => {
