@@ -28,6 +28,7 @@ import {
 } from "../../util/yaml-serialize.js";
 import { findMissingDependencies } from "./add-component-deps.js";
 import { coerceFields } from "./add-component-form-coerce.js";
+import { overlayOptions, overlayRequired } from "./add-component-form-overlays.js";
 import { addComponentFormStyles } from "./add-component-form.styles.js";
 import "./config-entry-form.js";
 import type { ConfigEntryValueChange } from "./config-entry-form.js";
@@ -79,6 +80,12 @@ export class ESPHomeAddComponentForm extends LitElement {
   @property({ attribute: false })
   extraRequired: string[] | null = null;
 
+  /** Per-field dropdown narrowing the requester imposes via a list
+   *  `bus_constraints` value (CN105 -> baud_rate [2400, 9600]); the
+   *  matching entry's `options` are limited to these, defaulting first. */
+  @property({ attribute: false })
+  optionOverrides: Record<string, (string | number)[]> | null = null;
+
   @property({ type: Boolean })
   submitting = false;
 
@@ -113,20 +120,15 @@ export class ESPHomeAddComponentForm extends LitElement {
 
   static styles = [espHomeStyles, inputStyles, addComponentFormStyles];
 
-  /** Schema with `extraRequired` keys overlaid as required. Memoized so
-   *  the shared form's `.entries` identity is render-stable. */
-  private _overlayRequired = memoizeOne(
-    (entries: ConfigEntry[], extra: string[] | null): ConfigEntry[] => {
-      if (!extra?.length) return entries;
-      const keys = new Set(extra);
-      return entries.map((e) =>
-        keys.has(e.key) && !e.required ? { ...e, required: true } : e
-      );
-    }
-  );
+  // Memoized so the shared form's `.entries` identity is render-stable.
+  private _overlayRequired = memoizeOne(overlayRequired);
+  private _overlayOptions = memoizeOne(overlayOptions);
 
   private get _entries(): ConfigEntry[] {
-    return this._overlayRequired(this.component.config_entries, this.extraRequired);
+    return this._overlayOptions(
+      this._overlayRequired(this.component.config_entries, this.extraRequired),
+      this.optionOverrides
+    );
   }
 
   /** True once we've seeded `_values` for the current component. */
