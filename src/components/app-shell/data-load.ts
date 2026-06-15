@@ -50,10 +50,11 @@ export async function loadIntegrationDocs(host: ESPHomeApp): Promise<void> {
   }
 }
 
-export async function loadThemePreference(host: ESPHomeApp): Promise<void> {
+export async function loadExpertModePreference(host: ESPHomeApp): Promise<void> {
   try {
     const prefs = await host._api.getPreferences();
-    host.applyTheme(prefs.theme);
+    // This PR only moves theme to the initial_state snapshot; expert_mode keeps
+    // loading the way it did before, left to the experience-levels follow-up.
     host._expertMode = prefs.expert_mode;
   } catch {
     // Preferences not critical — keep localStorage value.
