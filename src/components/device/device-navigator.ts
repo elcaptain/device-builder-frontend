@@ -536,8 +536,11 @@ export class ESPHomeDeviceNavigator extends LitElement {
     if (!this._api) return;
     // The slim catalog carries every section's friendly name; navigator-labels
     // falls back to it, so load it once rather than depending solely on per-id
-    // body fetches for names.
-    void loadCatalog(this._api).catch(() => {});
+    // body fetches for names. Re-render when it lands so a YAML-only section's
+    // friendly name replaces the raw key on first paint.
+    void loadCatalog(this._api)
+      .then(() => this.requestUpdate())
+      .catch(() => {});
     const sections = parseYamlTopLevelSections(this.yaml);
     const { core, components } = categorizeSections(sections);
     const platform = this.platform || undefined;

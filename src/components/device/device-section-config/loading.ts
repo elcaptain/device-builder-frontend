@@ -42,9 +42,11 @@ export async function loadConfig(host: ESPHomeDeviceSectionConfig): Promise<void
     // (editor/validate_yaml's post-render refresh) doesn't re-issue the round
     // trip.
     const yamlOnly = YAML_ONLY_SECTIONS.has(host.sectionKey);
+    // loadCatalog degrades to an empty index (logged) rather than rejecting, so
+    // a genuine load failure surfaces as a raw-id YAML-only header, not a throw;
+    // a real throw still reaches loadConfig's catch below.
     const component = yamlOnly
-      ? ((await loadCatalog(host._api).catch(() => null))?.byId.get(host.sectionKey) ??
-        null)
+      ? ((await loadCatalog(host._api)).byId.get(host.sectionKey) ?? null)
       : await fetchComponent(host._api, host.sectionKey, platform);
 
     if (id !== host._loadId) return;

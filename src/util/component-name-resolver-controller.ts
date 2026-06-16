@@ -61,8 +61,11 @@ export class ComponentNameResolverController implements ReactiveController {
   kickoff(ids: Iterable<string>): void {
     const api = this._getApi();
     if (!api) return;
-    // The slim index supplies names for YAML-only sections without a body fetch.
-    void loadCatalog(api).catch(() => {});
+    // The slim index supplies names for YAML-only sections without a body fetch;
+    // re-render when it lands so the friendly name replaces the raw id.
+    void loadCatalog(api)
+      .then(() => this._host.requestUpdate())
+      .catch(() => {});
     const platform = this._getPlatform();
     for (const id of ids) {
       // YAML-only sections (lvgl) render no form; don't pull their per-id body

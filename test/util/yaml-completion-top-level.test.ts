@@ -230,6 +230,29 @@ describe("resolveAvailableEntries (platform-merged)", () => {
     );
     expect(out.map((e: { key: string }) => e.key)).toContain("ssid");
   });
+
+  it("returns [] for a YAML-only section without fetching the body (lvgl)", async () => {
+    // lvgl renders YAML-only; completion under it must never hydrate the
+    // (~14 MB) per-id body. Guard short-circuits before any getComponentBodies.
+    const { resolveAvailableEntries } = await import("../../src/util/yaml-completion.js");
+    const c = catalog([entry("lvgl", ComponentCategory.CORE)]);
+    let fetched = false;
+    const fakeApi = {
+      getComponentBodies: async () => {
+        fetched = true;
+        return {};
+      },
+    } as never;
+    const out = await (resolveAvailableEntries as unknown as Function)(
+      fakeApi,
+      c,
+      "lvgl", // parentKey
+      null, // platformValue
+      "lvgl" // topLevelKey
+    );
+    expect(out).toEqual([]);
+    expect(fetched).toBe(false);
+  });
 });
 
 describe("matchKeyPosition", () => {
