@@ -24,12 +24,21 @@
  * so route the whole section to YAML-only — both shapes round-
  * trip cleanly through the YAML pane.
  *
+ * `lvgl` is a recursive widget tree (`pages:` -> `widgets:` -> widgets that
+ * themselves contain `widgets:`). The catalog model can't express the
+ * recursion, so the structured form can't round-trip it (`pages:` renders an
+ * empty list even when the YAML has pages) and editing in the form silently
+ * drops config. Route the whole section to the YAML pane, which round-trips
+ * losslessly. Its per-id catalog body is also ~14 MB; YAML-only sections skip
+ * the body fetch (see `loadConfig`), so the section never pulls it.
+ *
  * Lives in its own module so the unit test can import without
  * dragging Lit / DOM into the vitest Node environment.
  */
 export const YAML_ONLY_SECTIONS: ReadonlySet<string> = new Set([
   "external_components",
   "packages",
+  "lvgl",
 ]);
 
 /** True when the section should fall back to the YAML notice — either

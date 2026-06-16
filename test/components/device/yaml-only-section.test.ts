@@ -45,6 +45,14 @@ describe("YAML_ONLY_SECTIONS", () => {
     expect(MAP_SECTIONS.has("packages")).toBe(false);
   });
 
+  it("contains lvgl — recursive widget tree, no structured form", () => {
+    // lvgl is pages -> widgets -> widgets (recursive); the catalog can't
+    // express it and its per-id body is ~14 MB, so it's always YAML-only.
+    expect(YAML_ONLY_SECTIONS.has("lvgl")).toBe(true);
+    expect(isYamlOnlySection("lvgl", 200)).toBe(true);
+    expect(MAP_SECTIONS.has("lvgl")).toBe(false);
+  });
+
   it("YAML_ONLY_SECTIONS and MAP_SECTIONS are mutually exclusive", () => {
     // YAML-only takes precedence — an entry in both would silently
     // demote a MAP section to a YAML notice.

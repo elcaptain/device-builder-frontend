@@ -3,6 +3,7 @@ import { actionFieldLabel } from "../../util/action-field-label.js";
 import { getCachedComponent } from "../../util/component-name-cache.js";
 import { stripRedundantComponentSuffix } from "../../util/component-title.js";
 import { resolveSubstitutions } from "../../util/substitutions.js";
+import { getLoadedCatalog } from "../../util/yaml-completion-catalog.js";
 import { type YamlSection, sectionKeyOf } from "../../util/yaml-sections.js";
 import type { NavigatorBuckets } from "./navigator-buckets.js";
 import type { TriggerCatalogController } from "./trigger-catalog-controller.js";
@@ -56,7 +57,13 @@ export function resolveNavItemLabels(
 
   let primary = raw;
   const cached = getCachedComponent(raw, ctx.platform || undefined);
+  // YAML-only sections (lvgl) never hydrate the per-id body, so fall back to
+  // the slim index's friendly name rather than the raw key.
   if (cached?.name) primary = cached.name;
+  else {
+    const slim = getLoadedCatalog()?.byId.get(raw);
+    if (slim?.name) primary = slim.name;
+  }
   if (category === "core") primary = stripRedundantComponentSuffix(primary);
 
   // Prefer the backend-resolved node name for the esphome core section

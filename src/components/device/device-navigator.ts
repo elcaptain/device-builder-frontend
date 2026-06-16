@@ -24,6 +24,7 @@ import {
   subscribeComponentCache,
 } from "../../util/component-name-cache.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import { loadCatalog } from "../../util/yaml-completion-catalog.js";
 import {
   type YamlSection,
   categorizeSections,
@@ -40,6 +41,7 @@ import { type NavRow, resolveBucketLabels } from "./navigator-labels.js";
 import { type NavAction, renderNavSection } from "./navigator-render.js";
 import { NavigatorRevealController } from "./navigator-reveal-controller.js";
 import { navItemMatches } from "./navigator-search-match.js";
+import { YAML_ONLY_SECTIONS } from "./yaml-only-sections.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "./add-automation-dialog.js";
@@ -532,11 +534,18 @@ export class ESPHomeDeviceNavigator extends LitElement {
    */
   private _kickoffNameResolves(): void {
     if (!this._api) return;
+    // The slim catalog carries every section's friendly name; navigator-labels
+    // falls back to it, so load it once rather than depending solely on per-id
+    // body fetches for names.
+    void loadCatalog(this._api).catch(() => {});
     const sections = parseYamlTopLevelSections(this.yaml);
     const { core, components } = categorizeSections(sections);
     const platform = this.platform || undefined;
     for (const item of [...core, ...components]) {
       const id = sectionKeyOf(item);
+      // YAML-only sections (lvgl) render no form; don't pull their per-id body
+      // (lvgl's is ~14 MB) just to resolve a name the slim index already has.
+      if (YAML_ONLY_SECTIONS.has(id)) continue;
       if (getCachedComponent(id, platform) !== undefined) continue;
       void fetchComponent(this._api, id, platform).catch(() => {
         // Swallow — the navigator falls back to the raw id when no

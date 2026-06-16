@@ -14,6 +14,7 @@ import type { EditorState } from "@codemirror/state";
 import type { ESPHomeAPI } from "../api/esphome-api.js";
 import type { ComponentCatalogEntry } from "../api/types/components.js";
 import type { ConfigEntry } from "../api/types/config-entries.js";
+import { YAML_ONLY_SECTIONS } from "../components/device/yaml-only-sections.js";
 import { fetchComponent } from "./component-name-cache.js";
 import { resolveBundleContext } from "./yaml-ast.js";
 import { findTopLevelBlock, readPlatformSibling } from "./yaml-line-walker.js";
@@ -108,6 +109,14 @@ export interface CatalogIndex {
 }
 
 let catalogPromise: Promise<CatalogIndex> | null = null;
+let loadedCatalog: CatalogIndex | null = null;
+
+/** The slim catalog if `loadCatalog` has already resolved, else `null`.
+ *  Lets sync callers (navigator label resolution) read a component's
+ *  friendly name from the slim index without the per-id body fetch. */
+export function getLoadedCatalog(): CatalogIndex | null {
+  return loadedCatalog;
+}
 
 /**
  * Load the component catalog once per session. The list is small enough
@@ -126,7 +135,8 @@ export function loadCatalog(api: ESPHomeAPI): Promise<CatalogIndex> {
       list.push(c);
       byCategory.set(c.category, list);
     }
-    return { components: res.components, byId, byCategory };
+    loadedCatalog = { components: res.components, byId, byCategory };
+    return loadedCatalog;
   })().catch((err) => {
     console.debug("[yaml-completion] failed to load catalog:", err);
     catalogPromise = null;
@@ -191,6 +201,9 @@ export async function resolveAvailableEntries(
   platformValue: string | null,
   topLevelKey: string | null
 ): Promise<ConfigEntry[]> {
+  // YAML-only sections (lvgl) have no structured form; skip completions so we
+  // never hydrate their per-id body (lvgl's is ~14 MB) just to suggest fields.
+  if (topLevelKey && YAML_ONLY_SECTIONS.has(topLevelKey)) return [];
   // The slim ``getComponents`` index carries no ``config_entries``
   // (those hydrate lazily through ``components/get_component_bodies``),
   // so the catalog tells us only *which* ids exist — never their

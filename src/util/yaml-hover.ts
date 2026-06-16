@@ -19,7 +19,10 @@ import { html, nothing, render } from "lit";
 import type { ESPHomeAPI } from "../api/esphome-api.js";
 import type { ComponentCatalogEntry } from "../api/types/components.js";
 import type { ConfigEntry } from "../api/types/config-entries.js";
-import { isYamlOnlySection } from "../components/device/yaml-only-sections.js";
+import {
+  isYamlOnlySection,
+  YAML_ONLY_SECTIONS,
+} from "../components/device/yaml-only-sections.js";
 import { fetchComponent } from "./component-name-cache.js";
 import {
   getActions,
@@ -134,6 +137,9 @@ async function isYamlOnlyComponent(
   topLevelKey: string,
   platformValue: string | null
 ): Promise<boolean> {
+  // Always-YAML sections (lvgl, packages, ...) are YAML-only regardless of
+  // their body — short-circuit so hover never hydrates it (lvgl's is ~14 MB).
+  if (YAML_ONLY_SECTIONS.has(topLevelKey)) return true;
   const componentId = platformValue ? `${topLevelKey}.${platformValue}` : topLevelKey;
   const comp = await fetchComponent(api, componentId);
   // `config_entries` is absent (not []) on form-less components like ethernet.

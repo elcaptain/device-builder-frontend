@@ -1,10 +1,12 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import type { ESPHomeAPI } from "../api/index.js";
+import { YAML_ONLY_SECTIONS } from "../components/device/yaml-only-sections.js";
 import {
   fetchComponent,
   getCachedComponent,
   subscribeComponentCache,
 } from "./component-name-cache.js";
+import { getLoadedCatalog, loadCatalog } from "./yaml-completion-catalog.js";
 
 /**
  * Reactive controller that resolves raw component ids (e.g.
@@ -44,17 +46,28 @@ export class ComponentNameResolverController implements ReactiveController {
     this._unsubscribe = undefined;
   }
 
-  /** Friendly catalog name for ``id`` if cached, else the raw id. */
+  /** Friendly catalog name for ``id`` if cached, else the raw id.
+   *  Falls back to the slim index so YAML-only sections (whose bodies are
+   *  never hydrated) still resolve a friendly name. */
   resolve(id: string): string {
-    return getCachedComponent(id, this._getPlatform())?.name ?? id;
+    return (
+      getCachedComponent(id, this._getPlatform())?.name ??
+      getLoadedCatalog()?.byId.get(id)?.name ??
+      id
+    );
   }
 
   /** Fire-and-forget catalog lookups for any ids not yet cached. */
   kickoff(ids: Iterable<string>): void {
     const api = this._getApi();
     if (!api) return;
+    // The slim index supplies names for YAML-only sections without a body fetch.
+    void loadCatalog(api).catch(() => {});
     const platform = this._getPlatform();
     for (const id of ids) {
+      // YAML-only sections (lvgl) render no form; don't pull their per-id body
+      // (lvgl's is ~14 MB) just for a name the slim index already has.
+      if (YAML_ONLY_SECTIONS.has(id)) continue;
       if (getCachedComponent(id, platform) !== undefined) continue;
       void fetchComponent(api, id, platform).catch(() => {
         // Swallow — callers fall back to the raw id on miss, so a

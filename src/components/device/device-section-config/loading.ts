@@ -1,10 +1,12 @@
 import type { ConfigEntry, RequiredGroup } from "../../../api/types/config-entries.js";
 import { fetchComponent } from "../../../util/component-name-cache.js";
 import { normalizeHexValues } from "../../../util/hex-int.js";
+import { loadCatalog } from "../../../util/yaml-completion-catalog.js";
 import { parseYamlSectionValues } from "../../../util/yaml-section-reader.js";
 import { resolveCurrentFromLine } from "../../../util/yaml-sections.js";
 import { parseTopLevelComponents } from "../../../util/yaml-serialize.js";
 import type { ESPHomeDeviceSectionConfig } from "../device-section-config.js";
+import { YAML_ONLY_SECTIONS } from "../yaml-only-sections.js";
 
 export interface SectionConfigResponse {
   section_key: string;
@@ -33,10 +35,17 @@ export async function loadConfig(host: ESPHomeDeviceSectionConfig): Promise<void
 
   try {
     const platform = host.board?.esphome.platform;
-    // Session-scoped cache: a section that re-loads on every keystroke
-    // (editor/validate_yaml's post-render refresh) doesn't re-issue the
-    // same backend round-trip. Catalog is static JSON, entries immutable.
-    const component = await fetchComponent(host._api, host.sectionKey, platform);
+    // YAML-only sections (recursive/complex shapes like lvgl) render no form,
+    // so source the header from the slim catalog index and never fetch the
+    // full per-id body — lvgl's is ~14 MB. Other sections hydrate the body
+    // through the session-scoped cache so a re-load per keystroke
+    // (editor/validate_yaml's post-render refresh) doesn't re-issue the round
+    // trip.
+    const yamlOnly = YAML_ONLY_SECTIONS.has(host.sectionKey);
+    const component = yamlOnly
+      ? ((await loadCatalog(host._api).catch(() => null))?.byId.get(host.sectionKey) ??
+        null)
+      : await fetchComponent(host._api, host.sectionKey, platform);
 
     if (id !== host._loadId) return;
 
@@ -72,8 +81,10 @@ export async function loadConfig(host: ESPHomeDeviceSectionConfig): Promise<void
         docs_url: component.docs_url,
         icon: "",
         image_url: component.image_url,
-        entries: component.config_entries,
-        required_groups: component.required_groups ?? [],
+        // YAML-only sections drop entries so the "edit in YAML" notice fires;
+        // the slim index carries no config_entries to render anyway.
+        entries: yamlOnly ? [] : component.config_entries,
+        required_groups: yamlOnly ? [] : (component.required_groups ?? []),
       };
     }
     // Asymmetric with save/delete paths: undefined here means "section
