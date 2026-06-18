@@ -97,7 +97,7 @@ export function renderPairingRow(
               </span>
             `
           : nothing}
-        ${renderVersionMismatch(pairing, localize, appVersion)}
+        ${renderPeerVersion(pairing, localize, appVersion)}
       </div>
       <div class="pairing-actions">
         ${pairing.status === "approved" && pairing.connected
@@ -159,14 +159,25 @@ export function renderPairingRow(
   `;
 }
 
-function renderVersionMismatch(
+function renderPeerVersion(
   pairing: PairingSummary,
   localize: LocalizeFunc,
   appVersion: string
 ): TemplateResult | typeof nothing {
-  if (pairing.status !== "approved") return nothing;
+  // One sub-line for an approved row's version: a plain "ESPHome X"
+  // when it matches the local version, or the cautionary note when it
+  // doesn't. Hidden until the first handshake fills in esphome_version.
+  if (pairing.status !== "approved" || !pairing.esphome_version) return nothing;
   const kind = classifyVersionMismatch(appVersion, pairing.esphome_version);
-  if (kind === null) return nothing;
+  if (kind === null) {
+    return html`
+      <span class="row-desc">
+        ${localize("settings.remote_build_peer_version_line", {
+          esphome: pairing.esphome_version,
+        })}
+      </span>
+    `;
+  }
   const key =
     kind === "release"
       ? "settings.build_offload_pairing_version_mismatch_release"
