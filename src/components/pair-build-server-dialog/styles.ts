@@ -1,12 +1,26 @@
 import { css } from "lit";
 
+import { MOBILE_BREAKPOINT } from "../../styles/breakpoints.js";
+
 export const pairBuildServerDialogStyles = css`
   esphome-base-dialog {
     --width: 500px;
   }
 
-  /* Neutral header + title + footer come from dialogChromeStyles
-     (added in pair-build-server-dialog.ts's static styles). */
+  /* Neutral header + title chrome, inlined rather than composed from
+     dialogChromeStyles: that shared block also hides the footer part, and this
+     wizard renders its actions in the footer so they stay pinned while a tall
+     confirm step scrolls. */
+  esphome-base-dialog::part(header) {
+    padding: var(--wa-space-l) var(--wa-space-l) var(--wa-space-s);
+  }
+
+  esphome-base-dialog::part(title) {
+    font-size: var(--wa-font-size-m);
+    font-weight: var(--wa-font-weight-bold);
+    color: var(--wa-color-text-normal);
+  }
+
   esphome-base-dialog::part(body) {
     padding: 0 var(--wa-space-l);
   }
@@ -80,11 +94,27 @@ export const pairBuildServerDialogStyles = css`
     color: var(--wa-color-text-quiet);
   }
 
+  /* Rendered into wa-dialog's footer slot (pinned outside the scrolling
+     body) so the error + actions stay visible regardless of body scroll. */
+  .dialog-footer {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wa-space-s);
+  }
+
   .actions {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
     gap: var(--wa-space-s);
-    padding: var(--wa-space-m) 0 var(--wa-space-l);
+  }
+
+  .pin-connecting {
+    display: flex;
+    align-items: center;
+    gap: var(--wa-space-s);
+    font-size: var(--wa-font-size-s);
+    color: var(--wa-color-text-quiet);
   }
 
   .field-error {
@@ -96,7 +126,6 @@ export const pairBuildServerDialogStyles = css`
   .step-error {
     color: var(--esphome-error);
     font-size: var(--wa-font-size-s);
-    padding: var(--wa-space-s) 0;
   }
 
   .trust-warning {
@@ -116,5 +145,13 @@ export const pairBuildServerDialogStyles = css`
   .sent-body code {
     font-family: var(--wa-font-family-mono, monospace);
     font-size: var(--wa-font-size-xs);
+  }
+
+  /* On the mobile full-screen sheet the desktop header breathing room wastes
+     vertical space; tighten the top padding there only. */
+  @media (max-width: ${MOBILE_BREAKPOINT}px) {
+    esphome-base-dialog::part(header) {
+      padding-top: var(--wa-space-s);
+    }
   }
 `;

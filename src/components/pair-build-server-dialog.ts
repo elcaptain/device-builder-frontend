@@ -1,3 +1,5 @@
+import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
+
 import { consume } from "@lit/context";
 import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
@@ -11,11 +13,11 @@ import {
   localizeContext,
 } from "../context/index.js";
 import { dialogActionButtonStyles } from "../styles/dialog-action-buttons.js";
-import { dialogChromeStyles } from "../styles/dialog-chrome.js";
+import { fullscreenMobileDialog } from "../styles/dialog-mobile.js";
 import { inputStyles } from "../styles/inputs.js";
 import { pinHexStyles } from "../styles/pin-hex.js";
 import { espHomeStyles } from "../styles/shared.js";
-import { friendlyHostname } from "../util/hostname.js";
+import { friendlyHostname, parsePortInput } from "../util/hostname.js";
 import "./base-dialog.js";
 import {
   onConfirmSubmit,
@@ -58,7 +60,13 @@ export class ESPHomePairBuildServerDialog extends LitElement {
   _buildOffloadPairings: Map<string, PairingSummary> | null = null;
 
   @state() _step: "input" | "confirm" | "sent" = "input";
+  // Any round-trip in flight (preview or send): gates re-entry, the submit
+  // button, and the inputs, and drives the progress label/spinner.
   @state() _busy = false;
+  // The mutating request_pair send specifically. Only this vetoes dismissal
+  // (base-dialog busy gate) — the read-only fingerprint preview must stay
+  // cancellable, so a stale/offline discovered host doesn't trap the user.
+  @state() _sending = false;
   @state() _hostname = "";
   @state() _port = "6055";
   @state() _previewedPin = "";
@@ -69,6 +77,18 @@ export class ESPHomePairBuildServerDialog extends LitElement {
 
   // Resets on open() so the next pair attempt re-derives from hostname.
   @state() _receiverLabelTouched = false;
+
+  // True when the confirm step was reached by auto-preview (mDNS-discovered
+  // host), so the input step was never shown. Drives the confirm step's
+  // secondary button: Cancel (close) rather than Back (to the skipped form).
+  @state() _skippedInput = false;
+
+  // Bumped on every open(). The dialog is a reused singleton and a dismissable
+  // preview can still be in flight (offline host), so onPreviewSubmit captures
+  // this and drops its result if a later open() superseded the session — else a
+  // late preview would clobber the fresh session with a stale host/fingerprint.
+  // Not reactive: it gates a write, it doesn't drive render.
+  _previewGeneration = 0;
 
   // ${hostname}:${port} of the submitted request — null outside the sent step.
   @state() _sentKey: string | null = null;
@@ -85,14 +105,25 @@ export class ESPHomePairBuildServerDialog extends LitElement {
     inputStyles,
     pinHexStyles,
     dialogActionButtonStyles,
-    // Neutral header + title + footer (shared) — dialog-chrome.ts.
-    dialogChromeStyles,
     pairBuildServerDialogStyles,
+    // Full-screen sheet on mobile (overrides base-dialog's centered default;
+    // the outer-tree ::part rule wins the cascade).
+    fullscreenMobileDialog("esphome-base-dialog"),
   ];
 
-  open(prefill?: { hostname?: string; port?: number }): void {
+  // autoPreview skips the hostname/port input step: when the host+port are
+  // already known (mDNS-discovered dashboard), preview the fingerprint
+  // immediately and land on the confirm step. A failed preview drops back to
+  // the pre-filled input form (onPreviewSubmit's error branch).
+  open(
+    prefill?: { hostname?: string; port?: number },
+    opts?: { autoPreview?: boolean }
+  ): void {
+    // Supersede any preview still in flight from a previous open().
+    this._previewGeneration += 1;
     this._step = "input";
     this._busy = false;
+    this._sending = false;
     this._hostname = prefill?.hostname ?? "";
     this._port = prefill?.port !== undefined ? String(prefill.port) : "6055";
     this._previewedPin = "";
@@ -106,8 +137,19 @@ export class ESPHomePairBuildServerDialog extends LitElement {
     this._error = null;
     this._sentKey = null;
     this._offloaderIdentity = null;
+    this._skippedInput = false;
     void this._loadOffloaderIdentity();
     this._open = true;
+    if (
+      opts?.autoPreview &&
+      this._api !== undefined &&
+      this._hostname.trim() &&
+      parsePortInput(this._port) !== null
+    ) {
+      this._step = "confirm";
+      this._skippedInput = true;
+      void onPreviewSubmit(this);
+    }
   }
 
   // Read this dashboard's own identity for the sent-step fingerprint. The
@@ -140,23 +182,33 @@ export class ESPHomePairBuildServerDialog extends LitElement {
   _onPreviewSubmit = () => onPreviewSubmit(this);
   _onConfirmSubmit = () => onConfirmSubmit(this);
   _onConfirmBack = (): void => {
-    if (this._busy) return;
+    // Allowed during the read-only preview (connecting) so the user can bail on
+    // a stale host; only blocked once the request_pair send is in flight.
+    if (this._sending) return;
     // Drop captured pin — user is going back, possibly to a different host.
     // Re-previewing refills it on the next forward step.
     this._previewedPin = "";
-    this._step = "input";
     this._error = null;
+    // Reached confirm straight from the discovered list — there's no input
+    // step to return to, so dismiss back to that list instead of revealing the
+    // skipped hostname form.
+    if (this._skippedInput) {
+      this.close();
+      return;
+    }
+    this._step = "input";
   };
 
   protected render() {
-    // ?busy gates outside-click + Esc + close-button while a round-trip is
-    // in flight. Base-dialog vetoes wa-hide when busy — without
-    // this, a successful request_pair could fire pair-request-sent against
-    // an already-closed dialog.
+    // ?busy gates outside-click + Esc + close-button while the request_pair
+    // send is in flight (so a successful send can't fire pair-request-sent
+    // against an already-closed dialog). The read-only preview deliberately
+    // does NOT veto dismissal — it has no side effect to orphan, and trapping
+    // the user behind a spinner for an unreachable host is worse.
     return html`
       <esphome-base-dialog
         ?open=${this._open}
-        ?busy=${this._busy}
+        ?busy=${this._sending}
         .label=${this._dialogTitle()}
         @after-hide=${this._onAfterHide}
       >
