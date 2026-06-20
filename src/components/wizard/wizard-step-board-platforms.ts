@@ -26,9 +26,13 @@ export const WIZARD_BOARD_PLATFORMS: readonly WizardBoardPlatform[] = [
   { platform: "esp32", variant: "esp32", label: "ESP32" },
   { platform: "esp32", variant: "esp32s2", label: "ESP32-S2" },
   { platform: "esp32", variant: "esp32s3", label: "ESP32-S3" },
+  { platform: "esp32", variant: "esp32c2", label: "ESP32-C2" },
   { platform: "esp32", variant: "esp32c3", label: "ESP32-C3" },
+  { platform: "esp32", variant: "esp32c5", label: "ESP32-C5" },
   { platform: "esp32", variant: "esp32c6", label: "ESP32-C6" },
+  { platform: "esp32", variant: "esp32c61", label: "ESP32-C61" },
   { platform: "esp32", variant: "esp32h2", label: "ESP32-H2" },
+  { platform: "esp32", variant: "esp32p4", label: "ESP32-P4" },
   { platform: "esp8266", variant: "", label: "ESP8266" },
   // ESPHome's 'rp2040' platform covers both the original RP2040 and
   // the newer RP2350; split into two chips (mirroring the per-variant
