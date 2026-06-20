@@ -6,6 +6,7 @@ import {
   mdiChevronUp,
   mdiClose,
   mdiDownload,
+  mdiOpenInNew,
   mdiTextBoxOutline,
 } from "@mdi/js";
 import { LitElement, html } from "lit";
@@ -22,8 +23,11 @@ import type { DetectedChip } from "../util/web-serial.js";
 import {
   downloadSelectedBinary,
   flipToLogs,
+  handOffToFlasher,
+  showOtaLogs,
   startArtifactDownload,
   startDownload,
+  startUsbFlash,
   startWebSerialInstall,
 } from "./firmware-install-dialog/install-flow.js";
 import {
@@ -49,6 +53,7 @@ registerMdiIcons({
   "chevron-up": mdiChevronUp,
   close: mdiClose,
   download: mdiDownload,
+  "open-in-new": mdiOpenInNew,
   "text-box-outline": mdiTextBoxOutline,
 });
 
@@ -64,7 +69,12 @@ export type InstallStep =
   | "download-ready"
   | "error";
 
-export type Installer = "web-serial" | "web-download" | "binary-download" | null;
+export type Installer =
+  | "web-serial"
+  | "web-download"
+  | "binary-download"
+  | "web-flash"
+  | null;
 
 @customElement("esphome-firmware-install-dialog")
 export class ESPHomeFirmwareInstallDialog extends LitElement {
@@ -118,6 +128,17 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
   _jobId = "";
   _streamId = "";
 
+  // The compiled factory image for the "web-flash" installer, held between the
+  // download-ready step and the user clicking "Open USB flasher". Detached
+  // (nulled) once transferred to the flasher tab.
+  _usbFirmware: ArrayBuffer | null = null;
+  _usbFirmwareName = "";
+
+  // Teardown for an in-flight external-flasher hand-off (set by
+  // handOffToFlasher). Called from _detachStream so closing / reusing the
+  // dialog removes the message listener + timers. Null when none is active.
+  _usbFlashTeardown: (() => void) | null = null;
+
   // Reject hook for the in-flight _compileAndWait promise. _detachStream
   // removes the local handler so onResult/onError can never fire after a
   // teardown — without this the awaiter would hang and leak install tasks
@@ -145,6 +166,7 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
   // Compile on the server, download the resulting binary, show instructions
   // to flash it via web.esphome.io. Fallback when neither OTA nor Web Serial
   // is available (HTTP dashboard, offline first-flash).
+  // DEAD since #904 (the picker routes USB to web-flash); prune tracked in #907.
   installWebDownload(device: ConfiguredDevice) {
     this._init(device);
     this._installer = "web-download";
@@ -152,6 +174,22 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
     this._statusMessage = this._localize("firmware.status_queued");
     void startDownload(this);
   }
+
+  // "Flash via USB": compile + download the factory image here (logs/errors
+  // visible), then land on the ready step. The flasher tab is opened only when
+  // the user clicks Open USB flasher — never before a working image exists.
+  installUsbFlash(device: ConfiguredDevice) {
+    this._init(device);
+    this._installer = "web-flash";
+    this._step = "queued";
+    this._statusMessage = this._localize("firmware.status_queued");
+    void startUsbFlash(this);
+  }
+
+  // Hand the compiled firmware to the external flasher. Called from the
+  // download-ready "Open USB flasher" button (a user gesture, so the popup
+  // isn't blocked).
+  _openUsbFlasher = () => handOffToFlasher(this);
 
   // Compile + download with no opinion on how to flash. Always available so
   // users can plug into esptool.py / picotool / a UF2 mass-storage flow.
@@ -211,6 +249,8 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
     this._failedDuringValidate = false;
     this._jobSource = JobSource.LOCAL;
     this._jobSourceLabel = "";
+    this._usbFirmware = null;
+    this._usbFirmwareName = "";
     // _detachStream already cleared _jobId / _streamId / _compileReject.
     this._detected = null;
   }
@@ -220,6 +260,13 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
   // the parent flow doesn't hang. Cancels the underlying job so the backend
   // stops working for a dismissed dialog.
   _detachStream() {
+    // Tear down an in-flight USB-flasher hand-off (message listener + timers)
+    // too, so closing or reusing the dialog can't leak it or let a stale
+    // flasher tab mutate the next install's state. Pure teardown, no _fail.
+    if (this._usbFlashTeardown) {
+      this._usbFlashTeardown();
+      this._usbFlashTeardown = null;
+    }
     if (this._streamId) {
       this._api.stopStream(this._streamId).catch(() => {});
       this._streamId = "";
@@ -297,11 +344,18 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
     if (this._detected) flipToLogs(this, this._detected.port);
   };
 
-  // Re-run the Web Serial install after a flash failure: a full reset (_init) +
-  // fresh connect/flash, so a transient serial error (noise, dropped port) can
-  // be retried without closing and reopening the dialog.
+  // Web-flash success: the flash happened in the external tab, so view the
+  // rebooted device's logs over OTA/native-API rather than a local port.
+  _showUsbLogs = () => showOtaLogs(this);
+
+  // Re-run the install after a flash failure: a full reset (_init) + fresh
+  // build/flash, so a transient error (serial noise, the external flasher's
+  // chip-init failing, a closed flasher tab) can be retried in place. Routes by
+  // installer since web-flash hands off to the external tab again.
   _retry = () => {
-    if (this._device) this.installWebSerial(this._device);
+    if (!this._device) return;
+    if (this._installer === "web-flash") this.installUsbFlash(this._device);
+    else this.installWebSerial(this._device);
   };
 
   _cancel = async () => {

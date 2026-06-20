@@ -1,5 +1,6 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { type FirmwareBinary, JobSource } from "../../api/types/firmware-jobs.js";
+import { FLASHER_HOST } from "../../common/docs.js";
 import { configurationStem, downloadAnsiText } from "../../util/download-text.js";
 import type { ESPHomeFirmwareInstallDialog } from "../firmware-install-dialog.js";
 import type { ProcessTerminalState } from "../process-terminal/process-terminal.js";
@@ -99,6 +100,9 @@ export function cardState(host: ESPHomeFirmwareInstallDialog): ProcessTerminalSt
 }
 
 function downloadReadyTitle(host: ESPHomeFirmwareInstallDialog): string {
+  if (host._installer === "web-flash") {
+    return host._localize("firmware.usb_built_title");
+  }
   if (host._installer === "binary-download") {
     const isElf = host._downloadedFilename.endsWith(".elf");
     return host._localize(
@@ -109,6 +113,9 @@ function downloadReadyTitle(host: ESPHomeFirmwareInstallDialog): string {
 }
 
 function downloadReadyDetail(host: ESPHomeFirmwareInstallDialog): string {
+  if (host._installer === "web-flash") {
+    return host._localize("firmware.usb_built_body", { host: FLASHER_HOST });
+  }
   const filename = host._downloadedFilename;
   if (host._installer === "binary-download") {
     const isElf = filename.endsWith(".elf");
@@ -136,7 +143,13 @@ export function cardStatusDetail(host: ESPHomeFirmwareInstallDialog): string {
   if (host._step === "error") return host._errorMessage;
   // Hidden tabs throttle timers, which can stall the Web Serial write and fail
   // the flash; there's no API to opt out, so warn the user to stay on the page.
-  if (host._step === "flashing") return host._localize("firmware.flashing_keep_visible");
+  if (host._step === "flashing") {
+    return host._localize(
+      host._installer === "web-flash"
+        ? "firmware.usb_flashing_detail"
+        : "firmware.flashing_keep_visible"
+    );
+  }
   return "";
 }
 
@@ -168,6 +181,8 @@ function renderBinaryList(host: ESPHomeFirmwareInstallDialog): TemplateResult {
 function renderDownloadReadyExtra(
   host: ESPHomeFirmwareInstallDialog
 ): TemplateResult | typeof nothing {
+  // web-flash: the action is the "Open USB flasher" footer button; no extra body.
+  if (host._installer === "web-flash") return nothing;
   // Manual binary download: offer to pick a different format when more than
   // one was produced. The ELF is debug symbols, not a flashable image, so no
   // web.esphome.io checklist here.
@@ -297,6 +312,19 @@ export function renderFooter(host: ESPHomeFirmwareInstallDialog): TemplateResult
         </div>
       `;
     }
+    if (host._installer === "web-flash") {
+      return html`
+        <div class="footer">
+          <button class="btn btn--ghost" @click=${host._close}>
+            ${host._localize("command.close")}
+          </button>
+          <button class="btn btn--primary" @click=${host._openUsbFlasher}>
+            ${host._localize("firmware.usb_open_button")}
+            <wa-icon library="mdi" name="open-in-new"></wa-icon>
+          </button>
+        </div>
+      `;
+    }
     return html`
       <div class="footer">
         <button class="btn btn--ghost" @click=${host._close}>
@@ -313,12 +341,13 @@ export function renderFooter(host: ESPHomeFirmwareInstallDialog): TemplateResult
       </div>
     `;
   }
-  // A failed Web Serial flash can be retried in place — re-run the install.
-  // Excludes compile / validate failures, which surface the reset-build hint
-  // (renderResetSuggestion) instead; re-flashing wouldn't address those.
+  // A failed Web Serial or USB (web-flash) flash can be retried in place: re-run
+  // the install (web-flash re-opens the external flasher). Excludes compile /
+  // validate failures, which surface the reset-build hint (renderResetSuggestion)
+  // instead; re-flashing wouldn't address those.
   const canRetry =
     host._step === "error" &&
-    host._installer === "web-serial" &&
+    (host._installer === "web-serial" || host._installer === "web-flash") &&
     !host._failedDuringCompile &&
     !host._failedDuringValidate;
   if (canRetry) {
@@ -329,6 +358,21 @@ export function renderFooter(host: ESPHomeFirmwareInstallDialog): TemplateResult
         </button>
         <button class="btn btn--primary" @click=${host._retry}>
           ${host._localize("command.retry")}
+        </button>
+      </div>
+    `;
+  }
+  // Web-flash success: the device flashed in the external tab and is rebooting;
+  // offer its logs over OTA/native-API (the dashboard has no serial port).
+  if (host._installer === "web-flash" && host._step === "done") {
+    return html`
+      <div class="footer">
+        <button class="btn btn--ghost" @click=${host._close}>
+          ${host._localize("command.close")}
+        </button>
+        <button class="btn btn--primary" @click=${host._showUsbLogs}>
+          <wa-icon library="mdi" name="text-box-outline"></wa-icon>
+          ${host._localize("command.show_logs")}
         </button>
       </div>
     `;

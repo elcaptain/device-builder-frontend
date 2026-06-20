@@ -32,8 +32,10 @@ export function applyInstallMethod(
     case "web-serial":
       h.firmwareDialog?.installWebSerial(h.device);
       break;
-    case "web-download":
-      h.firmwareDialog?.installWebDownload(h.device);
+    case "web-flash":
+      // In-app Web Serial isn't available here; compile + download in the
+      // dialog, then hand off to the external secure-context flasher.
+      h.firmwareDialog?.installUsbFlash(h.device);
       break;
     case "binary-download":
       h.firmwareDialog?.installBinaryDownload(h.device);

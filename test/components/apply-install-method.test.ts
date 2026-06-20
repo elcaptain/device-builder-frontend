@@ -8,7 +8,7 @@ const device = { configuration: "x.yaml", name: "x" } as ConfiguredDevice;
 function deps() {
   const firmwareDialog = {
     installWebSerial: vi.fn(),
-    installWebDownload: vi.fn(),
+    installUsbFlash: vi.fn(),
     installBinaryDownload: vi.fn(),
   } as unknown as ESPHomeFirmwareInstallDialog;
   return { device, openInstall: vi.fn(), firmwareDialog };
@@ -46,10 +46,16 @@ describe("applyInstallMethod", () => {
     expect(d.openInstall).not.toHaveBeenCalled();
   });
 
-  it("web-download and binary-download route to the firmware dialog", () => {
+  it("web-flash routes to the dialog's USB-flash flow (compile, then hand off)", () => {
     const d = deps();
-    applyInstallMethod("web-download", undefined, d);
-    expect(d.firmwareDialog.installWebDownload).toHaveBeenCalledWith(device);
+    applyInstallMethod("web-flash", undefined, d);
+    expect(d.firmwareDialog.installUsbFlash).toHaveBeenCalledWith(device);
+    expect(d.openInstall).not.toHaveBeenCalled();
+    expect(d.firmwareDialog.installWebSerial).not.toHaveBeenCalled();
+  });
+
+  it("binary-download routes to the firmware dialog", () => {
+    const d = deps();
     applyInstallMethod("binary-download", undefined, d);
     expect(d.firmwareDialog.installBinaryDownload).toHaveBeenCalledWith(device);
   });
