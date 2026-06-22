@@ -67,7 +67,7 @@ const fakeApi = {
   getComponent: async () => null,
 } as never;
 
-async function labelsAt(yaml: string): Promise<string[]> {
+async function labelsAt(yaml: string, explicit = false): Promise<string[]> {
   // Drive a real view + full parse so the AST helpers see the same tree a
   // live editor does (a bare state parses lazily and misses the cursor's tail).
   const view = new EditorView({
@@ -75,7 +75,7 @@ async function labelsAt(yaml: string): Promise<string[]> {
   });
   try {
     forceParsing(view, yaml.length, 60000);
-    const ctx = new CompletionContext(view.state, yaml.length, false);
+    const ctx = new CompletionContext(view.state, yaml.length, explicit);
     const result = await createYamlCompletionSource(fakeApi)(ctx);
     return (result?.options ?? []).map((o) => o.label);
   } finally {
@@ -120,6 +120,25 @@ describe("createYamlCompletionSource (already-set key filtering)", () => {
     );
     expect(labels).toContain("advanced");
     expect(labels).toContain("version");
+  });
+
+  it("offers nested keys on a blank indented line when triggered explicitly (idle)", async () => {
+    // The caret rests on a blank line under ``framework:`` with no partial;
+    // an explicit (idle) trigger must still surface the framework fields.
+    const labels = await labelsAt(["esp32:", "  framework:", "    "].join("\n"), true);
+    expect(labels).toContain("advanced");
+    expect(labels).toContain("version");
+  });
+
+  it("filters already-set siblings on a blank indented line", async () => {
+    // The AST can't read siblings on a blank line; an indent scan must still
+    // drop a key already set in the mapping (``version`` here).
+    const labels = await labelsAt(
+      ["esp32:", "  framework:", "    version: 5.0", "    "].join("\n"),
+      true
+    );
+    expect(labels).toContain("advanced");
+    expect(labels).not.toContain("version");
   });
 
   it("offers each list item's own fields without cross-item filtering", async () => {

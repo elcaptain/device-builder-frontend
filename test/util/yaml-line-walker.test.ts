@@ -1,9 +1,12 @@
 import { Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import {
+  blankLineContext,
+  collectSiblingKeysByIndent,
   findParentKey,
   findTopLevelBlock,
   indentOf,
+  keyPathByIndent,
   readPlatformSibling,
   stripComment,
 } from "../../src/util/yaml-line-walker.js";
@@ -163,5 +166,69 @@ describe("readPlatformSibling (regex fallback)", () => {
   it("returns null when there's no platform sibling", () => {
     const lines = ["wifi:", "  ssid: x", "  password: y"];
     expect(readPlatformSibling(t(lines), 2, 2)).toBeNull();
+  });
+});
+
+describe("keyPathByIndent", () => {
+  it("builds the full ancestor chain for a blank nested line", () => {
+    const lines = ["esp32:", "  framework:", "    type: esp-idf", "    "];
+    expect(keyPathByIndent(t(lines), 3, 4)).toEqual(["esp32", "framework"]);
+  });
+
+  it("descends two nested levels", () => {
+    const lines = ["esp32:", "  framework:", "    advanced:", "      "];
+    expect(keyPathByIndent(t(lines), 3, 6)).toEqual(["esp32", "framework", "advanced"]);
+  });
+
+  it("returns [] at the top level", () => {
+    const lines = ["esp32:", "  board: x", ""];
+    expect(keyPathByIndent(t(lines), 2, 0)).toEqual([]);
+  });
+
+  it("skips blank lines between siblings", () => {
+    const lines = ["esp32:", "  framework:", "", "    type: a", "    "];
+    expect(keyPathByIndent(t(lines), 4, 4)).toEqual(["esp32", "framework"]);
+  });
+});
+
+describe("collectSiblingKeysByIndent", () => {
+  it("collects the mapping's keys at the cursor indent", () => {
+    const lines = ["ethernet:", "  clk:", "    mode: CLK_EXT_IN", "    pin: 0", "    "];
+    expect([...collectSiblingKeysByIndent(t(lines), 4, 4)].sort()).toEqual([
+      "mode",
+      "pin",
+    ]);
+  });
+
+  it("skips deeper descendants and other blocks", () => {
+    const lines = [
+      "esp32:",
+      "  framework:",
+      "    advanced:",
+      "      x: 1",
+      "    version: 5",
+      "    ",
+    ];
+    expect([...collectSiblingKeysByIndent(t(lines), 5, 4)].sort()).toEqual([
+      "advanced",
+      "version",
+    ]);
+  });
+});
+
+describe("blankLineContext", () => {
+  it("reports a blank indented line, else null", () => {
+    const blank = t(["esp32:", "  framework:", "    "]);
+    expect(blankLineContext(blank, blank.length)).toEqual({ lineIdx: 2, indent: 4 });
+    const filled = t(["esp32:", "  board: x"]);
+    expect(blankLineContext(filled, filled.length)).toBeNull();
+  });
+
+  it("returns null for a caret in the indentation of a non-blank line", () => {
+    // Whole-line check: a caret at column 2 of ``  board: x`` is not a blank
+    // line, even though the text before the caret is whitespace.
+    const doc = t(["esp32:", "  board: x"]);
+    const line2 = doc.line(2);
+    expect(blankLineContext(doc, line2.from + 2)).toBeNull();
   });
 });

@@ -16,7 +16,12 @@ import type { ComponentCatalogEntry } from "../api/types/components.js";
 import { ConfigEntryType, type ConfigEntry } from "../api/types/config-entries.js";
 import { fetchComponent } from "./component-name-cache.js";
 import { getKeyPath, resolveBundleContext } from "./yaml-ast.js";
-import { findTopLevelBlock, readPlatformSibling } from "./yaml-line-walker.js";
+import {
+  blankLineContext,
+  findTopLevelBlock,
+  keyPathByIndent,
+  readPlatformSibling,
+} from "./yaml-line-walker.js";
 
 // ``validFor`` regex constants — consumed by CodeMirror to decide
 // whether cached completion options stay valid as the user types.
@@ -293,15 +298,24 @@ export async function resolveAvailableEntries(
  * Compute the nested-group descent path for ``resolveAvailableEntries``:
  * the key chain from just under the top-level component down to and
  * including *parentKey*. Returns ``[]`` when *parentKey* is the top-level
- * key itself or doesn't appear on the cursor's AST key path (safe
- * no-descent fallback when the AST and the regex walker disagree).
+ * key itself or doesn't appear on the cursor's key path (safe no-descent
+ * fallback).
  */
 export function nestedPathForParent(
   state: EditorState,
   pos: number,
   parentKey: string
 ): string[] {
-  const path = getKeyPath(state, pos);
+  // On a genuinely blank line the AST has no Pair to anchor on (``getKeyPath``
+  // returns ``[]``), so build the chain from indentation instead. Elsewhere
+  // stay on the AST: a missing parentKey there means the walkers disagree
+  // (e.g. a list-item context), where the indent walk could synthesise a
+  // sibling-laden path. (The fallback is kept here, not inside ``getKeyPath``,
+  // so its AST-only callers — hover, the cursor-line event — still get ``[]``.)
+  const blank = blankLineContext(state.doc, pos);
+  const path = blank
+    ? keyPathByIndent(state.doc, blank.lineIdx, blank.indent)
+    : getKeyPath(state, pos);
   const idx = path.lastIndexOf(parentKey);
   if (idx < 1) return [];
   return path.slice(1, idx + 1);

@@ -93,6 +93,79 @@ export function findParentKey(
   return null;
 }
 
+/**
+ * When the caret sits on a wholly blank line, return that line's 0-based
+ * index and the caret's indent — the inputs the indent walkers need. The AST
+ * can't anchor on such a line (no Pair), so callers fall back to the
+ * indent-based walkers. ``null`` otherwise (including a caret in the
+ * indentation of a non-blank ``key:`` line, which the AST resolves fine).
+ */
+export function blankLineContext(
+  doc: Text,
+  pos: number
+): { lineIdx: number; indent: number } | null {
+  const line = doc.lineAt(pos);
+  // The whole line must be blank, not just the text before the caret — a
+  // caret in the indentation of an existing ``key:`` line is not a blank line
+  // (the AST resolves it fine), and treating it as blank would switch callers
+  // to the indent scan and miss that line's key.
+  if (line.text.trim() !== "") return null;
+  return { lineIdx: line.number - 1, indent: pos - line.from };
+}
+
+/**
+ * Build the full ancestor key chain (top-down) for a line by walking
+ * outward through strictly-decreasing indents — e.g. a line under
+ * ``esp32:`` → ``framework:`` yields ``["esp32", "framework"]``. Unlike
+ * the AST ``getKeyPath``, this is blank-line tolerant, so it resolves the
+ * nested context of an empty indented line (which has no Pair to anchor
+ * on). Returns ``[]`` at the top level.
+ */
+export function keyPathByIndent(doc: Text, lineIdx: number, indent: number): string[] {
+  const chain: string[] = [];
+  let below = indent;
+  let from = lineIdx;
+  for (;;) {
+    const p = findParentKey(doc, from, below);
+    if (!p) break;
+    chain.push(p.key);
+    below = p.indent;
+    from = p.lineIdx;
+  }
+  return chain.reverse();
+}
+
+/**
+ * Collect the keys of the mapping at *indent* surrounding *lineIdx* by
+ * scanning lines, not the AST. Used when the cursor is on a blank line —
+ * where the AST has no Pair to anchor on — so the already-set-key filter
+ * still works. Bounded to the enclosing block: stops at the first line that
+ * dedents below *indent* in each direction; deeper lines (children of a
+ * sibling) are skipped.
+ */
+export function collectSiblingKeysByIndent(
+  doc: Text,
+  lineIdx: number,
+  indent: number
+): Set<string> {
+  const out = new Set<string>();
+  const scan = (from: number, step: number): void => {
+    for (let i = from; i >= 0 && i < doc.lines; i += step) {
+      const stripped = stripComment(doc.line(i + 1).text);
+      if (!stripped.trim()) continue;
+      const ind = indentOf(stripped);
+      if (ind < indent) break;
+      if (ind === indent) {
+        const m = stripped.match(RE_PAIR_LINE);
+        if (m) out.add(m[1]);
+      }
+    }
+  };
+  scan(lineIdx - 1, -1);
+  scan(lineIdx + 1, 1);
+  return out;
+}
+
 /** Walk back from *lineIdx* to the first column-0 ``key:`` line. */
 export function findTopLevelBlock(doc: Text, lineIdx: number): string | null {
   for (let i = lineIdx - 1; i >= 0; i--) {
