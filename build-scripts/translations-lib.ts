@@ -48,6 +48,77 @@ export function flagValue(args: string[], name: string): string | undefined {
   return idx === -1 ? undefined : args[idx + 1];
 }
 
+type Messages = Record<string, unknown>;
+
+// Flatten a nested messages object to a map of dot-joined leaf key → string
+// value. Non-string leaves are skipped so they never count as translatable.
+function flattenMessages(
+  obj: Messages,
+  prefix = "",
+  out: Map<string, string> = new Map()
+): Map<string, string> {
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== null && typeof value === "object") {
+      flattenMessages(value as Messages, `${prefix}${key}.`, out);
+    } else if (typeof value === "string") {
+      out.set(`${prefix}${key}`, value);
+    }
+  }
+  return out;
+}
+
+// The manifest generator measures every locale against the same English base
+// object, so flatten it once per base and reuse the result. Keyed weakly so a
+// transient base doesn't pin its leaf map in memory. Deterministic, so this
+// stays referentially transparent.
+const baseLeavesCache = new WeakMap<Messages, Map<string, string>>();
+
+function flattenBase(base: Messages): Map<string, string> {
+  let leaves = baseLeavesCache.get(base);
+  if (leaves === undefined) {
+    leaves = flattenMessages(base);
+    baseLeavesCache.set(base, leaves);
+  }
+  return leaves;
+}
+
+// Percentage (integer 0–100) of the English source's leaf keys that carry a
+// non-empty value in `locale`. Mirrors how the runtime overlays a locale on
+// the English base (src/common/localize.ts): a key counts as translated when
+// the locale supplies any non-empty string for it, even one identical to
+// English (proper nouns, shared terms — Lokalise counts those too). Keys the
+// locale still carries but English has dropped (stale Lokalise entries) don't
+// count. Never rounds a partial locale up to 100%, and any locale with at
+// least one translated key reads ≥1% so a barely-started language isn't shown
+// as a flat 0%.
+//
+// The language-manifest generator keeps a byte-compatible copy of this logic
+// (build-scripts/gen-language-manifest.cjs); it's a CommonJS build script that
+// can't import this ESM module, so the two must be kept in sync. This copy is
+// the unit-tested reference.
+export function localeCompleteness(base: Messages, locale: Messages): number {
+  const baseLeaves = flattenBase(base);
+  const total = baseLeaves.size;
+  if (total === 0) {
+    return 100;
+  }
+  const localeLeaves = flattenMessages(locale);
+  let translated = 0;
+  for (const key of baseLeaves.keys()) {
+    const value = localeLeaves.get(key);
+    if (value !== undefined && value.length > 0) {
+      translated += 1;
+    }
+  }
+  if (translated >= total) {
+    return 100;
+  }
+  if (translated === 0) {
+    return 0;
+  }
+  return Math.min(99, Math.max(1, Math.round((translated / total) * 100)));
+}
+
 export type DownloadSource = "lokalise" | "release";
 
 // Resolve the `download --source`. Absent flag defaults to "lokalise", but

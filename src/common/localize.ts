@@ -48,14 +48,18 @@ const asMessages = (mod: unknown): Record<string, unknown> => {
 interface LanguageMeta {
   language: string;
   flag: string;
+  /** Percentage (0–100) of English source keys this locale has translated,
+   *  precomputed at build time (untranslated keys fall back to English). */
+  completeness: number;
 }
 
-// Build-time manifest of every shipped locale's autonym + flag, generated
-// from src/translations/*.json by build-scripts/gen-language-manifest.cjs.
-// It carries only two keys per locale, so it's cheap to keep in the entry
-// bundle — which lets the language picker stay synchronous (see LANGUAGES /
-// AVAILABLE_LOCALES below) without pulling any locale's message body into the
-// initial download. The bodies load lazily instead (see getLocaleContext).
+// Build-time manifest of every shipped locale's autonym, flag, and
+// translation completeness, generated from src/translations/*.json by
+// build-scripts/gen-language-manifest.cjs. It carries only those few scalar
+// keys per locale, so it's cheap to keep in the entry bundle — which lets the
+// language picker stay synchronous (see LANGUAGES / AVAILABLE_LOCALES below)
+// without pulling any locale's message body into the initial download. The
+// bodies load lazily instead (see getLocaleContext).
 const LANGUAGE_MANIFEST = languageManifest as Record<string, LanguageMeta>;
 
 // Locale message bodies load lazily — `mode: "lazy"` makes rspack emit one
@@ -107,6 +111,9 @@ export interface LanguageOption {
   /** Localize key, used only for the "system" option so it reads in the
    *  active UI language. Real locales use the literal `label`. */
   labelKey?: string;
+  /** Percentage (0–100) of English source keys this locale has translated.
+   *  Absent for the "system" option, which has no single underlying locale. */
+  completeness?: number;
 }
 
 /** Single source of truth for the language picker. Consumed by the
@@ -125,6 +132,7 @@ export const LANGUAGES: LanguageOption[] = [
       value: locale,
       label: meta?.language ?? locale,
       flag: meta?.flag ?? "🏳️",
+      completeness: meta?.completeness ?? 0,
     };
   }),
 ];
