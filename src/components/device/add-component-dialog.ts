@@ -15,6 +15,7 @@ import type { BusPrefill } from "../../util/bus-constraint-prefill.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { findAddedSection } from "../../util/yaml-sections.js";
 import { parseTopLevelComponents } from "../../util/yaml-serialize.js";
+import { findMissingDependencies } from "./add-component-deps.js";
 import { chooseExcludeCategories } from "./add-component-dialog-categories.js";
 import {
   matchesDepDomain,
@@ -26,6 +27,9 @@ import {
   type SelectionHost,
 } from "./add-component-dialog-selection.js";
 import { addComponentDialogStyles } from "./add-component-dialog.styles.js";
+import { coerceFields } from "./add-component-form-coerce.js";
+import { addFormPaintsAnything } from "./add-component-form-filter.js";
+import { buildInitialValues } from "./add-component-form-seed.js";
 import { componentDialogTitle } from "./component-card-category-label.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
@@ -335,23 +339,54 @@ export class ESPHomeAddComponentDialog extends LitElement {
     }
     this._selected = result.entry;
     this._submitError = "";
-    // Skip the empty form and add directly only when there is genuinely
-    // nothing to show: no config fields AND no missing top-level
-    // dependencies. A configless component can still require other
-    // components (e.g. `captive_portal` needs `wifi`), in which case the
-    // form's deps banner guides the user, so keep showing it. The empty
-    // schema makes the fields payload provably `{}` (no defaults, id, or
-    // pins to seed); on the rare API failure `_submitComponent` toasts
-    // the error (see its catch) since there's no form surface for it.
-    if (result.entry.config_entries.length === 0) {
-      const present = parseTopLevelComponents(this.yaml);
-      const hasMissingDeps = (result.entry.dependencies ?? []).some(
-        (d) => !present.has(d)
-      );
-      if (!hasMissingDeps) {
-        await this._submitComponent({}, /* notify */ true);
-      }
-    }
+    const fields = this._fastPathFields(result.entry);
+    if (fields) await this._submitComponent(fields, /* notify */ true);
+  }
+
+  /**
+   * Coerced fields to add *entry* directly, skipping the form, or null when
+   * the form should open. Fast-paths only when the add-form would paint
+   * nothing (`addFormPaintsAnything` reads the same `buildFormRenderPlan`
+   * `render()` does, so the gate can't drift from what the user sees) and the
+   * payload matches the form's Add. The payload is `buildInitialValues` +
+   * `coerceFields`, exactly the form's seed/submit, so a seeded `id`/pin (and
+   * a featured entry's `seedAll`-seeded locked presets) isn't dropped; the one
+   * thing skipped is the form's `validateEntries` bail, so a contradictory
+   * required+advanced+no-default schema (unfillable in the form anyway)
+   * surfaces a backend-error toast instead of a client-side block.
+   */
+  private _fastPathFields(entry: ComponentCatalogEntry): Record<string, unknown> | null {
+    // A prefilled/detour selection carries overlays the `{}`-seeded probe
+    // can't predict; show the form. (Detour/restore set `_selected` directly
+    // and bypass this handler, so this is null today — a forward guard.)
+    if (this._prefillReference !== null || this._depPrefill !== null) return null;
+    const present = parseTopLevelComponents(this.yaml);
+    // `findMissingDependencies` (dotted deps, platform stems) over a plain
+    // top-level-block check, so a stem-satisfied dep doesn't keep a blank
+    // form. The form's async `provides` subtraction isn't replicated — this
+    // stays stricter, only keeping the form a touch more often.
+    if (findMissingDependencies(entry.dependencies ?? [], this.yaml, present).length > 0)
+      return null;
+    const seeded = buildInitialValues({
+      entries: entry.config_entries,
+      component: entry,
+      board: this.board,
+      yaml: this.yaml,
+      prefillReference: null,
+      prefillFields: null,
+      localize: this._localize,
+    });
+    if (
+      addFormPaintsAnything(
+        entry.config_entries,
+        seeded,
+        entry.required_groups ?? [],
+        this.board,
+        present
+      )
+    )
+      return null;
+    return coerceFields(entry.config_entries, seeded);
   }
 
   /**
