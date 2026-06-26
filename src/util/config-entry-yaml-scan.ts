@@ -17,7 +17,7 @@
  * type into a field) from O(N) per keystroke to O(1).
  */
 import type { ComponentCatalogEntry } from "../api/types/components.js";
-import { scanPinGpios } from "./pin-gpio.js";
+import { isPinFieldKey, parsePinGpio, scanPinGpios } from "./pin-gpio.js";
 import { collectIdsAtPath, parseYamlTopLevelSections } from "./yaml-sections-core.js";
 
 /**
@@ -211,7 +211,14 @@ export function findUsedPins(
       if (BLOCK_SCALAR_RE.test(line)) blockScalarIndent = keyMatch[1].length;
       continue;
     }
-    for (const num of scanPinGpios(stripInlineComment(line))) {
+    const stripped = stripInlineComment(line);
+    // A bare-integer pin value (`tx_pin: 1`) carries no prefix for the token
+    // scan to anchor on; parse it from a pin-field key's value instead.
+    if (keyMatch && isPinFieldKey(keyMatch[2])) {
+      const gpio = parsePinGpio(stripped.slice(keyMatch[0].length).trim());
+      if (gpio !== null && !used.has(gpio)) used.set(gpio, currentDomain);
+    }
+    for (const num of scanPinGpios(stripped)) {
       if (!used.has(num)) used.set(num, currentDomain);
     }
   }
