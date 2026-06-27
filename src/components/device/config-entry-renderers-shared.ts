@@ -15,6 +15,7 @@ import {
 import { html, nothing } from "lit";
 import type { ConfigEntry } from "../../api/types/config-entries.js";
 import { ConfigEntryType } from "../../api/types/config-entries.js";
+import type { LocalizeFunc } from "../../common/localize.js";
 import { warningBannerStyles } from "../../styles/banners.js";
 import { disclosureStyles } from "../../styles/disclosure.js";
 import { inputStyles } from "../../styles/inputs.js";
@@ -54,6 +55,7 @@ import { constraintClusterStyles } from "./config-entry-renderers/constraint-clu
 import { literalLambdaToggleStyles } from "./config-entry-renderers/literal-lambda-toggle.js";
 import { fieldHighlightStyles } from "./field-highlight.styles.js";
 import type { PasswordInputValueChange } from "./password-input.js";
+import { substitutionNoteStyles } from "./substitution-note.styles.js";
 // Type-only — the `<esphome-secret-picker>` element is registered by the
 // form host (`config-entry-form.ts`). Keeping this module free of the
 // element's DOM-dependent side-effect import lets the renderer unit tests
@@ -74,6 +76,7 @@ export const fieldRendererStyles = [
   literalLambdaToggleStyles,
   constraintClusterStyles,
   fieldHighlightStyles,
+  substitutionNoteStyles,
 ];
 
 registerMdiIcons({
@@ -143,16 +146,20 @@ export function renderSecretHint(value: string, ctx: RenderCtx) {
 }
 
 /**
- * Hint beneath a string field referencing a ``${var}``: previews the
- * value when it resolves against this file's ``substitutions:``, else a
+ * Hint beneath a string field referencing a ``${var}`` or bare ``$var``:
+ * previews the value when it resolves against this file's ``substitutions:``, else a
  * marker whose tooltip notes the reference is resolved at build time
  * (from a package/include), not previewed here. ``nothing`` with no ref.
  */
-export function renderSubstitutionHint(value: string, ctx: RenderCtx) {
+export function renderSubstitutionHint(
+  value: string,
+  substitutions: Map<string, string>,
+  localize: LocalizeFunc
+) {
   if (!hasSubstitutionReference(value)) return nothing;
-  const resolved = resolveSubstitutions(value, ctx.substitutions);
+  const resolved = resolveSubstitutions(value, substitutions);
   if (hasSubstitutionReference(resolved)) {
-    const hint = ctx.localize("device.substitution_unresolved_hint");
+    const hint = localize("device.substitution_unresolved_hint");
     return html`<span
       class="substitution-note substitution-note--external"
       role="note"
@@ -165,10 +172,10 @@ export function renderSubstitutionHint(value: string, ctx: RenderCtx) {
         library="mdi"
         name="alert-circle-outline"
       ></wa-icon>
-      <span>${ctx.localize("device.substitution_unresolved")}</span>
+      <span>${localize("device.substitution_unresolved")}</span>
     </span>`;
   }
-  const label = ctx.localize("device.substitution_resolves_to");
+  const label = localize("device.substitution_resolves_to");
   return html`<span
     class="substitution-note"
     role="note"
@@ -401,7 +408,10 @@ export function renderStringField(
   const secretHint = secretPicker === nothing ? renderSecretHint(value, ctx) : nothing;
   // Never preview the resolved value for concealed fields — a secret kept
   // in `substitutions:` (e.g. a WiFi/API password) must not leak in plaintext.
-  const subHint = inputType === "password" ? nothing : renderSubstitutionHint(value, ctx);
+  const subHint =
+    inputType === "password"
+      ? nothing
+      : renderSubstitutionHint(value, ctx.substitutions, ctx.localize);
   // When the entry carries a closed list of `suggestions`, render a
   // strict <wa-select> regardless of the underlying inputType — used
   // by featured components to pin the field to one of a few values

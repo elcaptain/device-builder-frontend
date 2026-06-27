@@ -30,6 +30,7 @@ import { consume } from "@lit/context";
 import { mdiArrowDecisionOutline, mdiDelete, mdiOpenInNew } from "@mdi/js";
 import { html, LitElement, nothing } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
+import memoizeOne from "memoize-one";
 import toast from "sonner-js";
 
 import type { ESPHomeAPI } from "../../../api/index.js";
@@ -56,6 +57,7 @@ import {
 import { anyAdvancedEntry } from "../../../util/config-entry-tree.js";
 import { renderMarkdown } from "../../../util/markdown.js";
 import { registerMdiIcons } from "../../../util/register-icons.js";
+import { parseSubstitutions } from "../../../util/substitutions.js";
 import { triggerParamFormEntries } from "../../../util/trigger-param-form-entries.js";
 import { renderAdvancedToggle } from "../advanced-toggle.js";
 import "../config-entry-form.js";
@@ -67,6 +69,7 @@ import "./automation-trigger-picker.js";
 import { CatalogLoadController } from "./catalog-load-controller.js";
 import { componentDomain, instanceName } from "./component-targets.js";
 import { ParseErrorController } from "./parse-error-controller.js";
+import { renderTargetField } from "./render-target-field.js";
 import {
   applyParamChange,
   applyYamlDiff,
@@ -215,6 +218,10 @@ export class ESPHomeAutomationEditor extends LitElement {
   public get inFlightWrite(): boolean {
     return this._deleting || this._applyInFlight;
   }
+
+  /** Parse ``substitutions:`` from the current YAML once per edit so the
+   *  read-only Target field can preview ${...} like the text fields do. */
+  private _parseSubstitutions = memoizeOne(parseSubstitutions);
 
   static styles = [espHomeStyles, inputStyles, automationEditorStyles];
 
@@ -720,10 +727,11 @@ export class ESPHomeAutomationEditor extends LitElement {
     if (!loc) return nothing;
     if (loc.kind !== "component_on" && loc.kind !== "component_action") return nothing;
     const targetValue = this._targetMetadataValue(loc);
-    return html`<div class="field">
-      <label class="field-label"> ${this._localize("device.automation_target")} </label>
-      <input type="text" readonly .value=${targetValue} />
-    </div>`;
+    return renderTargetField(
+      targetValue,
+      this._parseSubstitutions(this.yaml),
+      this._localize
+    );
   }
 
   /**
