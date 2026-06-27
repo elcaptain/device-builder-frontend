@@ -98,6 +98,10 @@ import {
 import { inputStyles } from "../styles/inputs.js";
 import { espHomeStyles } from "../styles/shared.js";
 import { runBulkUpdate } from "../util/bulk-update.js";
+import {
+  loadDashboardFilters,
+  saveDashboardFilters,
+} from "../util/dashboard-filters-session.js";
 import { readDashboardUrl, writeDashboardUrl } from "../util/dashboard-url.js";
 import {
   activeFacetCount,
@@ -108,7 +112,7 @@ import {
 } from "../util/device-filter.js";
 import { matchesDeviceName } from "../util/device-search.js";
 import { DEVICE_SORT_COLLATOR, deviceSortKey } from "../util/device-sort.js";
-import { UPDATE_FACET_BUCKETS } from "../util/facets.js";
+import { normalizeUpdateBuckets } from "../util/facets.js";
 import { computeLabelUsage } from "../util/label-usage.js";
 import { navigate } from "../util/navigation.js";
 import { consumePendingHighlight } from "../util/pending-highlight.js";
@@ -418,15 +422,28 @@ export class ESPHomePageDashboard extends LitElement {
     if (urlState.areas !== undefined) this._selectedAreas = urlState.areas;
     if (urlState.platforms !== undefined) this._selectedPlatforms = urlState.platforms;
     if (urlState.states !== undefined) this._selectedStates = urlState.states;
-    if (urlState.updates !== undefined) {
-      // Normalize the user-editable URL to known buckets in canonical
-      // order, deduped — so unknown or duplicate ids can't inflate the
-      // active-filter count or render duplicate badges.
-      const requested = new Set(urlState.updates);
-      this._selectedUpdateStatus = UPDATE_FACET_BUCKETS.filter((b) => requested.has(b));
-    }
+    // Normalize the user-editable URL to known buckets in canonical order,
+    // deduped, so unknown or duplicate ids can't inflate the active-filter
+    // count or render duplicate badges.
+    if (urlState.updates !== undefined)
+      this._selectedUpdateStatus = normalizeUpdateBuckets(urlState.updates);
     if (urlState.view !== undefined) this._view = urlState.view;
     if (urlState.yaml !== undefined) this._yamlMode = urlState.yaml;
+
+    // Seed any facet the URL didn't carry from the session store, so filters
+    // survive returning to a bare "/" (command palette, fresh-load back), not
+    // just browser-Back. The URL stays authoritative per-field — a deep link or
+    // shared URL that sets a facet wins over the session seed. Labels are stored
+    // as ids here, so no name resolution is needed (unlike the URL path).
+    const saved = loadDashboardFilters();
+    if (saved) {
+      if (urlState.labels === undefined) this._selectedLabels = saved.labels;
+      if (urlState.areas === undefined) this._selectedAreas = saved.areas;
+      if (urlState.platforms === undefined) this._selectedPlatforms = saved.platforms;
+      if (urlState.states === undefined) this._selectedStates = saved.states;
+      if (urlState.updates === undefined)
+        this._selectedUpdateStatus = normalizeUpdateBuckets(saved.updates);
+    }
 
     this._syncYamlSearch();
   }
@@ -463,6 +480,14 @@ export class ESPHomePageDashboard extends LitElement {
     "_view",
     "_yamlMode",
   ] as const;
+
+  /** Facet fields persisted to the session store: the URL-synced set minus the
+   *  non-facet fields. Derived so adding a facet to ``_urlSyncedFields`` also
+   *  makes it session-seeded without touching a second list. */
+  private static readonly _sessionSyncedFields =
+    ESPHomePageDashboard._urlSyncedFields.filter(
+      (f) => f !== "_search" && f !== "_view" && f !== "_yamlMode"
+    );
 
   private _syncUrl(): void {
     // While name resolution is still pending (catalog hasn't loaded
@@ -558,20 +583,43 @@ export class ESPHomePageDashboard extends LitElement {
       const next = hits.reduce((sum, h) => sum + h.matches.length, 0);
       if (next !== this._yamlPreviewCount) this._yamlPreviewCount = next;
     }
-    // Mirror filter / search / view state to the URL on every
-    // change, but skip the first paint cycle (where every prop is
-    // "changed" because Lit treats initial assignment as a change) —
-    // the initial state already came from the URL via
-    // ``_hydrateFromUrl``, so writing it back is a no-op.
+    this._persistFilterState(changed);
+  }
+
+  /** Persist filter/search/view state on change. Two layers in one seam: the
+   *  URL (authoritative, shareable) and the session store (seeds facets the URL
+   *  doesn't carry). On the initial paint this writes the hydrated state back: a
+   *  no-op when it came from the URL, but when facets were session-seeded it
+   *  promotes them into the address bar via ``replaceState`` so the URL keeps
+   *  mirroring the active filters (back stack stays clean). */
+  private _persistFilterState(changed: PropertyValues): void {
     if (
       ESPHomePageDashboard._urlSyncedFields.some((f) => changed.has(f)) ||
-      // Label ids serialize to the URL by *name* through the catalog,
-      // and a catalog push (create / rename) can land after the
-      // selection change that referenced it — re-sync so the URL
-      // picks up the resolved / renamed names.
+      // Label ids serialize to the URL by *name* through the catalog, and a
+      // catalog push (create / rename) can land after the selection change that
+      // referenced it — re-sync so the URL picks up the resolved / renamed names.
       (changed.has("_labelsCatalog") && this._selectedLabels.length > 0)
     ) {
       this._syncUrl();
+    }
+    // The session store carries only the facets (search / view stay out of
+    // scope), so it survives a return to a bare "/" not just browser-Back.
+    if (ESPHomePageDashboard._sessionSyncedFields.some((f) => changed.has(f))) {
+      // While URL label *names* are still resolving to ids, ``_selectedLabels``
+      // is still ``[]`` — keep the previously saved ids rather than clobbering
+      // them with the empty placeholder (the resolved ids get saved once the
+      // catalog arrives and ``_selectedLabels`` changes).
+      const labels =
+        this._pendingLabelNames !== null
+          ? (loadDashboardFilters()?.labels ?? [])
+          : this._selectedLabels;
+      saveDashboardFilters({
+        labels,
+        areas: this._selectedAreas,
+        platforms: this._selectedPlatforms,
+        states: this._selectedStates,
+        updates: this._selectedUpdateStatus,
+      });
     }
   }
 
