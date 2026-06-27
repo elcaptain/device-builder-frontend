@@ -18,7 +18,13 @@
  */
 import type { ComponentCatalogEntry } from "../api/types/components.js";
 import { isPinFieldKey, parsePinGpio, scanPinGpios } from "./pin-gpio.js";
-import { collectIdsAtPath, parseYamlTopLevelSections } from "./yaml-sections-core.js";
+import {
+  collectIdsAtPath,
+  findFieldLine,
+  parseYamlTopLevelSections,
+  readInstanceScalar,
+  type YamlSection,
+} from "./yaml-sections-core.js";
 
 /**
  * Single-entry memo for the YAML scans. The hot path is the
@@ -349,6 +355,53 @@ export function findComponentsByProviders(
   }
   providerMemo.set(probe, result);
   return result;
+}
+
+// An instance's GPIO for a pin field, handling both the bare scalar
+// (`scl: 0`) and the expanded block (`scl:\n  number: GPIO0`) forms; null
+// when the field is absent or its value isn't a parseable pin.
+function readInstancePinGpio(
+  yaml: string,
+  lines: string[],
+  section: YamlSection,
+  key: string
+): number | null {
+  const lineNo = findFieldLine(yaml, section, [key]);
+  if (lineNo === null) return null;
+  const scalar = parsePinGpio(readInstanceScalar(lines[lineNo - 1], key));
+  if (scalar !== null) return scalar;
+  // Expanded form: descend into the `number:` sub-key.
+  const numLine = findFieldLine(yaml, section, [key, "number"]);
+  return numLine === null
+    ? null
+    : parsePinGpio(readInstanceScalar(lines[numLine - 1], "number"));
+}
+
+/**
+ * True when an existing instance under `domain:` occupies every pin in
+ * `lockedPins` (pin field key -> canonical GPIO) on a SINGLE instance — i.e. the
+ * same peripheral is already wired on the same pins. Drives the catalog's hide
+ * of a featured card whose fixed wiring is already present. `lockedPins` comes
+ * from the schema (backend), so the pin keys are authoritative — no key-name
+ * guessing. An empty map returns false. `parseYamlTopLevelSections` is memoized,
+ * so calling this per card is cheap.
+ */
+export function domainOccupiesPins(
+  yaml: string,
+  domain: string,
+  lockedPins: Readonly<Record<string, number>>
+): boolean {
+  const keys = Object.keys(lockedPins);
+  if (keys.length === 0) return false;
+  const lines = yaml.split("\n");
+  for (const section of parseYamlTopLevelSections(yaml)) {
+    if ((section.parentKey ?? section.key) !== domain) continue;
+    const occupies = keys.every(
+      (key) => readInstancePinGpio(yaml, lines, section, key) === lockedPins[key]
+    );
+    if (occupies) return true;
+  }
+  return false;
 }
 
 /**

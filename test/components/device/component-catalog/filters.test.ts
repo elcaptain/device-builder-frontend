@@ -154,6 +154,74 @@ describe("visibleComponents featured present-filter", () => {
   });
 });
 
+describe("visibleComponents featured pin-conflict", () => {
+  // Apollo's featured i2c bus: the backend ships schema-derived locked_pins
+  // {scl:0, sda:1}. The dependency flow can add a generic `i2c` (different id) on
+  // the same pins; the card must then hide.
+  const i2cBoard = {
+    id: "apollo-esk-1",
+    featured_components: [
+      {
+        id: "i2c_bus",
+        component_id: "i2c",
+        fields: { id: { value: "i2c_bus" } },
+        locked_pins: { scl: 0, sda: 1 },
+      },
+    ],
+  } as unknown as BoardCatalogEntry;
+  const i2cCard = entry("featured.apollo-esk-1.i2c_bus", [], [], true);
+
+  it("hides a featured bus card when an instance occupies its locked pins", () => {
+    // Generic i2c on scl:0/sda:1 under a different id; preset id i2c_bus absent.
+    const yaml = "i2c:\n  - scl: 0\n    sda: 1\n    id: i2c_1\n";
+    const ids = visibleComponents(
+      host([i2cCard], "esp32", { yaml, board: i2cBoard })
+    ).map((c) => c.id);
+    expect(ids).toEqual([]);
+  });
+
+  it("keeps the card when the existing bus uses different pins", () => {
+    const yaml = "i2c:\n  - scl: 22\n    sda: 21\n    id: i2c_1\n";
+    const ids = visibleComponents(
+      host([i2cCard], "esp32", { yaml, board: i2cBoard })
+    ).map((c) => c.id);
+    expect(ids).toEqual(["featured.apollo-esk-1.i2c_bus"]);
+  });
+
+  it("keeps the card when its locked pins are split across two instances", () => {
+    // scl:0 on bus a, sda:1 on bus b — no single instance occupies both.
+    const yaml =
+      "i2c:\n  - scl: 0\n    sda: 9\n    id: a\n  - scl: 8\n    sda: 1\n    id: b\n";
+    const ids = visibleComponents(
+      host([i2cCard], "esp32", { yaml, board: i2cBoard })
+    ).map((c) => c.id);
+    expect(ids).toEqual(["featured.apollo-esk-1.i2c_bus"]);
+  });
+
+  it("keeps the card when its domain is not configured", () => {
+    const yaml = "switch:\n  - platform: gpio\n    pin: 0\n";
+    const ids = visibleComponents(
+      host([i2cCard], "esp32", { yaml, board: i2cBoard })
+    ).map((c) => c.id);
+    expect(ids).toEqual(["featured.apollo-esk-1.i2c_bus"]);
+  });
+
+  it("keeps a card with no locked_pins (nothing to match)", () => {
+    const board = {
+      id: "demo",
+      featured_components: [
+        { id: "i2c_bus", component_id: "i2c", fields: { id: { value: "x" } } },
+      ],
+    } as unknown as BoardCatalogEntry;
+    const card = entry("featured.demo.i2c_bus", [], [], true);
+    const yaml = "i2c:\n  - scl: 0\n    sda: 1\n    id: i2c_1\n";
+    const ids = visibleComponents(host([card], "esp32", { yaml, board })).map(
+      (c) => c.id
+    );
+    expect(ids).toEqual(["featured.demo.i2c_bus"]);
+  });
+});
+
 describe("availableFeaturedCount", () => {
   const board = (
     featured_components: unknown[],
@@ -205,6 +273,28 @@ describe("availableFeaturedCount", () => {
       availableFeaturedCount(
         host([], "esp32", {
           yaml: "light:\n  - platform: esp32_rmt_led_strip\n    id: rgb_leds\n",
+          board: b,
+        })
+      )
+    ).toBe(0);
+  });
+
+  it("drops a featured component whose locked pins are already occupied", () => {
+    // Mirrors the visibleComponents pin-conflict hide so the badge stays in
+    // step with the grid (no badge/grid divergence).
+    const b = board([
+      {
+        id: "i2c_bus",
+        component_id: "i2c",
+        multi_conf: true,
+        locked_pins: { scl: 0, sda: 1 },
+      },
+    ]);
+    expect(availableFeaturedCount(host([], "esp32", { board: b }))).toBe(1);
+    expect(
+      availableFeaturedCount(
+        host([], "esp32", {
+          yaml: "i2c:\n  - scl: 0\n    sda: 1\n    id: i2c_1\n",
           board: b,
         })
       )

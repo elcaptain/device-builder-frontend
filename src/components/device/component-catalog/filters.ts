@@ -6,6 +6,10 @@ import {
 } from "../../../api/types/components.js";
 import type { LocalizeFunc } from "../../../common/localize.js";
 import { isComponentPresent } from "../../../util/component-presence.js";
+import {
+  domainOccupiesPins,
+  parseCatalogId,
+} from "../../../util/config-entry-yaml-scan.js";
 import { platformSupported } from "../../../util/config-validation.js";
 import { collectExistingIds } from "../../../util/default-component-id.js";
 import { buildFeaturedId } from "../../../util/featured-id.js";
@@ -54,6 +58,17 @@ function featuredIdPresent(
   return typeof presetId === "string" && existingIds.has(presetId);
 }
 
+// Same component + same pins = duplicate: a featured card's `locked_pins`
+// (schema-derived key -> GPIO, from the backend) is its fixed wiring; if an
+// existing instance in the card's domain already occupies those exact pins, the
+// card is a dupe even when its preset id differs (apollo's featured i2c bus vs a
+// generic `i2c` the dependency flow added on the same scl/sda).
+function featuredPinsTaken(fc: FeaturedComponent, yaml: string): boolean {
+  return fc.locked_pins
+    ? domainOccupiesPins(yaml, parseCatalogId(fc.component_id).domain, fc.locked_pins)
+    : false;
+}
+
 export function visibleComponents(
   host: ESPHomeComponentCatalog
 ): ComponentCatalogEntry[] {
@@ -81,7 +96,7 @@ export function visibleComponents(
 
   return platformCompatible.filter((c) => {
     const fc = featuredById.get(c.id);
-    if (fc && featuredIdPresent(fc, existingIds)) {
+    if (fc && (featuredIdPresent(fc, existingIds) || featuredPinsTaken(fc, host.yaml))) {
       return false;
     }
     const refId = fc?.component_id ?? c.id;
@@ -173,9 +188,11 @@ export function availableFeaturedCount(host: ESPHomeComponentCatalog): number {
   const existingIds = featured.length ? memoIds(host.yaml) : new Set<string>();
   // `!== false`, not truthy: the backend omits the `true` default, so an
   // absent multi_conf means multi-conf (still addable). A featured peripheral
-  // whose preset id is already configured is never addable, regardless.
+  // whose preset id or fixed pins are already configured is never addable,
+  // regardless — keeps the badge count in step with the grid.
   const addable = (fc: FeaturedComponent) =>
     !featuredIdPresent(fc, existingIds) &&
+    !featuredPinsTaken(fc, host.yaml) &&
     (fc.multi_conf !== false ||
       !isComponentPresent(fc.component_id, present, presentPlatforms));
   const components = featured.filter(addable).length;
