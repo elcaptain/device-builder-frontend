@@ -474,15 +474,18 @@ export class ESPHomeScriptEditor extends LitElement {
     // component schema (it does), even if the entries we're handing
     // the form have no non-required fields — the toggle is now also
     // gating the Parameters editor.
-    const hasAdvanced = anyAdvancedEntry(entries) || this._hasParametersEntry();
-    if (!hasAdvanced) return nothing;
+    const hasParameters = this._hasParametersEntry();
+    if (!anyAdvancedEntry(entries) && !hasParameters) return nothing;
+    // The toggle also gates the bespoke Parameters block, so count it as one
+    // revealed item; otherwise a params-only script would show no "(N)" hint.
+    const count = countAdvancedEntries(entries) + (hasParameters ? 1 : 0);
     return renderAdvancedToggle(
       this._showAdvanced,
       this._localize,
       (show) => {
         this._showAdvanced = show;
       },
-      countAdvancedEntries(entries)
+      count
     );
   }
 
