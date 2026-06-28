@@ -44,7 +44,10 @@ import {
   fetchComponent,
   getCachedComponent,
 } from "../../../util/component-name-cache.js";
-import { anyAdvancedEntry } from "../../../util/config-entry-tree.js";
+import {
+  anyAdvancedEntry,
+  countAdvancedEntries,
+} from "../../../util/config-entry-tree.js";
 import { getErrorMessage } from "../../../util/error-message.js";
 import { normalizeEspHomeId } from "../../../util/esphome-id.js";
 import { renderMarkdown } from "../../../util/markdown.js";
@@ -405,6 +408,7 @@ export class ESPHomeScriptEditor extends LitElement {
           <wa-icon library="mdi" name="open-in-new"></wa-icon>
         </a>
         <p class="ae-header-desc">${renderMarkdown(descText)}</p>
+        ${this._renderAdvancedToggle(this._configFormEntries())}
       </div>
       <div class="ae-header-icon">
         ${imageUrl
@@ -428,11 +432,7 @@ export class ESPHomeScriptEditor extends LitElement {
    * below the form.
    */
   private _renderConfigForm(automation: AutomationTree, disabled: boolean) {
-    const comp = this._scriptComponent;
-    if (!comp) return nothing;
-    const entries = comp.config_entries.filter(
-      (e) => e.key !== "parameters" && e.key !== "then"
-    );
+    const entries = this._configFormEntries();
     if (entries.length === 0) return nothing;
     // The form is its own flex-column with gap, and the toggle and
     // parameters/actions sit as siblings of it at the editor's root.
@@ -450,8 +450,18 @@ export class ESPHomeScriptEditor extends LitElement {
         ?show-advanced=${this._showAdvanced}
         @value-change=${this._onConfigFormValueChange}
       ></esphome-config-entry-form>
-      ${this._renderAdvancedToggle(entries)}
     `;
+  }
+
+  /** Script config_entries fed to the form: ``parameters`` (bespoke
+   *  typed-declaration UI) and ``then`` (the actions block) are
+   *  rendered elsewhere, so they're filtered out here. */
+  private _configFormEntries(): ConfigEntry[] {
+    return (
+      this._scriptComponent?.config_entries.filter(
+        (e) => e.key !== "parameters" && e.key !== "then"
+      ) ?? []
+    );
   }
 
   /** "Show advanced settings" toggle row. Pulled out so the same
@@ -466,9 +476,14 @@ export class ESPHomeScriptEditor extends LitElement {
     // gating the Parameters editor.
     const hasAdvanced = anyAdvancedEntry(entries) || this._hasParametersEntry();
     if (!hasAdvanced) return nothing;
-    return renderAdvancedToggle(this._showAdvanced, this._localize, (show) => {
-      this._showAdvanced = show;
-    });
+    return renderAdvancedToggle(
+      this._showAdvanced,
+      this._localize,
+      (show) => {
+        this._showAdvanced = show;
+      },
+      countAdvancedEntries(entries)
+    );
   }
 
   /** Does the script catalog define a ``parameters`` entry? Used to

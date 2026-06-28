@@ -391,7 +391,12 @@ export class ESPHomeAutomationActionNode extends LitElement {
       def.config_entries,
       this._showAdvanced
     );
-    return html`<esphome-config-entry-form
+    return html`${showToggle
+        ? renderAdvancedToggle(this._showAdvanced, this._localize, (show) => {
+            this._showAdvanced = show;
+          })
+        : nothing}
+      <esphome-config-entry-form
         .entries=${def.config_entries}
         .values=${this.value.params}
         .board=${this.board}
@@ -399,12 +404,7 @@ export class ESPHomeAutomationActionNode extends LitElement {
         ?disabled=${this.disabled}
         ?show-advanced=${showAdvanced}
         @value-change=${this._onParamChange}
-      ></esphome-config-entry-form>
-      ${showToggle
-        ? renderAdvancedToggle(this._showAdvanced, this._localize, (show) => {
-            this._showAdvanced = show;
-          })
-        : nothing}`;
+      ></esphome-config-entry-form>`;
   }
 
   /** The bespoke value+unit / lambda Delay widget. The renderer and

@@ -33,7 +33,7 @@ const automationEditorFrameStyles = css`
        header and the next row, so the legacy margin-bottom would
        compound. Just keep the border + bottom padding so the
        divider line still reads as a section break. */
-    border-bottom: 1px solid var(--wa-color-neutral-border-quiet, #e1e4e8);
+    border-bottom: 1px solid var(--wa-color-surface-border);
   }
 
   .ae-header-text {
@@ -123,14 +123,18 @@ const automationEditorFrameStyles = css`
     object-fit: contain;
   }
 
-  /* "Show advanced settings" toggle row — mirrors the device
-     section-config layout so the eye reads the two surfaces as
-     the same kind of form. */
+  /* "Show advanced settings" toggle row. The action-node host renders it
+     above its inline params form, so keep the bottom gap; in the script /
+     automation header it sits after the help text, where the .ae-header-text
+     column gap supplies the spacing, so the bottom margin is zeroed below. */
   .advanced-toggle-row {
     display: flex;
     justify-content: flex-start;
-    margin-top: var(--wa-space-s);
+    margin-bottom: var(--wa-space-s);
     font-size: var(--wa-font-size-s);
+  }
+  .ae-header-text .advanced-toggle-row {
+    margin-bottom: 0;
   }
   .advanced-toggle-row wa-switch {
     font-weight: var(--wa-font-weight-semibold);

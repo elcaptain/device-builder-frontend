@@ -11,15 +11,23 @@ vi.mock("@home-assistant/webawesome/dist/components/switch/switch.js", () => ({}
 import type { LocalizeFunc } from "../../../src/common/localize.js";
 import { renderAdvancedToggle } from "../../../src/components/device/advanced-toggle.js";
 
-const localize: LocalizeFunc = (key) =>
-  key === "device.show_advanced" ? "Show advanced settings" : key;
+const localize: LocalizeFunc = (key, params) => {
+  if (key === "device.show_advanced") return "Show advanced settings";
+  if (key === "device.show_advanced_count")
+    return `Show advanced settings (${params?.count})`;
+  return key;
+};
 
 type SwitchEl = HTMLElement & { checked: boolean };
 
-function mount(show: boolean, onChange: (show: boolean) => void): HTMLElement {
+function mount(
+  show: boolean,
+  onChange: (show: boolean) => void,
+  count?: number
+): HTMLElement {
   const container = document.createElement("div");
   document.body.appendChild(container);
-  render(renderAdvancedToggle(show, localize, onChange), container);
+  render(renderAdvancedToggle(show, localize, onChange, count), container);
   return container;
 }
 
@@ -34,6 +42,17 @@ describe("renderAdvancedToggle", () => {
     expect(sw).not.toBeNull();
     expect(sw!.checked).toBe(true);
     expect(container.textContent).toContain("Show advanced settings");
+  });
+
+  it("appends the count to the label when one is given", () => {
+    const container = mount(false, () => {}, 3);
+    expect(container.textContent).toContain("Show advanced settings (3)");
+  });
+
+  it("omits the count for a zero count", () => {
+    const container = mount(false, () => {}, 0);
+    expect(container.textContent).toContain("Show advanced settings");
+    expect(container.textContent).not.toContain("(0)");
   });
 
   it("reports the new checked value through onChange on change", () => {

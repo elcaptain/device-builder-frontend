@@ -17,7 +17,11 @@ import { inputStyles } from "../../styles/inputs.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { actionFieldLabel } from "../../util/action-field-label.js";
 import { defaultBoardImageUrl, onBoardImageError } from "../../util/board-image.js";
-import { anyAdvancedEntry, pathIsAdvanced } from "../../util/config-entry-tree.js";
+import {
+  anyAdvancedEntry,
+  countAdvancedEntries,
+  pathIsAdvanced,
+} from "../../util/config-entry-tree.js";
 import type { ValidationError } from "../../util/config-validation.js";
 import { renderMarkdown } from "../../util/markdown.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
@@ -337,6 +341,7 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     // actual user-keyed shape (currently just substitutions).
     const renderEntries = resolveSectionEntries(this.sectionKey, this._config.entries);
     const hasAdvanced = anyAdvancedEntry(renderEntries);
+    const advancedCount = countAdvancedEntries(renderEntries);
     // Free-form / structural sections: show "edit via YAML" instead of the
     // form. external_components and packages are always-YAML (discriminated
     // unions don't fit the catalog — see #361 for the packages data-loss
@@ -373,6 +378,14 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
             ? html`<p class="section-desc">
                 ${renderMarkdown(this._config.description)}
               </p>`
+            : nothing}
+          ${hasAdvanced
+            ? renderAdvancedToggle(
+                showAdvanced,
+                this._localize,
+                (show) => this._setShowAdvanced(show),
+                advancedCount
+              )
             : nothing}
         </div>
         ${this._isUnknown
@@ -430,11 +443,6 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
               @value-change=${this._onValueChange}
               @edit-action-field=${this._onEditActionField}
             ></esphome-config-entry-form>
-            ${hasAdvanced
-              ? renderAdvancedToggle(showAdvanced, this._localize, (show) =>
-                  this._setShowAdvanced(show)
-                )
-              : nothing}
             ${this._error ? html`<p class="error">${this._error}</p>` : nothing}
             ${this._renderApiActionsTable()} ${this._renderTriggersTable()}
             ${this._renderActionsRow(canDelete)}

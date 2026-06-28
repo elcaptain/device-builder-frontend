@@ -54,7 +54,10 @@ import {
   fetchComponent,
   getCachedComponent,
 } from "../../../util/component-name-cache.js";
-import { anyAdvancedEntry } from "../../../util/config-entry-tree.js";
+import {
+  anyAdvancedEntry,
+  countAdvancedEntries,
+} from "../../../util/config-entry-tree.js";
 import { renderMarkdown } from "../../../util/markdown.js";
 import { registerMdiIcons } from "../../../util/register-icons.js";
 import { parseSubstitutions } from "../../../util/substitutions.js";
@@ -563,7 +566,6 @@ export class ESPHomeAutomationEditor extends LitElement {
   ) {
     const entries = this._paramFormEntries(activeTrigger);
     if (entries.length === 0) return nothing;
-    const hasAdvanced = anyAdvancedEntry(entries);
     // No outer wrapper / no synthetic group label: the form renders
     // each entry with its own catalog-derived label + description,
     // and a section header above that ("Interval" / "Trigger
@@ -580,11 +582,6 @@ export class ESPHomeAutomationEditor extends LitElement {
         ?show-advanced=${this._showAdvanced}
         @value-change=${this._onTriggerParamsValueChange}
       ></esphome-config-entry-form>
-      ${hasAdvanced
-        ? renderAdvancedToggle(this._showAdvanced, this._localize, (show) => {
-            this._showAdvanced = show;
-          })
-        : nothing}
     `;
   }
 
@@ -672,6 +669,8 @@ export class ESPHomeAutomationEditor extends LitElement {
       activeTrigger?.description ??
       this._localize("device.automation_header_description");
     const imageUrl = intervalComp?.image_url ?? "";
+    const entries = this._paramFormEntries(activeTrigger);
+    const hasAdvanced = anyAdvancedEntry(entries);
     return html`<div class="ae-header">
       <div class="ae-header-text">
         <h2 class="ae-header-title">${title}</h2>
@@ -687,6 +686,16 @@ export class ESPHomeAutomationEditor extends LitElement {
             </a>`
           : nothing}
         <p class="ae-header-desc">${renderMarkdown(descText)}</p>
+        ${hasAdvanced
+          ? renderAdvancedToggle(
+              this._showAdvanced,
+              this._localize,
+              (show) => {
+                this._showAdvanced = show;
+              },
+              countAdvancedEntries(entries)
+            )
+          : nothing}
       </div>
       <div class="ae-header-icon">
         ${imageUrl

@@ -24,6 +24,15 @@ export function actionAdvancedState(
   };
 }
 
+/** Count of top-level advanced entries — the fields revealed at this level
+ *  when the toggle flips on. Used for the toggle's "(N)" hint. Intentionally
+ *  non-recursive (unlike `anyAdvancedEntry`): a nested advanced field isn't
+ *  revealed here, so a gate that's open with a `(0)`/plain label is expected
+ *  when the only advanced entry sits inside a non-advanced NESTED parent. */
+export function countAdvancedEntries(entries: ConfigEntry[]): number {
+  return entries.reduce((n, e) => n + (e.advanced ? 1 : 0), 0);
+}
+
 /** True when `entries` contains any advanced entry, recursively. */
 export function anyAdvancedEntry(entries: ConfigEntry[]): boolean {
   for (const entry of entries) {

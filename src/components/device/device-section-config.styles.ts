@@ -17,8 +17,12 @@ export const deviceSectionConfigStyles = css`
     width: 100%;
     gap: var(--wa-space-l);
     padding-bottom: var(--wa-space-m);
-    margin-bottom: var(--wa-space-m);
-    border-bottom: 1px solid var(--wa-color-surface-lowered);
+    /* No margin-bottom: the :host gap already supplies the space below the
+       divider, so the extra margin left an awkwardly large gap between the
+       separator line and the first form item. */
+    /* Match the controls/automations divider (surface-border), not the
+       heavier surface-lowered. */
+    border-bottom: 1px solid var(--wa-color-surface-border);
   }
 
   .section-header-info {
@@ -105,12 +109,11 @@ export const deviceSectionConfigStyles = css`
     gap: var(--wa-space-m);
   }
 
-  /* "Show advanced settings" toggle row, shown below the form when
-     the section has any advanced entries (at any depth). */
+  /* "Show advanced settings" toggle, shown in the header after the help
+     text so it stays put when advanced fields are revealed instead of
+     being shoved below the fold. */
   .advanced-toggle-row {
     display: flex;
-    justify-content: flex-start;
-    margin-top: var(--wa-space-s);
     font-size: var(--wa-font-size-s);
   }
 
