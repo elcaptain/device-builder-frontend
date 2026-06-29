@@ -227,3 +227,41 @@ describe("navigateToDep bus-constraint prefill", () => {
     expect(host._depPrefill).toBeNull();
   });
 });
+
+describe("navigateToDep featured-hub prefill", () => {
+  afterEach(() => _clearComponentCache());
+
+  const hubFeatured = {
+    id: "bp5758d_hub",
+    component_id: "bp5758d",
+    name: null,
+    description: null,
+    fields: {
+      clock_pin: { value: 26, locked: true, suggestions: null },
+      data_pin: { value: 24, locked: true, suggestions: null },
+    },
+  };
+
+  test("applies a board featured hub's locked pins when reached via the detour", async () => {
+    const host = makeHost(respond(makeComponentEntry("bp5758d")));
+    host.board = { id: "arlec", featured_components: [hubFeatured] };
+    host._selected = makeComponentEntry("output.bp5758d");
+
+    await navigateToDep(host, "bp5758d");
+
+    expect(host._depPrefill).toEqual({
+      fields: { clock_pin: 26, data_pin: 24 },
+      required: [],
+    });
+  });
+
+  test("leaves the prefill null when no featured entry materializes the dep", async () => {
+    const host = makeHost(respond(makeComponentEntry("bp5758d")));
+    host.board = { id: "arlec", featured_components: [] };
+    host._selected = makeComponentEntry("output.bp5758d");
+
+    await navigateToDep(host, "bp5758d");
+
+    expect(host._depPrefill).toBeNull();
+  });
+});

@@ -1,4 +1,5 @@
 import type { ESPHomeAPI } from "../../api/index.js";
+import type { FeaturedComponent } from "../../api/types/boards.js";
 import type { ComponentCatalogEntry } from "../../api/types/components.js";
 import {
   busConstraintPrefill,
@@ -10,7 +11,7 @@ import { fetchComponent } from "../../util/component-name-cache.js";
 export interface DepNavHost {
   readonly _api: ESPHomeAPI;
   platform: string;
-  board: { id: string } | null;
+  board: { id: string; featured_components?: FeaturedComponent[] } | null;
   _catalog: { filterByDomain(domain: string): void } | null;
   _selected: ComponentCatalogEntry | null;
   _returnTo: ComponentCatalogEntry | null;
@@ -57,9 +58,13 @@ export async function navigateToDep(host: DepNavHost, domain: string): Promise<v
     // The requester's bus constraints become the new bus's starting
     // values (ags10 caps i2c at 15kHz, most uart devices pin a baud).
     const constraints = previousSelected?.bus_constraints?.[domain];
-    host._depPrefill = constraints
+    const busPrefill = constraints
       ? busConstraintPrefill(direct.config_entries, constraints)
       : null;
+    host._depPrefill = mergePrefill(
+      busPrefill,
+      featuredHubPrefill(host.board, direct.id)
+    );
     host._selected = direct;
     return;
   }
@@ -67,6 +72,43 @@ export async function navigateToDep(host: DepNavHost, domain: string): Promise<v
   await host.updateComplete;
   if (seq !== host._depNavSeq) return;
   host._catalog?.filterByDomain(domain);
+}
+
+/**
+ * Starting values for a dependency that a board featured-component
+ * materializes (e.g. a bp5758d / sm2135 LED-driver hub with locked
+ * clock_pin / data_pin). The `requires` prerequisite flow only pre-fills the
+ * hub when the user picks the featured consumer directly; reaching the hub
+ * through the missing-dependency detour (or a full-setup bundle, which doesn't
+ * re-resolve a queued member's `requires`) lands here instead — so apply the
+ * same preset values the baked `featured.<board>.<id>` would, rather than an
+ * empty form. Returns null when no featured entry materializes this component.
+ */
+function featuredHubPrefill(
+  board: DepNavHost["board"],
+  componentId: string
+): BusPrefill | null {
+  const fc = board?.featured_components?.find((c) => c.component_id === componentId);
+  if (!fc) return null;
+  const fields: Record<string, unknown> = {};
+  for (const [key, preset] of Object.entries(fc.fields)) {
+    if (preset.value !== null && preset.value !== undefined) fields[key] = preset.value;
+  }
+  return Object.keys(fields).length > 0 ? { fields, required: [] } : null;
+}
+
+/** Merge a bus-constraint prefill with a featured one; the bus wins a shared field. */
+function mergePrefill(
+  bus: BusPrefill | null,
+  featured: BusPrefill | null
+): BusPrefill | null {
+  if (!bus) return featured;
+  if (!featured) return bus;
+  return {
+    fields: { ...featured.fields, ...bus.fields },
+    required: [...bus.required, ...featured.required],
+    ...(bus.optionOverrides ? { optionOverrides: bus.optionOverrides } : {}),
+  };
 }
 
 /**
