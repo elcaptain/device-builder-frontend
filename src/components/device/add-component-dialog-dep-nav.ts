@@ -61,11 +61,13 @@ export async function navigateToDep(host: DepNavHost, domain: string): Promise<v
     const busPrefill = constraints
       ? busConstraintPrefill(direct.config_entries, constraints)
       : null;
-    host._depPrefill = mergePrefill(
-      busPrefill,
-      featuredHubPrefill(host.board, direct.id)
-    );
-    host._selected = direct;
+    const fc = host.board?.featured_components?.find((c) => c.component_id === direct.id);
+    host._depPrefill = mergePrefill(busPrefill, featuredHubPrefill(fc));
+    // Carry the featured entry's locked state too, not just its values, so a
+    // hub reached through the detour matches the direct featured pick (a pin
+    // the catalog locks renders disabled, never editable into a config the
+    // backend would reject).
+    host._selected = fc ? applyFeaturedLocks(direct, fc) : direct;
     return;
   }
   host._selected = null;
@@ -84,17 +86,39 @@ export async function navigateToDep(host: DepNavHost, domain: string): Promise<v
  * same preset values the baked `featured.<board>.<id>` would, rather than an
  * empty form. Returns null when no featured entry materializes this component.
  */
-function featuredHubPrefill(
-  board: DepNavHost["board"],
-  componentId: string
-): BusPrefill | null {
-  const fc = board?.featured_components?.find((c) => c.component_id === componentId);
+function featuredHubPrefill(fc: FeaturedComponent | undefined): BusPrefill | null {
   if (!fc) return null;
   const fields: Record<string, unknown> = {};
   for (const [key, preset] of Object.entries(fc.fields)) {
     if (preset.value !== null && preset.value !== undefined) fields[key] = preset.value;
   }
   return Object.keys(fields).length > 0 ? { fields, required: [] } : null;
+}
+
+/**
+ * Clone *direct* with ``locked: true`` on each config entry the featured entry
+ * locks, so the dep form disables those fields (``effectiveDisabled`` reads
+ * ``entry.locked``). The bare component fetched for the detour carries no lock
+ * flags — only the server-hydrated ``featured.<board>.<id>`` does — so without
+ * this the pins arrive pre-filled but editable. Returns *direct* untouched when
+ * nothing is locked; never mutates the cached component.
+ */
+function applyFeaturedLocks(
+  direct: ComponentCatalogEntry,
+  fc: FeaturedComponent
+): ComponentCatalogEntry {
+  const lockedKeys = new Set(
+    Object.entries(fc.fields)
+      .filter(([, preset]) => preset.locked)
+      .map(([key]) => key)
+  );
+  if (lockedKeys.size === 0) return direct;
+  return {
+    ...direct,
+    config_entries: direct.config_entries.map((entry) =>
+      lockedKeys.has(entry.key) ? { ...entry, locked: true } : entry
+    ),
+  };
 }
 
 /** Merge a bus-constraint prefill with a featured one; the bus wins a shared field. */

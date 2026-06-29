@@ -243,16 +243,28 @@ describe("navigateToDep featured-hub prefill", () => {
   };
 
   test("applies a board featured hub's locked pins when reached via the detour", async () => {
-    const host = makeHost(respond(makeComponentEntry("bp5758d")));
+    const bp5758d = makeComponentEntry("bp5758d", {
+      config_entries: [
+        makeConfigEntry({ key: "clock_pin", type: ConfigEntryType.PIN }),
+        makeConfigEntry({ key: "data_pin", type: ConfigEntryType.PIN }),
+      ],
+    });
+    const host = makeHost(respond(bp5758d));
     host.board = { id: "arlec", featured_components: [hubFeatured] };
     host._selected = makeComponentEntry("output.bp5758d");
 
     await navigateToDep(host, "bp5758d");
 
+    // Values arrive via the prefill...
     expect(host._depPrefill).toEqual({
       fields: { clock_pin: 26, data_pin: 24 },
       required: [],
     });
+    // ...and the locked state is carried onto the dep component's entries.
+    const locked = Object.fromEntries(
+      host._selected!.config_entries.map((e) => [e.key, e.locked])
+    );
+    expect(locked).toEqual({ clock_pin: true, data_pin: true });
   });
 
   test("leaves the prefill null when no featured entry materializes the dep", async () => {
