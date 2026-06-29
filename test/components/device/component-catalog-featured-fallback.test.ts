@@ -56,12 +56,16 @@ async function mountFeatured({
     board: POE_BOARD,
     yaml,
     _search: search,
-    _components: components,
     _categories: [{ id: "featured", name: "featured", count: 1 }],
-    _total: components.length,
     _category: "featured",
-    _loading: false,
-    _initialLoad: false,
+  });
+  // _components / _total now read off the paged list controller, and loading is
+  // controller-owned (hasLoaded replaces _initialLoad), so seed it directly.
+  Object.assign((el as unknown as { _list: Record<string, unknown> })._list, {
+    items: components,
+    total: components.length,
+    loading: false,
+    hasLoaded: true,
   });
   document.body.appendChild(el);
   await el.updateComplete;
