@@ -449,17 +449,17 @@ export class ESPHomeAddComponentDialog extends LitElement {
     fullIds: string[],
     boardId: string,
     progressName: string
-  ) {
+  ): Promise<boolean> {
     const [first, ...rest] = fullIds;
     const result = await hydrateForSelection(
       this as unknown as SelectionHost,
       first,
       boardId
     );
-    if (result.kind === "stale") return;
+    if (result.kind === "stale") return false;
     if (result.kind === "error") {
       this._submitError = result.message;
-      return;
+      return false;
     }
     // Fresh sequence — abandon any in-flight dep-detour state.
     this._clearDetourFields();
@@ -471,6 +471,7 @@ export class ESPHomeAddComponentDialog extends LitElement {
     };
     this._selected = result.entry;
     this._submitError = "";
+    return true;
   }
 
   /**
@@ -522,11 +523,12 @@ export class ESPHomeAddComponentDialog extends LitElement {
   }
 
   /**
-   * Picking a bundle queues the bundle's components and opens the
-   * form view on the first one. Each successful submit advances the
-   * queue (`_onFormSubmit`); cancelling clears state but keeps any
-   * already-added components in the YAML — no rollback, consistent
-   * with the regular flow.
+   * Add a whole bundle in one shot: each member is merged with its board
+   * presets and no form, threading the editor draft so unsaved edits survive.
+   * The form only opens for a member needing input the presets don't cover —
+   * from there the rest continues through the interactive queue, so a bundle
+   * that can't be filled blind still completes. Already-added members are kept
+   * on hand-off (no rollback, consistent with the regular flow).
    */
   private async _onBundleSelected(
     e: CustomEvent<{ bundle: FeaturedBundle; boardId: string }>
@@ -534,11 +536,128 @@ export class ESPHomeAddComponentDialog extends LitElement {
     e.stopPropagation();
     if (this._submitting) return;
     const { bundle, boardId } = e.detail;
-    if (!boardId || bundle.component_ids.length === 0) return;
+    if (!boardId || bundle.component_ids.length === 0 || !this.configuration) return;
     const fullIds = bundle.component_ids.map((localId) =>
       buildFeaturedId(boardId, localId)
     );
-    await this._startFeaturedSequence(fullIds, boardId, bundle.name);
+
+    // Fresh sequence — abandon any in-flight dep-detour state, and invalidate
+    // any in-flight dep-nav lookup the way `_submitComponent` does.
+    this._clearDetourFields();
+    this._submitting = true;
+    this._submitError = "";
+    this._depNavSeq++;
+    let draft = this.yaml || undefined;
+    let lastAdded: { domain: string; id: string } | null = null;
+    let addedAny = false;
+    // Publish the merged draft so far, then resume from member *idx* through the
+    // interactive queue, carrying the just-added dependency's id into the opened
+    // form's matching reference field (the chaining bundles rely on).
+    const handOff = async (idx: number) => {
+      if (addedAny) this._dispatchDraft(this.yaml);
+      // Keep `_submitting` set across the hydrate so the dialog can't be
+      // dismissed or a new selection started mid-hand-off (which would make the
+      // hydrate stale); release it once the form is up.
+      const started = await this._startFeaturedSequence(
+        fullIds.slice(idx),
+        boardId,
+        bundle.name
+      );
+      this._submitting = false;
+      // A stale/errored sequence opened no form and left detour state alone;
+      // don't clobber it (or a superseding selection's state).
+      if (!started) return;
+      if (lastAdded) this._prefillReference = lastAdded;
+      // `_startFeaturedSequence` counts from 1 over the remaining slice; restate
+      // the banner against the whole bundle so members already added silently
+      // still count toward the step number.
+      this._bundleProgress = {
+        current: idx + 1,
+        total: fullIds.length,
+        bundleName: bundle.name,
+      };
+    };
+    try {
+      for (let i = 0; i < fullIds.length; i++) {
+        const result = await hydrateForSelection(
+          this as unknown as SelectionHost,
+          fullIds[i],
+          boardId
+        );
+        if (result.kind === "stale") {
+          // A newer selection superseded this batch; publish what merged so far
+          // for symmetry with the throw/hand-off paths (the superseding flow
+          // also threads `this.yaml`, but don't rely on it cancelling).
+          if (addedAny) this._dispatchDraft(this.yaml);
+          return;
+        }
+        if (result.kind === "error") {
+          // A body fetch failed; routing through hand-off would only re-fetch
+          // the same member and drop this message. Surface it directly and keep
+          // what merged so far.
+          if (addedAny) this._dispatchDraft(this.yaml);
+          this._submitError = result.message;
+          return;
+        }
+        const entry = result.entry;
+        // A member needing input the presets don't cover opens the form.
+        const fields = this._fastPathFields(entry);
+        if (fields === null) {
+          await handOff(i);
+          return;
+        }
+        const { yaml } = await this._api.addComponent(
+          this.configuration,
+          { component_id: fullIds[i], fields },
+          draft
+        );
+        draft = yaml;
+        addedAny = true;
+        // Keep `this.yaml` current so the next member's dep check + reference
+        // dropdown see what this batch already added; the host draft is
+        // published once at the end rather than churning the editor per member.
+        this.yaml = yaml;
+        lastAdded = this._chainReference(entry, fields);
+      }
+      if (addedAny) this._dispatchDraft(this.yaml);
+      this._open = false;
+      this._selected = null;
+      this._resetDetourState();
+      toast.success(this._localize("device.bundle_added", { name: bundle.name }), {
+        richColors: true,
+      });
+    } catch (err) {
+      // A member failed mid-batch: publish what merged so far so the host keeps
+      // the already-added members (the draft is otherwise only published on the
+      // success or hand-off paths, not on a throw).
+      if (addedAny) this._dispatchDraft(this.yaml);
+      this._submitError =
+        err instanceof Error ? err.message : this._localize("device.add_component_error");
+      toast.error(this._submitError, { richColors: true });
+    } finally {
+      this._submitting = false;
+    }
+  }
+
+  /** Surface the merged YAML as an unsaved editor draft (host saves explicitly). */
+  private _dispatchDraft(yaml: string) {
+    this.dispatchEvent(
+      new CustomEvent("yaml-draft", { detail: { yaml }, bubbles: true, composed: true })
+    );
+  }
+
+  /**
+   * The ``{domain, id}`` a just-added component hands to a later member's
+   * matching reference field, or null when it has no id to chain.
+   */
+  private _chainReference(
+    entry: ComponentCatalogEntry,
+    fields: Record<string, unknown>
+  ): { domain: string; id: string } | null {
+    const id = fields["id"];
+    return typeof id === "string" && entry.category
+      ? { domain: entry.category, id }
+      : null;
   }
 
   private _onBack() {
@@ -620,13 +739,7 @@ export class ESPHomeAddComponentDialog extends LitElement {
       // (so the dependency we just added shows up in the original
       // component's dropdown). `yaml-draft` advances only the working
       // buffer, leaving the dirty flag on so the user saves explicitly.
-      this.dispatchEvent(
-        new CustomEvent("yaml-draft", {
-          detail: { yaml },
-          bubbles: true,
-          composed: true,
-        })
-      );
+      this._dispatchDraft(yaml);
 
       if (this._returnTo) {
         // Just finished adding a dependency — restore the original
@@ -690,16 +803,7 @@ export class ESPHomeAddComponentDialog extends LitElement {
         // `light.binary` whose `output:` field has to point at it — and
         // without this prefill the user has to re-pick the id they just
         // typed in the previous step from a dropdown.
-        const justAddedId = fields["id"];
-        const justAddedDomain = this._selected.category;
-        if (typeof justAddedId === "string" && justAddedDomain) {
-          this._prefillReference = {
-            domain: justAddedDomain,
-            id: justAddedId,
-          };
-        } else {
-          this._prefillReference = null;
-        }
+        this._prefillReference = this._chainReference(this._selected, fields);
         this._bundleQueue = remaining;
         this._bundleProgress = {
           ...this._bundleProgress,
