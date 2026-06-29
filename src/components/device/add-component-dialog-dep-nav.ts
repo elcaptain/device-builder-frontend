@@ -61,6 +61,11 @@ export async function navigateToDep(host: DepNavHost, domain: string): Promise<v
     const busPrefill = constraints
       ? busConstraintPrefill(direct.config_entries, constraints)
       : null;
+    // First match wins: the detour knows only the dependency's component_id,
+    // not a specific featured id, so it can't disambiguate a board that lists
+    // the same hub component twice with diverging locked pins. The importer
+    // never produces that (it skips multi-hub configs), so only a hand-curated
+    // board could reach it.
     const fc = host.board?.featured_components?.find((c) => c.component_id === direct.id);
     host._depPrefill = mergePrefill(busPrefill, featuredHubPrefill(fc));
     // Carry the featured entry's locked state too, not just its values, so a
