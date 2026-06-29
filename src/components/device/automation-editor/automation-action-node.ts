@@ -37,7 +37,10 @@ import type { LocalizeFunc } from "../../../common/localize.js";
 import { localizeContext } from "../../../context/index.js";
 import { inputStyles } from "../../../styles/inputs.js";
 import { espHomeStyles } from "../../../styles/shared.js";
-import { actionAdvancedState } from "../../../util/config-entry-tree.js";
+import {
+  actionAdvancedState,
+  countAdvancedEntries,
+} from "../../../util/config-entry-tree.js";
 import { renderMarkdown } from "../../../util/markdown.js";
 import { registerMdiIcons } from "../../../util/register-icons.js";
 import { renderAdvancedToggle } from "../advanced-toggle.js";
@@ -392,9 +395,14 @@ export class ESPHomeAutomationActionNode extends LitElement {
       this._showAdvanced
     );
     return html`${showToggle
-        ? renderAdvancedToggle(this._showAdvanced, this._localize, (show) => {
-            this._showAdvanced = show;
-          })
+        ? renderAdvancedToggle(
+            this._showAdvanced,
+            this._localize,
+            (show) => {
+              this._showAdvanced = show;
+            },
+            countAdvancedEntries(def.config_entries)
+          )
         : nothing}
       <esphome-config-entry-form
         .entries=${def.config_entries}
