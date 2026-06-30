@@ -38,6 +38,7 @@ import type { LocalizeFunc } from "../../common/localize.js";
 import { labelsContext, localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { matchesDeviceRow } from "../../util/device-search.js";
+import { showPendingChanges, showUpdateAvailable } from "../../util/device-sync.js";
 import { labelChipStyles, resolveLabelIds } from "../../util/label-chip-template.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { renderDeviceTableBody, renderDeviceTableHead } from "./device-table-grid.js";
@@ -282,7 +283,8 @@ export class ESPHomeDeviceTable extends LitElement {
         labels: resolveLabelIds(d.labels, this._labelCatalog),
         config: d.configuration,
         hasPendingChanges: d.has_pending_changes === true,
-        hasUpdateAvailable: d.update_available,
+        showModified: showPendingChanges(d),
+        showUpdate: showUpdateAvailable(d),
         api_enabled: d.api_enabled === true,
         api_encrypted: d.api_encrypted === true,
         api_encryption_active: d.api_encryption_active ?? null,
