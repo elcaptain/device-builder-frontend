@@ -1,5 +1,5 @@
 import { consume } from "@lit/context";
-import { LitElement, css, html, type PropertyValues } from "lit";
+import { LitElement, css, html, nothing, type PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { ESPHomeAPI } from "../../api/index.js";
 import type { BoardCatalogEntry } from "../../api/types/boards.js";
@@ -15,6 +15,7 @@ import { wifiFieldsStyles } from "../onboarding/wifi-fields-styles.js";
 import { isWifiPasswordTooShort, renderWifiFields } from "../onboarding/wifi-fields.js";
 
 import "@home-assistant/webawesome/dist/components/checkbox/checkbox.js";
+import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
 
 @customElement("esphome-wizard-step-setup")
 export class ESPHomeWizardStepSetup extends LitElement {
@@ -31,6 +32,10 @@ export class ESPHomeWizardStepSetup extends LitElement {
   // Set by the parent dialog; the step stays mounted while the dialog is
   // hidden, so the Enter listener follows this rather than connectedCallback.
   @property({ type: Boolean }) active = false;
+
+  // Set by the parent dialog while createDevice is in flight; a big board
+  // (128-relay full setup) takes seconds, so the button must show progress.
+  @property({ type: Boolean }) submitting = false;
 
   @state()
   private _stage: "name" | "wifi" = "name";
@@ -66,6 +71,9 @@ export class ESPHomeWizardStepSetup extends LitElement {
   // stages, so the latch idiom the dialogs use doesn't apply).
   private _enter = new EnterController(this, (e) => {
     if (e.repeat) return;
+    // Match the pointer path: the buttons are disabled while submitting, so the
+    // keyboard must honor the same lock (_onNext is the authoritative backstop).
+    if (this.submitting) return;
     if (this._canAdvance()) this._onNext();
   });
 
@@ -238,9 +246,25 @@ export class ESPHomeWizardStepSetup extends LitElement {
         background: var(--esphome-primary-hover);
       }
 
-      .btn-primary:disabled {
+      /* Both variants set an explicit background, which overrides the UA
+         disabled greying, so a disabled button would otherwise look active;
+         dim it here (Back and Finish setup are both disabled mid-create). */
+      .btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+      }
+
+      /* Pin the spinner to a 1em square (box-sizing + flex:none) so it can't
+         reflow the button, and tint it to currentColor; same treatment as the
+         editor Save button (device-editor.styles.ts). */
+      .btn wa-spinner {
+        box-sizing: border-box;
+        flex: none;
+        width: 1em;
+        height: 1em;
+        --track-width: 2px;
+        --indicator-color: currentColor;
+        --track-color: color-mix(in srgb, currentColor 30%, transparent);
       }
     `,
   ];
@@ -282,16 +306,23 @@ export class ESPHomeWizardStepSetup extends LitElement {
       ${this._stage === "name" ? this._renderNameSection() : this._renderWifiSection()}
 
       <div class="actions">
-        <button class="btn btn-secondary" type="button" @click=${this._onBack}>
+        <button
+          class="btn btn-secondary"
+          type="button"
+          ?disabled=${this.submitting}
+          @click=${this._onBack}
+        >
           ${this._localize("wizard.back")}
         </button>
         <div class="actions-right">
           <button
             class="btn btn-primary"
             type="button"
-            ?disabled=${!this._canAdvance()}
+            ?disabled=${!this._canAdvance() || this.submitting}
+            aria-busy=${this.submitting || nothing}
             @click=${this._onNext}
           >
+            ${this.submitting ? html`<wa-spinner></wa-spinner>` : nothing}
             ${this._stage === "name" && this._collectWifi
               ? this._localize("wizard.next")
               : this._localize("wizard.finish_setup")}
@@ -368,6 +399,9 @@ export class ESPHomeWizardStepSetup extends LitElement {
   }
 
   private _onBack() {
+    // The disabled attribute blocks the click; guard the handler too so a
+    // create in flight can't be stepped back out from under.
+    if (this.submitting) return;
     if (this._stage === "wifi") {
       this._stage = "name";
       return;
@@ -382,6 +416,10 @@ export class ESPHomeWizardStepSetup extends LitElement {
   }
 
   private _onNext() {
+    // Single in-flight lock for every advance/finish path (button click, Enter
+    // key); the disabled buttons block the pointer, this covers the rest so a
+    // create can't be re-dispatched or stepped forward mid-add.
+    if (this.submitting) return;
     if (this._stage === "name") {
       if (this._collectWifi) {
         this._stage = "wifi";
