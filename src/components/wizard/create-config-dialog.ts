@@ -13,7 +13,7 @@ import { fullscreenMobileDialog } from "../../styles/dialog-mobile.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { withBase } from "../../util/base-path.js";
 import { buildFeaturedId } from "../../util/featured-id.js";
-import { fullSetupComponentIds } from "../../util/full-setup.js";
+import { featuredComponentName, fullSetupComponentIds } from "../../util/full-setup.js";
 import { markJustCreated } from "../../util/just-created.js";
 import { markPendingHighlight } from "../../util/pending-highlight.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
@@ -579,7 +579,7 @@ export class ESPHomeCreateConfigDialog extends LitElement implements ImportFlowH
     configuration: string,
     board: BoardCatalogEntry
   ): Promise<void> {
-    let skipped = 0;
+    const skipped: string[] = [];
     for (const localId of fullSetupComponentIds(board)) {
       try {
         await this._api.addComponent(configuration, {
@@ -587,15 +587,24 @@ export class ESPHomeCreateConfigDialog extends LitElement implements ImportFlowH
         });
       } catch (err) {
         console.error(`Full setup: failed to add ${localId} to ${configuration}:`, err);
-        skipped += 1;
+        skipped.push(featuredComponentName(board, localId));
       }
     }
-    // A partially-applied device would otherwise look complete; tell the user
-    // some recommended components need finishing in the editor.
-    if (skipped > 0) {
-      toast.warning(this._localize("wizard.full_setup_partial", { count: skipped }), {
-        richColors: true,
-      });
+    // A partially-applied device would otherwise look complete; name which
+    // recommended components need finishing, capped so the toast stays short.
+    if (skipped.length > 0) {
+      const shown = 3;
+      toast.warning(
+        this._localize("wizard.full_setup_partial", {
+          // count drives the singular/plural wording; names/extra list the
+          // skipped components, capped. Older count-only Lokalise strings
+          // still render off count alone until re-translated.
+          count: skipped.length,
+          names: skipped.slice(0, shown).join(", "),
+          extra: Math.max(0, skipped.length - shown),
+        }),
+        { richColors: true }
+      );
     }
   }
 
