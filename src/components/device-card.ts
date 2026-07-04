@@ -5,6 +5,7 @@ import {
   mdiCheckNetworkOutline,
   mdiCheckboxBlankOutline,
   mdiCheckboxMarked,
+  mdiClockOutline,
   mdiCloseCircle,
   mdiDotsVertical,
   mdiHelpNetworkOutline,
@@ -59,6 +60,7 @@ registerMdiIcons({
   "open-in-new": mdiOpenInNew,
   pencil: mdiPencil,
   upload: mdiUpload,
+  "clock-outline": mdiClockOutline,
 });
 
 @customElement("esphome-device-card")
@@ -85,6 +87,7 @@ export class ESPHomeDeviceCard extends LitElement {
   // modified / update affordances (dot + install / update button).
   @property({ type: Boolean, attribute: "show-modified" }) showModified = false;
   @property({ type: Boolean, attribute: "show-update" }) showUpdate = false;
+  @property({ type: Boolean, attribute: "queued-update" }) queuedUpdate = false;
 
   // Installed + target ESPHome versions for the Update hover.
   @property({ attribute: false }) installedVersion = "";
@@ -196,6 +199,16 @@ export class ESPHomeDeviceCard extends LitElement {
                       class="indicator-dot indicator-dot--update"
                       title=${this._localize("dashboard.status_update_available")}
                     ></span>`
+                  : nothing
+              }
+              ${
+                this.queuedUpdate
+                  ? html`<wa-icon
+                      class="indicator-queued"
+                      library="mdi"
+                      name="clock-outline"
+                      title=${this._localize("dashboard.status_queued_update")}
+                    ></wa-icon>`
                   : nothing
               }
               ${renderEncryptionIcon(this)}

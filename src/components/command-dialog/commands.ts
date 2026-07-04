@@ -196,7 +196,10 @@ export function followJob(host: ESPHomeCommandDialog, jobId: string): void {
     onResult: (data) => {
       host._streamId = "";
       host._flushPendingLines();
-      const result = data as unknown as { status: string; exit_code: number | null };
+      const result = data as unknown as Pick<
+        FirmwareJob,
+        "status" | "exit_code" | "is_deferred_install"
+      >;
       const success = result.status === JobStatus.COMPLETED;
 
       // On a successful install/rename COMPILE, follow the dependent flash —
@@ -222,6 +225,14 @@ export function followJob(host: ESPHomeCommandDialog, jobId: string): void {
           // so the remote-builder sub-line doesn't linger on the compile's
           // receiver.
           primeAndFollow(host, flash);
+          return;
+        }
+        // A deferred install compiles now and flashes when the device wakes,
+        // so no dependent flash exists — queued is the success state.
+        if (result.is_deferred_install) {
+          host._state = "success";
+          host._statusMessage = host._localize("dashboard.queued_successfully");
+          host._jobId = "";
           return;
         }
         // No flash step — the device was never flashed, so don't report success.

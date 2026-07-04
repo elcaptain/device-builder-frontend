@@ -968,6 +968,8 @@ export class ESPHomePageDashboard extends LitElement {
     this._openConfirm({ kind: "delete-archived", device });
   _confirmArchive = (device: ConfiguredDevice) =>
     this._openConfirm({ kind: "archive-single", device });
+  _confirmClearQueuedUpdate = (device: ConfiguredDevice) =>
+    this._openConfirm({ kind: "clear-queued-update", device });
 
   _executeConfirm = () => {
     const p = this._pendingConfirm;

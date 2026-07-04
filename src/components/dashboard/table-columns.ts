@@ -38,6 +38,7 @@ export interface DeviceRow {
   // button, update column + update button.
   showModified: boolean;
   showUpdate: boolean;
+  hasQueuedUpdate: boolean;
   api_enabled: boolean;
   api_encrypted: boolean;
   api_encryption_active: string | null;
@@ -178,6 +179,16 @@ export function createDeviceColumns(localize: LocalizeFunc): ColumnDef<DeviceRow
                   class="cell-indicator cell-indicator--update"
                   title=${localize("dashboard.status_update_available")}
                 ></span>`
+              : nothing
+          }
+          ${
+            row.hasQueuedUpdate
+              ? html`<wa-icon
+                  class="cell-indicator-queued"
+                  library="mdi"
+                  name="clock-outline"
+                  title=${localize("dashboard.status_queued_update")}
+                ></wa-icon>`
               : nothing
           }
           ${

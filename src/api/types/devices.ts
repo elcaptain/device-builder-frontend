@@ -69,6 +69,8 @@ export interface ConfiguredDevice {
    */
   directly_referenced_integrations?: string[];
   state: DeviceState;
+  /** Indicates if an offline update has been compiled and is waiting for the device to wake up */
+  queued_update?: boolean;
   /**
    * 8-char hex hash of the YAML as last successfully compiled,
    * persisted in the device-builder metadata sidecar. Matches the
