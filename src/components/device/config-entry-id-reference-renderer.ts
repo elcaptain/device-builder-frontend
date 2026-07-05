@@ -10,7 +10,10 @@ import type { ConfigEntry } from "../../api/types/config-entries.js";
 import {
   findReferenceCandidates,
   resolveSoleCandidate,
+  yamlHasMergedSources,
 } from "../../util/config-entry-yaml-scan.js";
+import { isValidEsphomeId } from "../../util/esphome-id.js";
+import { renderInlineError } from "../../util/render-error.js";
 import { resolveSubstitutions } from "../../util/substitutions.js";
 import {
   effectiveDisabled,
@@ -38,7 +41,7 @@ export function renderIdReferenceField(
   const bail = renderYamlOnlyFallbackIfNonPrimitive(entry, path, ctx, raw);
   if (bail) return bail;
   const value = String(raw ?? "");
-  const invalid = ctx.errorAt(path) !== null;
+  const fieldError = ctx.errorAt(path) !== null;
 
   // Surface ESPHome's auto-resolved target as the default, but only on an
   // empty field — a committed value isn't a "default".
@@ -67,6 +70,24 @@ export function renderIdReferenceField(
   const orphanOption = hasOrphanValue
     ? idOption(value, value, ctx.localize("device.id_reference_unresolved", { domain }))
     : nothing;
+  // A dangling reference we can be sure about gets an inline error without
+  // waiting for the backend lint round trip: plain identifier (substitutions
+  // and !secret indirections can't be checked), no merged sources that could
+  // define the id in another file, and the provider fetch has settled so the
+  // candidate list is complete. Backend validation stays the authority; a
+  // field-level error from it takes precedence below.
+  const unknownId =
+    hasOrphanValue &&
+    isValidEsphomeId(value) &&
+    !ctx.interfaceProvidersPending(domain) &&
+    !yamlHasMergedSources(ctx.yaml);
+  const invalid = fieldError || unknownId;
+  const unknownIdError =
+    unknownId && !fieldError
+      ? renderInlineError(
+          ctx.localize("device.id_reference_unknown_error", { id: value })
+        )
+      : nothing;
   // Solo "Add new" CTA only when there's genuinely nothing to show.
   const empty = candidates.length === 0 && !hasOrphanValue;
 
@@ -113,7 +134,7 @@ export function renderIdReferenceField(
         >
           ${addOption}
         </wa-select>
-        ${renderFieldError(path, ctx)}
+        ${renderFieldError(path, ctx)}${unknownIdError}
       </div>
     `;
   }
@@ -148,7 +169,7 @@ export function renderIdReferenceField(
         })}
         ${addOption}
       </wa-select>
-      ${renderFieldError(path, ctx)}
+      ${renderFieldError(path, ctx)}${unknownIdError}
     </div>
   `;
 }

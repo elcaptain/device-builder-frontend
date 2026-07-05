@@ -888,6 +888,8 @@ export class ESPHomeConfigEntryForm extends LitElement {
       requestAddComponent: (domain) => this._requestAddComponent(domain),
       resolveInterfaceProviders: (interfaceName) =>
         this._resolveInterfaceProviders(interfaceName),
+      interfaceProvidersPending: (interfaceName) =>
+        this._interfaceProvidersPending.has(interfaceName),
       scopeValues: (path) => this._scopeValues(path),
       filterRenderable: this._filterRenderable,
       getPendingUnit: (path) => this._pendingUnits.get(path.join(".")),

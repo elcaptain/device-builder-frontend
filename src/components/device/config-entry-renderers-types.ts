@@ -67,6 +67,9 @@ export interface RenderCtx {
    * re-renders. Empty until loaded, and ``[]`` for a same-domain reference.
    */
   resolveInterfaceProviders: (interfaceName: string) => ReadonlyArray<ComponentProvider>;
+  /** True while the provider fetch for *interfaceName* is in flight —
+   *  candidate lists are incomplete then, so don't flag unknown ids. */
+  interfaceProvidersPending: (interfaceName: string) => boolean;
   scopeValues: (path: string[]) => Record<string, unknown>;
   filterRenderable: (
     entries: ConfigEntry[],
