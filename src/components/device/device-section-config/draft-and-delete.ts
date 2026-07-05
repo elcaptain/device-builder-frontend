@@ -1,11 +1,21 @@
 import toast from "sonner-js";
+import type { ConfigEntry } from "../../../api/types/config-entries.js";
+import { ConfigEntryType } from "../../../api/types/config-entries.js";
+import { entryAtPath } from "../../../util/config-entry-tree.js";
 import { validateEntries } from "../../../util/config-validation.js";
-import { setIn } from "../../../util/nested-values.js";
+import { isValidEspHomeId } from "../../../util/esphome-id.js";
+import { getIn, setIn } from "../../../util/nested-values.js";
 import {
   KEEP_EMPTY_STRING_SECTIONS,
   resolveSectionEntries,
 } from "../../../util/section-entry-overrides.js";
 import {
+  idDeclaredElsewhere,
+  renameIdInValues,
+  renameIdReferences,
+} from "../../../util/yaml-id-rename.js";
+import {
+  findSectionRange,
   removeSectionFromYaml,
   updateSectionInYaml,
 } from "../../../util/yaml-section-values.js";
@@ -22,6 +32,7 @@ export function flushDraft(host: ESPHomeDeviceSectionConfig): void {
   if (!host._config) return;
 
   const renderEntries = resolveSectionEntries(host.sectionKey, host._config.entries);
+  const renames = resolvePendingIdRenames(host, renderEntries);
   host._fieldErrors = validateEntries(
     renderEntries,
     host._values,
@@ -35,11 +46,12 @@ export function flushDraft(host: ESPHomeDeviceSectionConfig): void {
     // Section was removed from live YAML between keystroke and debounce
     // (paste / external edit). Drop the splice silently — next picker
     // click re-runs loadConfig against the current YAML.
+    host._pendingIdRenames.clear();
     host._setDirty(false);
     return;
   }
 
-  const newYaml = updateSectionInYaml(
+  let newYaml = updateSectionInYaml(
     host.yaml,
     host.sectionKey,
     host._values,
@@ -50,6 +62,18 @@ export function flushDraft(host: ESPHomeDeviceSectionConfig): void {
     // empty-string definitions, so dropping placeholders keeps it loadable.
     { keepEmptyStrings: KEEP_EMPTY_STRING_SECTIONS.has(host.sectionKey) }
   );
+
+  // Rewrite references to renamed ids across the rest of the buffer, in
+  // the same draft so the declaration and its references move as one
+  // buffer swap (one undo step in the YAML pane). The edited section's
+  // new range is excluded — it was just spliced from the renamed values.
+  for (const { from, to } of renames) {
+    const range = findSectionRange(newYaml.split("\n"), host.sectionKey, fromLine);
+    newYaml = renameIdReferences(newYaml, from, to, {
+      excludeFromLine: range.start + 1,
+      excludeToLine: range.end + 1,
+    });
+  }
 
   host._setDirty(false);
 
@@ -65,11 +89,53 @@ export function flushDraft(host: ESPHomeDeviceSectionConfig): void {
   );
 }
 
+/**
+ * Turn the pending id edits into actionable renames and rewrite the
+ * section's own draft values for each. Skip-and-forget renames that
+ * can't or shouldn't propagate; keep a pending entry whose new value is
+ * mid-edit invalid so a later valid flush still renames from the id the
+ * references actually hold.
+ */
+function resolvePendingIdRenames(
+  host: ESPHomeDeviceSectionConfig,
+  renderEntries: ConfigEntry[]
+): { from: string; to: string }[] {
+  if (!host._pendingIdRenames.size) return [];
+  const sectionRange = findSectionRange(
+    host.yaml.split("\n"),
+    host.sectionKey,
+    resolveCurrentFromLine(host.yaml, host.sectionKey, host.fromLine)
+  );
+  const exclude = {
+    excludeFromLine: sectionRange.start + 1,
+    excludeToLine: sectionRange.end + 1,
+  };
+  const renames: { from: string; to: string }[] = [];
+  for (const [key, pending] of host._pendingIdRenames) {
+    const to = getIn(host._values, pending.path);
+    if (typeof to !== "string" || !isValidEspHomeId(to)) continue; // keep pending
+    host._pendingIdRenames.delete(key);
+    if (to === pending.from || !isValidEspHomeId(pending.from)) continue;
+    // A surviving declaration elsewhere still owns the old id — renaming
+    // the references would break it.
+    if (
+      sectionRange.start >= 0 &&
+      idDeclaredElsewhere(host.yaml, pending.from, exclude)
+    ) {
+      continue;
+    }
+    host._values = renameIdInValues(host._values, renderEntries, pending.from, to);
+    renames.push({ from: pending.from, to });
+  }
+  return renames;
+}
+
 export function onValueChange(
   host: ESPHomeDeviceSectionConfig,
   e: CustomEvent<ConfigEntryValueChange>
 ): void {
   const { path, value } = e.detail;
+  recordPendingIdRename(host, path);
   host._values = setIn(host._values, path, value);
   host._setDirty(true);
   const errKey = path.join(".");
@@ -84,6 +150,25 @@ export function onValueChange(
     host._clearedBackendPaths = new Set(host._clearedBackendPaths).add(errKey);
   }
   host._scheduleDraftFlush();
+}
+
+/**
+ * Remember the id a declaring ID field held before this edit, so the
+ * flush can rename references from it. First old value wins across the
+ * debounce window; after a successful propagation the entry clears and
+ * the next keystroke records the id the references now hold.
+ */
+function recordPendingIdRename(host: ESPHomeDeviceSectionConfig, path: string[]): void {
+  const key = path.join(".");
+  if (host._pendingIdRenames.has(key) || !host._config) return;
+  const old = getIn(host._values, path);
+  if (typeof old !== "string") return;
+  const entry = entryAtPath(
+    resolveSectionEntries(host.sectionKey, host._config.entries),
+    path
+  );
+  if (entry?.type !== ConfigEntryType.ID || entry.references_component) return;
+  host._pendingIdRenames.set(key, { path, from: old });
 }
 
 /** Point the section's field(s) at generated values (from the security notice)

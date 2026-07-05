@@ -30,6 +30,7 @@ export async function loadConfig(host: ESPHomeDeviceSectionConfig): Promise<void
     host._draftTimer = null;
   }
   host._lastSelfWrittenYaml = null;
+  host._pendingIdRenames.clear();
 
   try {
     const platform = host.board?.esphome.platform;

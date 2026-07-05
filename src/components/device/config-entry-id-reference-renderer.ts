@@ -15,16 +15,39 @@ import {
 import { isValidEspHomeId } from "../../util/esphome-id.js";
 import { renderInlineError } from "../../util/render-error.js";
 import { resolveSubstitutions } from "../../util/substitutions.js";
+import { countIdReferences } from "../../util/yaml-id-rename.js";
 import {
   effectiveDisabled,
   fieldKeyAttr,
   renderFieldError,
   renderLabel,
+  renderStringField,
   renderYamlOnlyFallbackIfNonPrimitive,
   type RenderCtx,
 } from "./config-entry-renderers-shared.js";
 
 export const ADD_NEW_SENTINEL = "__esphome_add_new__";
+
+/**
+ * Declaring-id field: a plain string input plus a reference-count hint,
+ * so a rename doesn't feel risky — references follow it (the section
+ * editor propagates the rename across the buffer on flush).
+ */
+export function renderIdDeclarationField(
+  entry: ConfigEntry,
+  path: string[],
+  ctx: RenderCtx
+) {
+  const value = String(ctx.getAt(path) ?? "");
+  const count = isValidEspHomeId(value) ? countIdReferences(ctx.yaml, value) : 0;
+  const hint =
+    count > 0
+      ? html`<span class="field-note"
+          >${ctx.localize("device.id_rename_references_hint", { count })}</span
+        >`
+      : nothing;
+  return renderStringField(entry, "text", path, ctx, hint);
+}
 
 export function renderIdReferenceField(
   entry: ConfigEntry,

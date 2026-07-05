@@ -26,6 +26,21 @@ export function anyAdvancedEntry(entries: ConfigEntry[]): boolean {
   return false;
 }
 
+/** The entry a value path addresses, skipping list-index segments the
+ *  schema doesn't nest; null when the path doesn't resolve. */
+export function entryAtPath(entries: ConfigEntry[], path: string[]): ConfigEntry | null {
+  let level = entries;
+  let found: ConfigEntry | null = null;
+  for (const key of path) {
+    if (isIndexSegment(key)) continue;
+    const entry = level.find((e) => e.key === key);
+    if (!entry) return null;
+    found = entry;
+    level = entry.config_entries ?? [];
+  }
+  return found;
+}
+
 /**
  * Whether the entry at *path* — or any NESTED ancestor along it — is
  * `advanced`. Used to reveal a section's hidden advanced fields when the

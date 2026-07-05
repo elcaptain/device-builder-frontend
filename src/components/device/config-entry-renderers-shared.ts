@@ -333,7 +333,8 @@ export function renderStringField(
   entry: ConfigEntry,
   inputType: string,
   path: string[],
-  ctx: RenderCtx
+  ctx: RenderCtx,
+  extraHint: unknown = nothing
 ) {
   const raw = ctx.getAt(path);
   const bail = renderYamlOnlyFallbackIfNonPrimitive(entry, path, ctx, raw);
@@ -462,7 +463,7 @@ export function renderStringField(
   return html`
     <div class="field" data-field-key=${fieldKeyAttr(path)}>
       ${renderLabel(entry, ctx)} ${withPicker(textInput)} ${secretHint} ${subHint}
-      ${renderFieldError(path, ctx)}
+      ${extraHint} ${renderFieldError(path, ctx)}
     </div>
   `;
 }

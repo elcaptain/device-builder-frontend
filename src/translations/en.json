@@ -900,6 +900,7 @@
     "id_reference_add": "Add {domain}",
     "id_reference_unresolved": "{domain} not defined in this file",
     "id_reference_unknown_error": "ID \"{id}\" is not defined in this configuration.",
+    "id_rename_references_hint": "Referenced in {count} {count, plural, one {place} other {places}}; references update automatically when you rename this ID.",
     "return_to_after_dep_prefix": "Adding a dependency. We'll bring you back to",
     "return_to_after_dep_suffix": "after.",
     "add_automation_error": "Failed to add automation",

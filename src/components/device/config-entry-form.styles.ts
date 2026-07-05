@@ -46,6 +46,13 @@ export const configEntryFormStyles = css`
     margin-top: var(--wa-space-2xs);
   }
 
+  /* Informational line under a field (the declaring-id reference count). */
+  .field-note {
+    color: var(--wa-color-text-quiet);
+    font-size: var(--wa-font-size-2xs);
+    margin-top: var(--wa-space-2xs);
+  }
+
   .field-description {
     font-size: var(--wa-font-size-2xs);
     color: var(--wa-color-text-quiet);

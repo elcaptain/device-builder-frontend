@@ -179,6 +179,10 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
 
   _loadId = 0;
   _draftTimer: ReturnType<typeof setTimeout> | null = null;
+  // Declaring-ID fields edited since the last flush, keyed by dotted path,
+  // holding the id the buffer's references still point at. Non-reactive —
+  // consumed by flushDraft to propagate renames across the buffer.
+  _pendingIdRenames = new Map<string, { path: string[]; from: string }>();
   // Parent loops yaml-draft events back through our yaml prop, which would
   // trigger reload() and lose focus mid-edit. reload() short-circuits when
   // the live yaml matches this snapshot.

@@ -72,7 +72,7 @@ import {
  * here use object keys; primitive-keyed memos that wanted to
  * cache `undefined` would need a different shape.
  */
-function createScanMemo<K, V>(equals: (a: K, b: K) => boolean) {
+export function createScanMemo<K, V>(equals: (a: K, b: K) => boolean) {
   let key: K | undefined;
   let value: V | undefined;
   return {

@@ -13,6 +13,7 @@ export {
 
 export {
   ADD_NEW_SENTINEL,
+  renderIdDeclarationField,
   renderIdReferenceField,
 } from "./config-entry-id-reference-renderer.js";
 

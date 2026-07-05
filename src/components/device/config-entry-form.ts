@@ -86,6 +86,7 @@ import {
   renderExclusiveGroupField,
   renderFloatWithUnitField,
   renderIconField,
+  renderIdDeclarationField,
   renderIdReferenceField,
   renderMapField,
   renderMultiValueField,
@@ -812,6 +813,11 @@ export class ESPHomeConfigEntryForm extends LitElement {
         return renderStringField(entry, "color", path, ctx);
       case ConfigEntryType.MAC_ADDRESS:
         return renderStringField(entry, "text", path, ctx);
+      case ConfigEntryType.ID:
+        // A declaring id (reference-typed entries exited above via
+        // references_component): a plain string field plus a hint when
+        // other parts of the config reference the current value.
+        return renderIdDeclarationField(entry, path, ctx);
       case ConfigEntryType.LAMBDA:
         return renderLambdaField(entry, path, ctx);
       case ConfigEntryType.JSON:
