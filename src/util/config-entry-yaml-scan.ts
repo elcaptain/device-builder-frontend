@@ -472,9 +472,10 @@ export function findReferenceCandidates(
 // can't see. A value-position `!include` (`wifi: !include wifi.yaml`) only
 // replaces that key's value, so it deliberately doesn't match.
 const MERGED_SOURCE_RE = /^(?:packages|<<)\s*:/m;
-// Any `!include` — value position (`sensor: !include x.yaml`) or list item
-// (`- !include x.yaml`) — can define ids the local scan can't see.
-const INCLUDE_RE = /!include\b/;
+// Any include-family tag — `!include`, `!include_dir_list`,
+// `!include_dir_merge_list`, … — in value or list-item position can
+// define ids the local scan can't see.
+const INCLUDE_RE = /!include/;
 
 /**
  * Whether the YAML root-merges components the scan can't enumerate.
