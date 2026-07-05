@@ -70,7 +70,11 @@ export function flushDraft(host: ESPHomeDeviceSectionConfig): void {
   // computed once.
   if (renames.length) {
     const range = findSectionRange(newYaml.split("\n"), host.sectionKey, fromLine);
-    const exclude = { excludeFromLine: range.start + 1, excludeToLine: range.end + 1 };
+    const exclude = {
+      excludeFromLine: range.start + 1,
+      excludeToLine: range.end + 1,
+      platform: host.board?.esphome.platform,
+    };
     for (const { from, to } of renames) {
       newYaml = renameIdReferences(newYaml, from, to, exclude);
     }

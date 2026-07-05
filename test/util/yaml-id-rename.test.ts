@@ -1,4 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import type { ESPHomeAPI } from "../../src/api/index.js";
+import type { ComponentCatalogEntry } from "../../src/api/types/components.js";
+import type { ConfigEntry } from "../../src/api/types/config-entries.js";
+import {
+  _clearComponentCache,
+  fetchComponent,
+} from "../../src/util/component-name-cache.js";
 import {
   _clearIdRenameMemos,
   countIdReferences,
@@ -8,9 +15,42 @@ import {
 } from "../../src/util/yaml-id-rename.js";
 import { _clearYamlSectionsMemo } from "../../src/util/yaml-sections.js";
 
-beforeEach(() => {
+const entry = (key: string, overrides: Partial<ConfigEntry> = {}): ConfigEntry =>
+  ({ key, type: "string", ...overrides }) as never;
+
+const body = (id: string, entries: ConfigEntry[]): ComponentCatalogEntry =>
+  ({ id, name: id, config_entries: entries }) as never;
+
+/** Schemas for the components the fixtures use; which keys hold id
+ *  references comes from these, not from key names. */
+const BODIES: Record<string, ComponentCatalogEntry> = {
+  rtttl: body("rtttl", [entry("output", { references_component: "output" })]),
+  "light.rgb": body("light.rgb", [
+    entry("red", { references_component: "output" }),
+    entry("outputs", { references_component: "output" }),
+    entry("name"),
+  ]),
+  "switch.gpio": body("switch.gpio", [
+    entry("pin"),
+    entry("interlock", { references_component: "switch" }),
+  ]),
+  "text_sensor.template": body("text_sensor.template", [
+    entry("name"),
+    entry("icon"),
+    entry("device_class"),
+  ]),
+};
+
+const api = {
+  getComponentBodies: async (ids: string[]) =>
+    Object.fromEntries(ids.filter((id) => BODIES[id]).map((id) => [id, BODIES[id]])),
+} as unknown as ESPHomeAPI;
+
+beforeEach(async () => {
+  _clearComponentCache();
   _clearIdRenameMemos();
   _clearYamlSectionsMemo();
+  await Promise.all(Object.keys(BODIES).map((id) => fetchComponent(api, id)));
 });
 
 const APOLLO = `esphome:
@@ -58,7 +98,17 @@ button:
     expect(findIdReferences(yaml, "relay1")).toEqual([{ line: 11, kind: "value" }]);
   });
 
-  it("finds bare sequence items and quoted values", () => {
+  it("treats a dotted action shorthand value as a reference", () => {
+    const yaml = `button:
+  - platform: template
+    name: Toggle
+    on_press:
+      - switch.toggle: relay1
+`;
+    expect(findIdReferences(yaml, "relay1")).toEqual([{ line: 5, kind: "value" }]);
+  });
+
+  it("finds bare sequence items and quoted values via the schema's reference keys", () => {
     const yaml = `output:
   - platform: ledc
     id: out_a
@@ -91,7 +141,7 @@ sensor:
     ]);
   });
 
-  it("skips free-text keys whose value matches the id", () => {
+  it("skips keys the schema doesn't mark as references", () => {
     const yaml = `output:
   - platform: ledc
     id: dark
@@ -103,6 +153,18 @@ text_sensor:
     device_class: dark
 `;
     expect(findIdReferences(yaml, "dark")).toEqual([]);
+  });
+
+  it("skips generic keys in a section whose schema isn't cached", () => {
+    const yaml = `my_unknown_component:
+  some_field: out_a
+  on_thing:
+    - switch.toggle: out_a
+    - lambda: 'id(out_a);'
+`;
+    // some_field can't be confirmed as a reference; the dotted action
+    // shorthand and the lambda call still are.
+    expect(findIdReferences(yaml, "out_a").map((s) => s.line)).toEqual([4, 5]);
   });
 
   it("does not match longer identifiers or other ids", () => {
@@ -207,6 +269,18 @@ describe("countIdReferences", () => {
     expect(countIdReferences(APOLLO, "buzzer_output")).toBe(1);
     expect(countIdReferences(APOLLO, "rtttl_player")).toBe(0);
     expect(countIdReferences(APOLLO, "buzzer_output")).toBe(1);
+  });
+
+  it("does not count an enum value colliding with a short id", () => {
+    const yaml = `light:
+  - platform: rgb
+    id: rgb
+    name: rgb
+  - platform: rgb
+    red: rgb
+`;
+    // name is not a reference key in the schema; red is.
+    expect(countIdReferences(yaml, "rgb")).toBe(1);
   });
 
   it("does not count a globals declaration as a reference", () => {

@@ -2,21 +2,29 @@
  * Find and rewrite references to a component id across the YAML buffer.
  *
  * Same philosophy as config-entry-yaml-scan: pragmatic line scans over a
- * possibly mid-edit buffer, not a full YAML parse. A reference is an
- * identifier-shaped scalar equal to the id in value position (`key: id`,
- * `- key: id`, a bare `- id` list item, a `[a, b]` flow-sequence
- * element) under a key that isn't known free text, or an `id(...)` call
- * inside a lambda. Declaring `id:` lines of sections and list items are
- * excluded — an `id:` nested deeper (an automation action's target) is a
- * reference.
+ * possibly mid-edit buffer, not a full YAML parse. Which values can hold
+ * an id comes from the schema, not from guessing by key name:
  *
- * Known tradeoff of the textual scan: a value that merely equals the id
- * under a key outside the free-text denylist (an enum value colliding
- * with a short id like `rgb`) reads as a reference. The schema would
- * disambiguate, but it isn't fetched for foreign sections; the denylist
- * covers the common prose/enum keys.
+ * - a non-declaring `id:` value (an automation action's target) and a
+ *   dotted action-shorthand value (`- switch.turn_on: relay1`) are
+ *   references by ESPHome convention, buffer-wide;
+ * - a `key: value` / bare `- value` / `[a, b]` flow-sequence value is a
+ *   reference only when the containing section's cached catalog entry
+ *   marks that key `references_component` (the same schema the reference
+ *   dropdowns and YAML completion resolve against);
+ * - `substitutions:` values are literal splice text, so any of them can
+ *   carry the id;
+ * - `id(...)` calls inside lambdas are references anywhere.
+ *
+ * A section whose schema isn't cached contributes no schema-keyed sites
+ * (the universal rules above still apply inside it) — the navigator
+ * prefetches every present section's schema, so in practice the cache is
+ * warm. Known tradeoff: a dotted action shorthand whose scalar isn't a
+ * target (`logger.log: msg`) reads as a reference when the message
+ * exactly equals the id.
  */
 import type { ConfigEntry } from "../api/types/config-entries.js";
+import { getCachedComponent, subscribeComponentCache } from "./component-name-cache.js";
 import { createScanMemo } from "./config-entry-yaml-scan.js";
 import { isValidEspHomeId } from "./esphome-id.js";
 import { LIST_SECTIONS } from "./section-entry-overrides.js";
@@ -26,6 +34,7 @@ import {
   parseYamlTopLevelSections,
   readInstanceScalar,
 } from "./yaml-sections-core.js";
+import { sectionKeyOf } from "./yaml-sections.js";
 
 export interface IdReferenceSite {
   /** 1-indexed line of the reference. */
@@ -38,29 +47,17 @@ export interface IdScanOptions {
   /** 1-indexed inclusive range to skip — the section being edited. */
   excludeFromLine?: number;
   excludeToLine?: number;
+  /** Device chip platform (`esp32`, …) — the component-cache bucket the
+   *  app fetches section schemas into. */
+  platform?: string;
 }
-
-/** Keys whose values are prose or enums, never id references. */
-const FREETEXT_KEYS = new Set([
-  "name",
-  "friendly_name",
-  "comment",
-  "ssid",
-  "password",
-  "platform",
-  "device_class",
-  "icon",
-  "unit_of_measurement",
-  "state_class",
-  "entity_category",
-  "restore_mode",
-  "mode",
-]);
 
 /** `key: value` with an optional list dash; captures prefix, key, value. */
 const VALUE_LINE_RE = /^(\s*(?:-\s+)?)([A-Za-z_][\w.]*)(:\s*)(\S.*)$/;
+/** `key:` opening a block (no inline value); captures prefix and key. */
+const KEY_ONLY_RE = /^(\s*(?:-\s+)?)([A-Za-z_][\w.]*):\s*$/;
 /** A bare `- value` sequence item; captures prefix and value. */
-const BARE_ITEM_RE = /^(\s*-\s+)([^\s:#].*)$/;
+const BARE_ITEM_RE = /^(\s*)-\s+([^\s:#].*)$/;
 
 /** `id(<id>)` lambda call. Safe to build from a validated identifier. */
 const idCallRe = (id: string) => new RegExp(String.raw`\bid\(\s*${id}\s*\)`, "g");
@@ -70,6 +67,13 @@ const idTokenRe = (id: string) => new RegExp(String.raw`\b${id}\b`, "g");
 type Site =
   | { lineIdx: number; kind: "value"; afterCol: number }
   | { lineIdx: number; kind: "lambda" };
+
+// The section contexts depend on the component cache, which fills as
+// schemas arrive; the generation busts the memos when it does.
+let cacheGen = 0;
+subscribeComponentCache(() => {
+  cacheGen++;
+});
 
 const declMemo = createScanMemo<string, Set<number>>((a, b) => a === b);
 
@@ -95,6 +99,57 @@ function declarationLines(yaml: string): Set<number> {
   return out;
 }
 
+interface SectionScanCtx {
+  fromIdx: number; // 0-indexed inclusive
+  toIdx: number;
+  /** Keys the section's schema marks `references_component`; null when
+   *  the schema isn't cached — schema-keyed matching is skipped then. */
+  refKeys: ReadonlySet<string> | null;
+  /** `substitutions:` — every value is spliced text, any may carry the id. */
+  allValues: boolean;
+}
+
+function collectRefKeys(entries: ConfigEntry[], out: Set<string>): void {
+  for (const e of entries) {
+    if (e.references_component) out.add(e.key);
+    if (e.config_entries) collectRefKeys(e.config_entries, out);
+  }
+}
+
+interface SectionCtxKey {
+  yaml: string;
+  platform: string | undefined;
+  gen: number;
+}
+
+const sectionCtxMemo = createScanMemo<SectionCtxKey, SectionScanCtx[]>(
+  (a, b) => a.yaml === b.yaml && a.platform === b.platform && a.gen === b.gen
+);
+
+function sectionScanCtxs(yaml: string, platform: string | undefined): SectionScanCtx[] {
+  const key = { yaml, platform, gen: cacheGen };
+  const hit = sectionCtxMemo.get(key);
+  if (hit) return hit;
+  const out: SectionScanCtx[] = [];
+  for (const section of parseYamlTopLevelSections(yaml)) {
+    const fromIdx = section.fromLine - 1;
+    const toIdx = section.toLine - 1;
+    if (section.key === "substitutions") {
+      out.push({ fromIdx, toIdx, refKeys: null, allValues: true });
+      continue;
+    }
+    const comp = getCachedComponent(sectionKeyOf(section), platform);
+    let refKeys: Set<string> | null = null;
+    if (comp) {
+      refKeys = new Set();
+      collectRefKeys(comp.config_entries ?? [], refKeys);
+    }
+    out.push({ fromIdx, toIdx, refKeys, allValues: false });
+  }
+  sectionCtxMemo.set(key, out);
+  return out;
+}
+
 /** Whether a value-position scalar or flow sequence carries *id*. */
 function valueCarriesId(rawValue: string, id: string): boolean {
   if (rawValue.startsWith("[")) {
@@ -106,6 +161,13 @@ function valueCarriesId(rawValue: string, id: string): boolean {
   return stripQuotes(rawValue) === id;
 }
 
+/** Whether *key* can hold an id reference in this section context. */
+function keyHoldsReference(key: string, sctx: SectionScanCtx | undefined): boolean {
+  if (key === "id" || key.includes(".")) return true;
+  if (!sctx) return false;
+  return sctx.allValues || (sctx.refKeys?.has(key) ?? false);
+}
+
 function scanSites(yaml: string, id: string, opts: IdScanOptions = {}): Site[] {
   const sites: Site[] = [];
   // Not identifier-shaped ⇒ can't be an ESPHome id ⇒ no sites. This also
@@ -113,37 +175,80 @@ function scanSites(yaml: string, id: string, opts: IdScanOptions = {}): Site[] {
   if (!isValidEspHomeId(id)) return sites;
   const lines = yaml.split("\n");
   const declared = declarationLines(yaml);
+  const sections = sectionScanCtxs(yaml, opts.platform);
   const lambdaRe = idCallRe(id);
   const from = (opts.excludeFromLine ?? 0) - 1;
   const to = (opts.excludeToLine ?? 0) - 1;
 
+  // Nearest enclosing `key:` per indent, for attributing bare `- value`
+  // items to the key whose block they sit in.
+  const keyStack: { indent: number; key: string }[] = [];
+  let sectionIdx = 0;
+
   for (let i = 0; i < lines.length; i++) {
-    if (opts.excludeFromLine !== undefined && i >= from && i <= to) continue;
+    while (sectionIdx < sections.length && sections[sectionIdx].toIdx < i) sectionIdx++;
+    const sctx =
+      sectionIdx < sections.length && sections[sectionIdx].fromIdx <= i
+        ? sections[sectionIdx]
+        : undefined;
+    const excluded = opts.excludeFromLine !== undefined && i >= from && i <= to;
     const { value: content } = splitInlineComment(lines[i]);
 
-    if (content.includes("id(")) {
+    if (!excluded && content.includes("id(")) {
       lambdaRe.lastIndex = 0;
       if (lambdaRe.test(content)) {
         sites.push({ lineIdx: i, kind: "lambda" });
         continue;
       }
     }
-    if (declared.has(i)) continue;
 
     const pair = VALUE_LINE_RE.exec(content);
     if (pair) {
-      if (!FREETEXT_KEYS.has(pair[2]) && valueCarriesId(pair[4].trim(), id)) {
-        sites.push({
-          lineIdx: i,
-          kind: "value",
-          afterCol: pair[1].length + pair[2].length,
-        });
+      const indent = pair[1].length;
+      while (keyStack.length && keyStack[keyStack.length - 1].indent >= indent) {
+        keyStack.pop();
+      }
+      keyStack.push({ indent, key: pair[2] });
+      if (
+        !excluded &&
+        !declared.has(i) &&
+        keyHoldsReference(pair[2], sctx) &&
+        valueCarriesId(pair[4].trim(), id)
+      ) {
+        sites.push({ lineIdx: i, kind: "value", afterCol: indent + pair[2].length });
       }
       continue;
     }
+    const keyOnly = KEY_ONLY_RE.exec(content);
+    if (keyOnly) {
+      const indent = keyOnly[1].length;
+      while (keyStack.length && keyStack[keyStack.length - 1].indent >= indent) {
+        keyStack.pop();
+      }
+      keyStack.push({ indent, key: keyOnly[2] });
+      continue;
+    }
     const bare = BARE_ITEM_RE.exec(content);
-    if (bare && stripQuotes(bare[2].trim()) === id) {
-      sites.push({ lineIdx: i, kind: "value", afterCol: bare[1].length });
+    if (bare) {
+      // A dash at the owning key's own indent is still its item, so only
+      // deeper keys are popped.
+      const indent = bare[1].length;
+      while (keyStack.length && keyStack[keyStack.length - 1].indent > indent) {
+        keyStack.pop();
+      }
+      const parent = keyStack[keyStack.length - 1];
+      if (
+        !excluded &&
+        parent &&
+        keyHoldsReference(parent.key, sctx) &&
+        stripQuotes(bare[2].trim()) === id
+      ) {
+        sites.push({
+          lineIdx: i,
+          kind: "value",
+          afterCol: content.length - bare[2].length,
+        });
+      }
     }
   }
   return sites;
@@ -176,21 +281,30 @@ export function findIdReferences(
   return scanSites(yaml, id, opts).map((s) => ({ line: s.lineIdx + 1, kind: s.kind }));
 }
 
+interface CountKey {
+  yaml: string;
+  platform: string | undefined;
+  gen: number;
+}
+
 // Keyed on the buffer, holding per-id counts: a form renders several
 // declaring ID fields (nested entities), and a single-entry (yaml, id)
 // memo would thrash across them on every render.
-const countMemo = createScanMemo<string, Map<string, number>>((a, b) => a === b);
+const countMemo = createScanMemo<CountKey, Map<string, number>>(
+  (a, b) => a.yaml === b.yaml && a.platform === b.platform && a.gen === b.gen
+);
 
 /** Memoised reference count for the ID field's awareness hint. */
-export function countIdReferences(yaml: string, id: string): number {
-  let counts = countMemo.get(yaml);
+export function countIdReferences(yaml: string, id: string, platform?: string): number {
+  const key = { yaml, platform, gen: cacheGen };
+  let counts = countMemo.get(key);
   if (!counts) {
     counts = new Map();
-    countMemo.set(yaml, counts);
+    countMemo.set(key, counts);
   }
   const hit = counts.get(id);
   if (hit !== undefined) return hit;
-  const count = findIdReferences(yaml, id).length;
+  const count = findIdReferences(yaml, id, { platform }).length;
   counts.set(id, count);
   return count;
 }
@@ -278,4 +392,5 @@ export function renameIdInValues(
 export function _clearIdRenameMemos(): void {
   countMemo.clear();
   declMemo.clear();
+  sectionCtxMemo.clear();
 }

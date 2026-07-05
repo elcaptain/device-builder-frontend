@@ -39,7 +39,9 @@ export function renderIdDeclarationField(
   ctx: RenderCtx
 ) {
   const value = String(ctx.getAt(path) ?? "");
-  const count = isValidEspHomeId(value) ? countIdReferences(ctx.yaml, value) : 0;
+  const count = isValidEspHomeId(value)
+    ? countIdReferences(ctx.yaml, value, ctx.board?.esphome.platform)
+    : 0;
   const hint =
     count > 0
       ? html`<span class="field-note"

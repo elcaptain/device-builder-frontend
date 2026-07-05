@@ -5,20 +5,47 @@
  * id through the form rewrites every reference to the old id in the same
  * yaml-draft, with the guardrails that keep half-renames impossible.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("sonner-js", () => ({
   default: { error: vi.fn(), info: vi.fn(), success: vi.fn() },
 }));
 
+import type { ESPHomeAPI } from "../../../src/api/index.js";
 import { ConfigEntryType } from "../../../src/api/types/config-entries.js";
 import { ESPHomeDeviceSectionConfig } from "../../../src/components/device/device-section-config.js";
 import {
   flushDraft,
   onValueChange,
 } from "../../../src/components/device/device-section-config/draft-and-delete.js";
+import {
+  _clearComponentCache,
+  fetchComponent,
+} from "../../../src/util/component-name-cache.js";
+import { _clearIdRenameMemos } from "../../../src/util/yaml-id-rename.js";
 import { _clearYamlSectionsMemo } from "../../../src/util/yaml-sections.js";
 import { makeEntry } from "./_renderer-fixtures.js";
+
+// The scan resolves reference keys from cached schemas; seed the ones
+// the fixtures' foreign sections use.
+const BODIES = {
+  rtttl: {
+    id: "rtttl",
+    name: "rtttl",
+    config_entries: [{ key: "output", type: "id", references_component: "output" }],
+  },
+} as never as Record<string, never>;
+
+const api = {
+  getComponentBodies: async (ids: string[]) =>
+    Object.fromEntries(ids.filter((id) => id in BODIES).map((id) => [id, BODIES[id]])),
+} as unknown as ESPHomeAPI;
+
+beforeEach(async () => {
+  _clearComponentCache();
+  _clearIdRenameMemos();
+  await Promise.all(Object.keys(BODIES).map((id) => fetchComponent(api, id)));
+});
 
 const APOLLO = `output:
   - platform: ledc
