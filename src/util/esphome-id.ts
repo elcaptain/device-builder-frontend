@@ -35,7 +35,10 @@ export function normalizeEspHomeId(input: string): string {
   return input.replace(/[^a-zA-Z0-9_]+/g, "_");
 }
 
+/** The Python-identifier shape ESPHome requires of an id. */
+const ESPHOME_ID_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /** Whether *value* is already a well-formed ESPHome id. */
 export function isValidEspHomeId(value: string): boolean {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
+  return ESPHOME_ID_RE.test(value);
 }
