@@ -52,10 +52,9 @@ export interface IdScanOptions {
   platform?: string;
 }
 
-/** `key: value` with an optional list dash; captures prefix, key, value. */
-const VALUE_LINE_RE = /^(\s*(?:-\s+)?)([A-Za-z_][\w.]*)(:\s*)(\S.*)$/;
-/** `key:` opening a block (no inline value); captures prefix and key. */
-const KEY_ONLY_RE = /^(\s*(?:-\s+)?)([A-Za-z_][\w.]*):\s*$/;
+/** `key:` with an optional list dash and optional inline value;
+ *  captures prefix, key, value (undefined for a block-opening key). */
+const PAIR_LINE_RE = /^(\s*(?:-\s+)?)([A-Za-z_][\w.]*)(:\s*)(\S.*)?$/;
 /** A bare `- value` sequence item; captures prefix and value. */
 const BARE_ITEM_RE = /^(\s*)-\s+([^\s:#].*)$/;
 
@@ -202,7 +201,7 @@ function scanSites(yaml: string, id: string, opts: IdScanOptions = {}): Site[] {
       }
     }
 
-    const pair = VALUE_LINE_RE.exec(content);
+    const pair = PAIR_LINE_RE.exec(content);
     if (pair) {
       const indent = pair[1].length;
       while (keyStack.length && keyStack[keyStack.length - 1].indent >= indent) {
@@ -211,21 +210,13 @@ function scanSites(yaml: string, id: string, opts: IdScanOptions = {}): Site[] {
       keyStack.push({ indent, key: pair[2] });
       if (
         !excluded &&
+        pair[4] !== undefined &&
         !declared.has(i) &&
         keyHoldsReference(pair[2], sctx) &&
         valueCarriesId(pair[4].trim(), id)
       ) {
         sites.push({ lineIdx: i, kind: "value", afterCol: indent + pair[2].length });
       }
-      continue;
-    }
-    const keyOnly = KEY_ONLY_RE.exec(content);
-    if (keyOnly) {
-      const indent = keyOnly[1].length;
-      while (keyStack.length && keyStack[keyStack.length - 1].indent >= indent) {
-        keyStack.pop();
-      }
-      keyStack.push({ indent, key: keyOnly[2] });
       continue;
     }
     const bare = BARE_ITEM_RE.exec(content);
