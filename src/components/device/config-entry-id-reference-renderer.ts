@@ -14,7 +14,10 @@ import {
 } from "../../util/config-entry-yaml-scan.js";
 import { isValidEspHomeId } from "../../util/esphome-id.js";
 import { renderInlineError } from "../../util/render-error.js";
-import { resolveSubstitutions } from "../../util/substitutions.js";
+import {
+  hasSubstitutionReference,
+  resolveSubstitutions,
+} from "../../util/substitutions.js";
 import {
   effectiveDisabled,
   fieldKeyAttr,
@@ -79,7 +82,7 @@ export function renderIdReferenceField(
     hasOrphanValue &&
     providers !== null &&
     isValidEspHomeId(value) &&
-    !candidates.some((c) => c.id.includes("${")) &&
+    !candidates.some((c) => hasSubstitutionReference(c.id)) &&
     !yamlHasExternalIdSources(ctx.yaml);
   const invalid = fieldError || unknownId;
   const unknownIdError = unknownId

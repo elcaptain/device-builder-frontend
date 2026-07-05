@@ -224,6 +224,11 @@ describe("renderIdReferenceField — inline error for an unknown id", () => {
     expect(errorTexts(renderOutputRef(subbed, "buzzer_output"))).toHaveLength(0);
   });
 
+  it("does not flag when a candidate id uses a bare $name substitution", () => {
+    const subbed = APOLLO_YAML.replace("id: buzzer_outputd", "id: $node_buzzer");
+    expect(errorTexts(renderOutputRef(subbed, "buzzer_output"))).toHaveLength(0);
+  });
+
   it("yields to a backend error on the same field", () => {
     const tmpl = renderOutputRef(APOLLO_YAML, "buzzer_output", {
       errorAt: () => ({
