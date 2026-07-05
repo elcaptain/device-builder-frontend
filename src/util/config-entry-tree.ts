@@ -26,39 +26,44 @@ export function anyAdvancedEntry(entries: ConfigEntry[]): boolean {
   return false;
 }
 
-/** The entry a value path addresses, skipping list-index segments the
- *  schema doesn't nest; null when the path doesn't resolve. */
-export function entryAtPath(entries: ConfigEntry[], path: string[]): ConfigEntry | null {
+/**
+ * The entries a value path traverses, outermost first. List-index
+ * segments are skipped: the schema nests an item's fields directly
+ * under the list entry, with no index level. Null when the path
+ * doesn't resolve.
+ */
+function entriesAlongPath(entries: ConfigEntry[], path: string[]): ConfigEntry[] | null {
   let level = entries;
-  let found: ConfigEntry | null = null;
+  const chain: ConfigEntry[] = [];
   for (const key of path) {
     if (isIndexSegment(key)) continue;
     const entry = level.find((e) => e.key === key);
     if (!entry) return null;
-    found = entry;
+    chain.push(entry);
     level = entry.config_entries ?? [];
   }
-  return found;
+  return chain;
+}
+
+/** The entry a value path addresses; null when the path doesn't resolve. */
+export function entryAtPath(entries: ConfigEntry[], path: string[]): ConfigEntry | null {
+  const chain = entriesAlongPath(entries, path);
+  return chain?.length ? chain[chain.length - 1] : null;
 }
 
 /**
  * Whether the entry at *path* — or any NESTED ancestor along it — is
  * `advanced`. Used to reveal a section's hidden advanced fields when the
- * caret or a backend error lands on one. List-index segments are skipped:
- * the schema nests an item's fields directly under the list entry, with
- * no index level. Returns false if the path doesn't resolve.
+ * caret or a backend error lands on one. False if the path doesn't
+ * resolve.
  */
 export function pathIsAdvanced(entries: ConfigEntry[], path: string[]): boolean {
-  let level = entries;
-  let advanced = false;
-  for (const key of path) {
-    if (isIndexSegment(key)) continue;
-    const entry = level.find((e) => e.key === key);
-    if (!entry) return false;
-    if (entry.advanced) advanced = true;
-    level = entry.config_entries ?? [];
-  }
-  return advanced;
+  return entriesAlongPath(entries, path)?.some((e) => e.advanced) ?? false;
+}
+
+/** A declaring id field: creates an id rather than referencing one. */
+export function isDeclaringIdEntry(entry: ConfigEntry | null): boolean {
+  return entry?.type === ConfigEntryType.ID && !entry.references_component;
 }
 
 /**

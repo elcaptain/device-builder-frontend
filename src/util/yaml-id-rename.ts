@@ -4,15 +4,28 @@
  * Same philosophy as config-entry-yaml-scan: pragmatic line scans over a
  * possibly mid-edit buffer, not a full YAML parse. A reference is an
  * identifier-shaped scalar equal to the id in value position (`key: id`,
- * `- key: id`, a bare `- id` list item) under a key that isn't known
- * free text, or an `id(...)` call inside a lambda. Declaring `id:` lines
- * of sections and list items are excluded — an `id:` nested deeper (an
- * automation action's target) is a reference.
+ * `- key: id`, a bare `- id` list item, a `[a, b]` flow-sequence
+ * element) under a key that isn't known free text, or an `id(...)` call
+ * inside a lambda. Declaring `id:` lines of sections and list items are
+ * excluded — an `id:` nested deeper (an automation action's target) is a
+ * reference.
+ *
+ * Known tradeoff of the textual scan: a value that merely equals the id
+ * under a key outside the free-text denylist (an enum value colliding
+ * with a short id like `rgb`) reads as a reference. The schema would
+ * disambiguate, but it isn't fetched for foreign sections; the denylist
+ * covers the common prose/enum keys.
  */
 import type { ConfigEntry } from "../api/types/config-entries.js";
 import { createScanMemo } from "./config-entry-yaml-scan.js";
+import { isValidEspHomeId } from "./esphome-id.js";
+import { LIST_SECTIONS } from "./section-entry-overrides.js";
 import { splitInlineComment, stripQuotes } from "./yaml-scalar.js";
-import { findFieldLine, parseYamlTopLevelSections } from "./yaml-sections-core.js";
+import {
+  findFieldLine,
+  parseYamlTopLevelSections,
+  readInstanceScalar,
+} from "./yaml-sections-core.js";
 
 export interface IdReferenceSite {
   /** 1-indexed line of the reference. */
@@ -49,80 +62,106 @@ const VALUE_LINE_RE = /^(\s*(?:-\s+)?)([A-Za-z_][\w.]*)(:\s*)(\S.*)$/;
 /** A bare `- value` sequence item; captures prefix and value. */
 const BARE_ITEM_RE = /^(\s*-\s+)([^\s:#].*)$/;
 
-interface Site {
-  lineIdx: number;
-  kind: "value" | "lambda";
-  rewrite: (line: string, newId: string) => string;
-}
+/** `id(<id>)` lambda call. Safe to build from a validated identifier. */
+const idCallRe = (id: string) => new RegExp(String.raw`\bid\(\s*${id}\s*\)`, "g");
+/** The identifier as a standalone token. */
+const idTokenRe = (id: string) => new RegExp(String.raw`\b${id}\b`, "g");
 
-/** 0-indexed lines that declare an `id:` for a section or list item. */
+type Site =
+  | { lineIdx: number; kind: "value"; afterCol: number }
+  | { lineIdx: number; kind: "lambda" };
+
+const declMemo = createScanMemo<string, Set<number>>((a, b) => a === b);
+
+/** 0-indexed lines that declare an `id:` for a section or list item.
+ *  LIST_SECTIONS blocks (globals) aren't expanded per item, so their
+ *  item-level `id:` lines are collected by direct scan. */
 function declarationLines(yaml: string): Set<number> {
+  const hit = declMemo.get(yaml);
+  if (hit) return hit;
   const out = new Set<number>();
+  const lines = yaml.split("\n");
   for (const section of parseYamlTopLevelSections(yaml)) {
+    if (LIST_SECTIONS.has(section.key)) {
+      for (let i = section.fromLine - 1; i <= section.toLine - 1; i++) {
+        if (readInstanceScalar(lines[i], "id") !== null) out.add(i);
+      }
+      continue;
+    }
     const line = findFieldLine(yaml, section, ["id"]);
     if (line !== null) out.add(line - 1);
   }
+  declMemo.set(yaml, out);
   return out;
+}
+
+/** Whether a value-position scalar or flow sequence carries *id*. */
+function valueCarriesId(rawValue: string, id: string): boolean {
+  if (rawValue.startsWith("[")) {
+    return rawValue
+      .slice(1, rawValue.lastIndexOf("]") < 0 ? undefined : rawValue.lastIndexOf("]"))
+      .split(",")
+      .some((tok) => stripQuotes(tok.trim()) === id);
+  }
+  return stripQuotes(rawValue) === id;
 }
 
 function scanSites(yaml: string, id: string, opts: IdScanOptions = {}): Site[] {
   const sites: Site[] = [];
-  if (!id) return sites;
+  // Not identifier-shaped ⇒ can't be an ESPHome id ⇒ no sites. This also
+  // keeps the RegExp construction below safe for arbitrary input.
+  if (!isValidEspHomeId(id)) return sites;
   const lines = yaml.split("\n");
   const declared = declarationLines(yaml);
-  const lambdaRe = new RegExp(String.raw`\bid\(\s*${id}\s*\)`, "g");
+  const lambdaRe = idCallRe(id);
   const from = (opts.excludeFromLine ?? 0) - 1;
   const to = (opts.excludeToLine ?? 0) - 1;
 
   for (let i = 0; i < lines.length; i++) {
     if (opts.excludeFromLine !== undefined && i >= from && i <= to) continue;
-    const line = lines[i];
-    const { value: content } = splitInlineComment(line);
+    const { value: content } = splitInlineComment(lines[i]);
 
-    lambdaRe.lastIndex = 0;
-    if (lambdaRe.test(content)) {
-      sites.push({
-        lineIdx: i,
-        kind: "lambda",
-        rewrite: (l, newId) =>
-          l.replace(new RegExp(String.raw`\bid\(\s*${id}\s*\)`, "g"), `id(${newId})`),
-      });
-      continue;
+    if (content.includes("id(")) {
+      lambdaRe.lastIndex = 0;
+      if (lambdaRe.test(content)) {
+        sites.push({ lineIdx: i, kind: "lambda" });
+        continue;
+      }
     }
     if (declared.has(i)) continue;
 
     const pair = VALUE_LINE_RE.exec(content);
-    if (pair && !FREETEXT_KEYS.has(pair[2]) && stripQuotes(pair[4].trim()) === id) {
-      sites.push({
-        lineIdx: i,
-        kind: "value",
-        rewrite: (l, newId) => replaceScalar(l, pair[1].length + pair[2].length, newId),
-      });
+    if (pair) {
+      if (!FREETEXT_KEYS.has(pair[2]) && valueCarriesId(pair[4].trim(), id)) {
+        sites.push({
+          lineIdx: i,
+          kind: "value",
+          afterCol: pair[1].length + pair[2].length,
+        });
+      }
       continue;
     }
     const bare = BARE_ITEM_RE.exec(content);
     if (bare && stripQuotes(bare[2].trim()) === id) {
-      sites.push({
-        lineIdx: i,
-        kind: "value",
-        rewrite: (l, newId) => replaceScalar(l, bare[1].length, newId),
-      });
+      sites.push({ lineIdx: i, kind: "value", afterCol: bare[1].length });
     }
   }
   return sites;
 }
 
-/** Swap the scalar token equal to the old id after *afterCol*, keeping
- *  quoting style, spacing, and any trailing comment. */
-function replaceScalar(line: string, afterCol: number, newId: string): string {
+/** Swap standalone tokens equal to the old id after *afterCol*, keeping
+ *  quoting style, spacing, and any trailing comment. Identifier `\b`
+ *  boundaries can't match inside a longer id. */
+function rewriteValue(
+  line: string,
+  afterCol: number,
+  tokenRe: RegExp,
+  newId: string
+): string {
   const { value: content, comment } = splitInlineComment(line);
-  const head = content.slice(0, afterCol);
-  const tail = content.slice(afterCol);
-  const rewritten = tail.replace(
-    /(:?\s*)(["']?)([^"'#]*?)(["']?)(\s*)$/,
-    (_m, sep, q1, _old, q2, ws) => `${sep}${q1}${newId}${q2}${ws}`
+  return (
+    content.slice(0, afterCol) + content.slice(afterCol).replace(tokenRe, newId) + comment
   );
-  return head + rewritten + comment;
 }
 
 /**
@@ -137,26 +176,27 @@ export function findIdReferences(
   return scanSites(yaml, id, opts).map((s) => ({ line: s.lineIdx + 1, kind: s.kind }));
 }
 
-interface CountKey {
-  yaml: string;
-  id: string;
-}
-const countMemo = createScanMemo<CountKey, number>(
-  (a, b) => a.yaml === b.yaml && a.id === b.id
-);
+// Keyed on the buffer, holding per-id counts: a form renders several
+// declaring ID fields (nested entities), and a single-entry (yaml, id)
+// memo would thrash across them on every render.
+const countMemo = createScanMemo<string, Map<string, number>>((a, b) => a === b);
 
 /** Memoised reference count for the ID field's awareness hint. */
 export function countIdReferences(yaml: string, id: string): number {
-  const key = { yaml, id };
-  const hit = countMemo.get(key);
+  let counts = countMemo.get(yaml);
+  if (!counts) {
+    counts = new Map();
+    countMemo.set(yaml, counts);
+  }
+  const hit = counts.get(id);
   if (hit !== undefined) return hit;
   const count = findIdReferences(yaml, id).length;
-  countMemo.set(key, count);
+  counts.set(id, count);
   return count;
 }
 
 /** Rewrite every reference to *oldId* as *newId*; untouched lines stay
- *  byte-identical. */
+ *  byte-identical and the line count never changes. */
 export function renameIdReferences(
   yaml: string,
   oldId: string,
@@ -166,8 +206,13 @@ export function renameIdReferences(
   const sites = scanSites(yaml, oldId, opts);
   if (!sites.length) return yaml;
   const lines = yaml.split("\n");
+  const lambdaRe = idCallRe(oldId);
+  const tokenRe = idTokenRe(oldId);
   for (const site of sites) {
-    lines[site.lineIdx] = site.rewrite(lines[site.lineIdx], newId);
+    lines[site.lineIdx] =
+      site.kind === "lambda"
+        ? lines[site.lineIdx].replace(lambdaRe, `id(${newId})`)
+        : rewriteValue(lines[site.lineIdx], site.afterCol, tokenRe, newId);
   }
   return lines.join("\n");
 }
@@ -186,8 +231,7 @@ export function idDeclaredElsewhere(
     if (opts.excludeFromLine !== undefined && lineIdx >= from && lineIdx <= to) {
       continue;
     }
-    const pair = VALUE_LINE_RE.exec(splitInlineComment(lines[lineIdx]).value);
-    if (pair && stripQuotes(pair[4].trim()) === id) return true;
+    if (readInstanceScalar(lines[lineIdx], "id") === id) return true;
   }
   return false;
 }
@@ -205,18 +249,15 @@ export function renameIdInValues(
   oldId: string,
   newId: string
 ): Record<string, unknown> {
-  const lambdaRe = new RegExp(String.raw`\bid\(\s*${oldId}\s*\)`, "g");
+  if (!isValidEspHomeId(oldId)) return values;
+  const lambdaRe = idCallRe(oldId);
   const fixString = (s: string, entry: ConfigEntry | undefined): string => {
     if (entry?.references_component && s === oldId) return newId;
     return s.replace(lambdaRe, `id(${newId})`);
   };
   const walk = (val: unknown, entry: ConfigEntry | undefined): unknown => {
     if (typeof val === "string") return fixString(val, entry);
-    if (Array.isArray(val)) {
-      return val.map((item) =>
-        typeof item === "string" ? fixString(item, entry) : walk(item, entry)
-      );
-    }
+    if (Array.isArray(val)) return val.map((item) => walk(item, entry));
     if (val && typeof val === "object") {
       const level = entry ? (entry.config_entries ?? []) : entries;
       const out: Record<string, unknown> = {};
@@ -233,7 +274,8 @@ export function renameIdInValues(
   return walk(values, undefined) as Record<string, unknown>;
 }
 
-/** Test-only: clear the count memo. */
+/** Test-only: clear the scan memos. */
 export function _clearIdRenameMemos(): void {
   countMemo.clear();
+  declMemo.clear();
 }

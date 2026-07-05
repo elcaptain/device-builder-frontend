@@ -1,7 +1,6 @@
 import toast from "sonner-js";
 import type { ConfigEntry } from "../../../api/types/config-entries.js";
-import { ConfigEntryType } from "../../../api/types/config-entries.js";
-import { entryAtPath } from "../../../util/config-entry-tree.js";
+import { entryAtPath, isDeclaringIdEntry } from "../../../util/config-entry-tree.js";
 import { validateEntries } from "../../../util/config-validation.js";
 import { isValidEspHomeId } from "../../../util/esphome-id.js";
 import { getIn, setIn } from "../../../util/nested-values.js";
@@ -31,16 +30,6 @@ export function flushDraft(host: ESPHomeDeviceSectionConfig): void {
   host._draftTimer = null;
   if (!host._config) return;
 
-  const renderEntries = resolveSectionEntries(host.sectionKey, host._config.entries);
-  const renames = resolvePendingIdRenames(host, renderEntries);
-  host._fieldErrors = validateEntries(
-    renderEntries,
-    host._values,
-    host._presentComponents,
-    host.board?.esphome.platform ?? null,
-    host.sectionKey
-  );
-
   const fromLine = resolveCurrentFromLine(host.yaml, host.sectionKey, host.fromLine);
   if (fromLine === undefined) {
     // Section was removed from live YAML between keystroke and debounce
@@ -50,6 +39,16 @@ export function flushDraft(host: ESPHomeDeviceSectionConfig): void {
     host._setDirty(false);
     return;
   }
+
+  const renderEntries = resolveSectionEntries(host.sectionKey, host._config.entries);
+  const renames = resolvePendingIdRenames(host, renderEntries, fromLine);
+  host._fieldErrors = validateEntries(
+    renderEntries,
+    host._values,
+    host._presentComponents,
+    host.board?.esphome.platform ?? null,
+    host.sectionKey
+  );
 
   let newYaml = updateSectionInYaml(
     host.yaml,
@@ -67,12 +66,14 @@ export function flushDraft(host: ESPHomeDeviceSectionConfig): void {
   // the same draft so the declaration and its references move as one
   // buffer swap (one undo step in the YAML pane). The edited section's
   // new range is excluded — it was just spliced from the renamed values.
-  for (const { from, to } of renames) {
+  // renameIdReferences never changes the line count, so the range is
+  // computed once.
+  if (renames.length) {
     const range = findSectionRange(newYaml.split("\n"), host.sectionKey, fromLine);
-    newYaml = renameIdReferences(newYaml, from, to, {
-      excludeFromLine: range.start + 1,
-      excludeToLine: range.end + 1,
-    });
+    const exclude = { excludeFromLine: range.start + 1, excludeToLine: range.end + 1 };
+    for (const { from, to } of renames) {
+      newYaml = renameIdReferences(newYaml, from, to, exclude);
+    }
   }
 
   host._setDirty(false);
@@ -98,18 +99,12 @@ export function flushDraft(host: ESPHomeDeviceSectionConfig): void {
  */
 function resolvePendingIdRenames(
   host: ESPHomeDeviceSectionConfig,
-  renderEntries: ConfigEntry[]
+  renderEntries: ConfigEntry[],
+  fromLine: number
 ): { from: string; to: string }[] {
   if (!host._pendingIdRenames.size) return [];
-  const sectionRange = findSectionRange(
-    host.yaml.split("\n"),
-    host.sectionKey,
-    resolveCurrentFromLine(host.yaml, host.sectionKey, host.fromLine)
-  );
-  const exclude = {
-    excludeFromLine: sectionRange.start + 1,
-    excludeToLine: sectionRange.end + 1,
-  };
+  const range = findSectionRange(host.yaml.split("\n"), host.sectionKey, fromLine);
+  const exclude = { excludeFromLine: range.start + 1, excludeToLine: range.end + 1 };
   const renames: { from: string; to: string }[] = [];
   for (const [key, pending] of host._pendingIdRenames) {
     const to = getIn(host._values, pending.path);
@@ -118,12 +113,7 @@ function resolvePendingIdRenames(
     if (to === pending.from || !isValidEspHomeId(pending.from)) continue;
     // A surviving declaration elsewhere still owns the old id — renaming
     // the references would break it.
-    if (
-      sectionRange.start >= 0 &&
-      idDeclaredElsewhere(host.yaml, pending.from, exclude)
-    ) {
-      continue;
-    }
+    if (idDeclaredElsewhere(host.yaml, pending.from, exclude)) continue;
     host._values = renameIdInValues(host._values, renderEntries, pending.from, to);
     renames.push({ from: pending.from, to });
   }
@@ -167,7 +157,7 @@ function recordPendingIdRename(host: ESPHomeDeviceSectionConfig, path: string[])
     resolveSectionEntries(host.sectionKey, host._config.entries),
     path
   );
-  if (entry?.type !== ConfigEntryType.ID || entry.references_component) return;
+  if (!isDeclaringIdEntry(entry)) return;
   host._pendingIdRenames.set(key, { path, from: old });
 }
 

@@ -140,6 +140,23 @@ light:
     expect(out).toContain('red: "out_b" # main channel');
   });
 
+  it("rewrites flow-sequence elements", () => {
+    const yaml = `switch:
+  - platform: gpio
+    id: relay1
+    pin: 4
+  - platform: gpio
+    id: relay2
+    pin: 5
+    interlock: [relay1, relay2]
+`;
+    const out = renameIdReferences(yaml, "relay1", "relay_main", {
+      excludeFromLine: 2,
+      excludeToLine: 4,
+    });
+    expect(out).toContain("interlock: [relay_main, relay2]");
+  });
+
   it("rewrites lambda calls without touching similar tokens", () => {
     const yaml = `script:
   - id: beep
@@ -186,10 +203,30 @@ script:
 });
 
 describe("countIdReferences", () => {
-  it("counts and memoizes", () => {
-    expect(countIdReferences(APOLLO, "buzzer_output")).toBe(1);
+  it("counts references, several ids against one buffer", () => {
     expect(countIdReferences(APOLLO, "buzzer_output")).toBe(1);
     expect(countIdReferences(APOLLO, "rtttl_player")).toBe(0);
+    expect(countIdReferences(APOLLO, "buzzer_output")).toBe(1);
+  });
+
+  it("does not count a globals declaration as a reference", () => {
+    const yaml = `globals:
+  - id: counter_a
+    type: int
+  - id: counter_b
+    type: int
+
+sensor:
+  - platform: template
+    lambda: 'return id(counter_b);'
+`;
+    expect(countIdReferences(yaml, "counter_a")).toBe(0);
+    expect(countIdReferences(yaml, "counter_b")).toBe(1);
+  });
+
+  it("returns zero for a non-identifier value instead of throwing", () => {
+    expect(countIdReferences(APOLLO, "${sub}")).toBe(0);
+    expect(countIdReferences(APOLLO, "bad(id")).toBe(0);
   });
 });
 
