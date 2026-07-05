@@ -9,15 +9,12 @@ import { html, nothing } from "lit";
 import type { ConfigEntry } from "../../api/types/config-entries.js";
 import {
   findReferenceCandidates,
+  isCertainlyDanglingId,
   resolveSoleCandidate,
-  yamlHasExternalIdSources,
 } from "../../util/config-entry-yaml-scan.js";
 import { isValidEspHomeId } from "../../util/esphome-id.js";
 import { renderInlineError } from "../../util/render-error.js";
-import {
-  hasSubstitutionReference,
-  resolveSubstitutions,
-} from "../../util/substitutions.js";
+import { resolveSubstitutions } from "../../util/substitutions.js";
 import { countIdReferences } from "../../util/yaml-id-rename.js";
 import {
   effectiveDisabled,
@@ -96,19 +93,14 @@ export function renderIdReferenceField(
     ? idOption(value, value, ctx.localize("device.id_reference_unresolved", { domain }))
     : nothing;
   // A dangling reference we can be sure about gets an inline error without
-  // waiting for the backend lint round trip: the provider fetch has settled
-  // (candidate list is complete), the value is a plain identifier
-  // (substitutions and !secret indirections can't be checked), no candidate
-  // id needs substitution to compare, and nothing pulls ids in from other
-  // files. Backend validation stays the authority: a field-level error from
-  // it takes precedence.
+  // waiting for the backend lint round trip. The renderer gates on its own
+  // state — backend validation stays the authority, and the provider fetch
+  // must have settled (candidate list complete) — the certainty verdict
+  // itself lives beside the candidate scan.
   const unknownId =
     !fieldError &&
-    hasOrphanValue &&
     providers !== null &&
-    isValidEspHomeId(value) &&
-    !candidates.some((c) => hasSubstitutionReference(c.id)) &&
-    !yamlHasExternalIdSources(ctx.yaml);
+    isCertainlyDanglingId(value, candidates, ctx.yaml);
   const invalid = fieldError || unknownId;
   const unknownIdError = unknownId
     ? renderInlineError(ctx.localize("device.id_reference_unknown_error", { id: value }))
@@ -152,14 +144,14 @@ export function renderIdReferenceField(
       <div class="field" data-field-key=${fieldKeyAttr(path)}>
         ${renderLabel(entry, ctx)}
         <wa-select
-          class=${invalid ? "invalid" : ""}
+          class=${fieldError ? "invalid" : ""}
           ?disabled=${effectiveDisabled(entry, ctx)}
           placeholder=${ctx.localize("device.id_reference_empty", { domain })}
           @change=${onChange}
         >
           ${addOption}
         </wa-select>
-        ${renderFieldError(path, ctx)}${unknownIdError}
+        ${renderFieldError(path, ctx)}
       </div>
     `;
   }

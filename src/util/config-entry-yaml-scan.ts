@@ -17,7 +17,9 @@
  * type into a field) from O(N) per keystroke to O(1).
  */
 import type { ComponentCatalogEntry } from "../api/types/components.js";
+import { isValidEspHomeId } from "./esphome-id.js";
 import { isPinFieldKey, parsePinGpio, scanPinGpios } from "./pin-gpio.js";
+import { hasSubstitutionReference } from "./substitutions.js";
 import {
   collectIdsAtPath,
   findFieldLine,
@@ -472,10 +474,6 @@ export function findReferenceCandidates(
 // can't see. A value-position `!include` (`wifi: !include wifi.yaml`) only
 // replaces that key's value, so it deliberately doesn't match.
 const MERGED_SOURCE_RE = /^(?:packages|<<)\s*:/m;
-// Any include-family tag — `!include`, `!include_dir_list`,
-// `!include_dir_merge_list`, … — in value or list-item position can
-// define ids the local scan can't see.
-const INCLUDE_RE = /!include/;
 
 /**
  * Whether the YAML root-merges components the scan can't enumerate.
@@ -496,8 +494,36 @@ export function yamlHasMergedSources(yaml: string): boolean {
  * from the candidate scan isn't proof of a dangling reference.
  */
 export function yamlHasExternalIdSources(yaml: string): boolean {
-  if (!yaml) return false;
-  return MERGED_SOURCE_RE.test(yaml) || INCLUDE_RE.test(yaml);
+  const hit = externalMemo.get(yaml);
+  if (hit !== undefined) return hit;
+  // Any include-family tag — `!include`, `!include_dir_list`,
+  // `!include_dir_merge_list`, … — in value or list-item position can
+  // define ids the local scan can't see.
+  const result = yamlHasMergedSources(yaml) || yaml.includes("!include");
+  externalMemo.set(yaml, result);
+  return result;
+}
+
+const externalMemo = createScanMemo<string, boolean>((a, b) => a === b);
+
+/**
+ * Whether *value* is a reference the local scan is certain dangles: an
+ * identifier-shaped id (substitutions and !secret indirections can't be
+ * checked) absent from a candidate list that's fully comparable (no
+ * candidate id needs substitution to compare) in a buffer that pulls no
+ * ids in from other files. Callers own their own gates (backend-error
+ * precedence, provider settling) — this is the pure verdict.
+ */
+export function isCertainlyDanglingId(
+  value: string,
+  candidates: ReadonlyArray<{ id: string }>,
+  yaml: string
+): boolean {
+  return (
+    isValidEspHomeId(value) &&
+    !candidates.some((c) => c.id === value || hasSubstitutionReference(c.id)) &&
+    !yamlHasExternalIdSources(yaml)
+  );
 }
 
 /**
@@ -523,4 +549,5 @@ export function resolveSoleCandidate(
 export function _clearScanMemos(): void {
   pinMemo.clear();
   providerMemo.clear();
+  externalMemo.clear();
 }
