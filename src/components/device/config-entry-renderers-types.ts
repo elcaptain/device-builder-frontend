@@ -64,9 +64,13 @@ export interface RenderCtx {
   /**
    * Providers of a cross-domain interface reference. Returns synchronously
    * from a per-form cache; a miss kicks an async catalog fetch and
-   * re-renders. Empty until loaded, and ``[]`` for a same-domain reference.
+   * re-renders. ``null`` while unsettled (no api yet, fetch in flight, or
+   * the last fetch failed) — the candidate list is incomplete then, not
+   * empty. ``[]`` is a settled same-domain reference.
    */
-  resolveInterfaceProviders: (interfaceName: string) => ReadonlyArray<ComponentProvider>;
+  resolveInterfaceProviders: (
+    interfaceName: string
+  ) => ReadonlyArray<ComponentProvider> | null;
   scopeValues: (path: string[]) => Record<string, unknown>;
   filterRenderable: (
     entries: ConfigEntry[],

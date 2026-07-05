@@ -152,3 +152,93 @@ describe("renderIdReferenceField — resolves ${...} in option labels (#1709)", 
     expect(select?.placeholder).toBe("WIFI Switch Relay");
   });
 });
+
+describe("renderIdReferenceField — inline error for an unknown id", () => {
+  const APOLLO_YAML = [
+    "output:",
+    "  - platform: ledc",
+    "    pin: 18",
+    "    id: buzzer_outputd",
+    "",
+    "rtttl:",
+    "  - output: buzzer_output",
+    "    id: rtttl_player",
+    "",
+  ].join("\n");
+
+  function renderOutputRef(
+    yaml: string,
+    value: string,
+    ctxOverrides: Record<string, unknown> = {}
+  ) {
+    const entry = makeEntry(ConfigEntryType.STRING, { references_component: "output" });
+    return renderIdReferenceField(
+      entry,
+      ["output"],
+      makeRenderCtx({ output: value }, { overrides: { yaml, ...ctxOverrides } })
+    );
+  }
+
+  const errorTexts = (tmpl: unknown): unknown[] =>
+    findTemplatesByAnchor(tmpl, "field-error").map((t) => t.values[0]);
+
+  const selectInvalid = (tmpl: unknown): unknown =>
+    findElementBindings(tmpl, "wa-select")[0]?.class;
+
+  it("flags a dangling reference with an inline error and invalid state", () => {
+    const tmpl = renderOutputRef(APOLLO_YAML, "buzzer_output");
+    expect(errorTexts(tmpl)).toContain("device.id_reference_unknown_error");
+    expect(selectInvalid(tmpl)).toBe("invalid");
+  });
+
+  it("does not flag a resolving reference", () => {
+    const tmpl = renderOutputRef(APOLLO_YAML, "buzzer_outputd");
+    expect(errorTexts(tmpl)).toHaveLength(0);
+    expect(selectInvalid(tmpl)).toBe("");
+  });
+
+  it("does not flag a substitution value", () => {
+    const tmpl = renderOutputRef(APOLLO_YAML, "${my_output}");
+    expect(errorTexts(tmpl)).toHaveLength(0);
+  });
+
+  it("does not flag when merged sources could define the id elsewhere", () => {
+    const merged = `packages:\n  base: !include common.yaml\n\n${APOLLO_YAML}`;
+    expect(errorTexts(renderOutputRef(merged, "buzzer_output"))).toHaveLength(0);
+  });
+
+  it("does not flag while the provider fetch is unsettled", () => {
+    const tmpl = renderOutputRef(APOLLO_YAML, "buzzer_output", {
+      resolveInterfaceProviders: () => null,
+    });
+    expect(errorTexts(tmpl)).toHaveLength(0);
+  });
+
+  it("does not flag when an included value could define the id elsewhere", () => {
+    const withInclude = `binary_sensor: !include sensors.yaml\n\n${APOLLO_YAML}`;
+    expect(errorTexts(renderOutputRef(withInclude, "buzzer_output"))).toHaveLength(0);
+  });
+
+  it("does not flag when a candidate id needs substitution to compare", () => {
+    const subbed = APOLLO_YAML.replace("id: buzzer_outputd", "id: ${name}_buzzer");
+    expect(errorTexts(renderOutputRef(subbed, "buzzer_output"))).toHaveLength(0);
+  });
+
+  it("does not flag when a candidate id uses a bare $name substitution", () => {
+    const subbed = APOLLO_YAML.replace("id: buzzer_outputd", "id: $node_buzzer");
+    expect(errorTexts(renderOutputRef(subbed, "buzzer_output"))).toHaveLength(0);
+  });
+
+  it("yields to a backend error on the same field", () => {
+    const tmpl = renderOutputRef(APOLLO_YAML, "buzzer_output", {
+      errorAt: () => ({
+        key: "output",
+        code: "validation.backend",
+        params: { message: "backend says no" },
+      }),
+    });
+    const texts = errorTexts(tmpl);
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).not.toBe("device.id_reference_unknown_error");
+  });
+});

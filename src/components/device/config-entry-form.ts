@@ -1020,7 +1020,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
    */
   private _resolveInterfaceProviders(
     interfaceName: string
-  ): readonly ComponentProvider[] {
+  ): readonly ComponentProvider[] | null {
     if (!interfaceName) return [];
     const cached = this._interfaceProviders.get(interfaceName);
     if (cached) return cached;
@@ -1050,7 +1050,10 @@ export class ESPHomeConfigEntryForm extends LitElement {
         )
         .finally(() => this._interfaceProvidersPending.delete(interfaceName));
     }
-    return [];
+    // Unsettled: no api yet, fetch in flight, or the last fetch failed.
+    // Distinct from a cached [] so consumers don't treat an incomplete
+    // candidate list as complete.
+    return null;
   }
 }
 

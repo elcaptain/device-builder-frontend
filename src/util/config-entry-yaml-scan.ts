@@ -17,7 +17,9 @@
  * type into a field) from O(N) per keystroke to O(1).
  */
 import type { ComponentCatalogEntry } from "../api/types/components.js";
+import { isValidEspHomeId } from "./esphome-id.js";
 import { isPinFieldKey, parsePinGpio, scanPinGpios } from "./pin-gpio.js";
+import { hasSubstitutionReference } from "./substitutions.js";
 import {
   collectIdsAtPath,
   findFieldLine,
@@ -471,7 +473,8 @@ export function findReferenceCandidates(
 // constructs that merge whole component sections in from sources the scan
 // can't see. A value-position `!include` (`wifi: !include wifi.yaml`) only
 // replaces that key's value, so it deliberately doesn't match.
-const MERGED_SOURCE_RE = /^(?:packages|<<)\s*:/;
+const MERGED_SOURCE_RE = /^(?:packages|<<)\s*:/m;
+const MERGE_KEY_RE = /^\s*<<\s*:/m;
 
 /**
  * Whether the YAML root-merges components the scan can't enumerate.
@@ -482,7 +485,49 @@ const MERGED_SOURCE_RE = /^(?:packages|<<)\s*:/;
  */
 export function yamlHasMergedSources(yaml: string): boolean {
   if (!yaml) return false;
-  return yaml.split("\n").some((line) => MERGED_SOURCE_RE.test(line));
+  return MERGED_SOURCE_RE.test(yaml);
+}
+
+/**
+ * Whether the YAML pulls in ids the local scan can't see: merged sources
+ * (`packages:` / `<<:`) or any `!include`d value (a value-position or
+ * list-item `!include` defines ids in another file). When true, a value missing
+ * from the candidate scan isn't proof of a dangling reference.
+ */
+export function yamlHasExternalIdSources(yaml: string): boolean {
+  const hit = externalMemo.get(yaml);
+  if (hit !== undefined) return hit;
+  // Any include-family tag — `!include`, `!include_dir_list`,
+  // `!include_dir_merge_list`, … — in value or list-item position can
+  // define ids the local scan can't see; so can a merge key at any
+  // indent (`<<: *anchor` inside a component can merge an `id:` in),
+  // unlike yamlHasMergedSources' deliberately top-level scope.
+  const result =
+    yamlHasMergedSources(yaml) || MERGE_KEY_RE.test(yaml) || yaml.includes("!include");
+  externalMemo.set(yaml, result);
+  return result;
+}
+
+const externalMemo = createScanMemo<string, boolean>((a, b) => a === b);
+
+/**
+ * Whether *value* is a reference the local scan is certain dangles: an
+ * identifier-shaped id (substitutions and !secret indirections can't be
+ * checked) absent from a candidate list that's fully comparable (no
+ * candidate id needs substitution to compare) in a buffer that pulls no
+ * ids in from other files. Callers own their own gates (backend-error
+ * precedence, provider settling) — this is the pure verdict.
+ */
+export function isCertainlyDanglingId(
+  value: string,
+  candidates: ReadonlyArray<{ id: string }>,
+  yaml: string
+): boolean {
+  return (
+    isValidEspHomeId(value) &&
+    !candidates.some((c) => c.id === value || hasSubstitutionReference(c.id)) &&
+    !yamlHasExternalIdSources(yaml)
+  );
 }
 
 /**
@@ -508,4 +553,5 @@ export function resolveSoleCandidate(
 export function _clearScanMemos(): void {
   pinMemo.clear();
   providerMemo.clear();
+  externalMemo.clear();
 }

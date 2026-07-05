@@ -9,8 +9,10 @@ import { html, nothing } from "lit";
 import type { ConfigEntry } from "../../api/types/config-entries.js";
 import {
   findReferenceCandidates,
+  isCertainlyDanglingId,
   resolveSoleCandidate,
 } from "../../util/config-entry-yaml-scan.js";
+import { renderInlineError } from "../../util/render-error.js";
 import { resolveSubstitutions } from "../../util/substitutions.js";
 import {
   effectiveDisabled,
@@ -29,16 +31,13 @@ export function renderIdReferenceField(
   ctx: RenderCtx
 ) {
   const domain = entry.references_component || "";
-  const candidates = findReferenceCandidates(
-    ctx.yaml,
-    domain,
-    ctx.resolveInterfaceProviders(domain)
-  );
+  const providers = ctx.resolveInterfaceProviders(domain);
+  const candidates = findReferenceCandidates(ctx.yaml, domain, providers ?? []);
   const raw = ctx.getAt(path);
   const bail = renderYamlOnlyFallbackIfNonPrimitive(entry, path, ctx, raw);
   if (bail) return bail;
   const value = String(raw ?? "");
-  const invalid = ctx.errorAt(path) !== null;
+  const fieldError = ctx.errorAt(path) !== null;
 
   // Surface ESPHome's auto-resolved target as the default, but only on an
   // empty field — a committed value isn't a "default".
@@ -66,6 +65,19 @@ export function renderIdReferenceField(
   const hasOrphanValue = value !== "" && !candidates.some((c) => c.id === value);
   const orphanOption = hasOrphanValue
     ? idOption(value, value, ctx.localize("device.id_reference_unresolved", { domain }))
+    : nothing;
+  // A dangling reference we can be sure about gets an inline error without
+  // waiting for the backend lint round trip. The renderer gates on its own
+  // state — backend validation stays the authority, and the provider fetch
+  // must have settled (candidate list complete) — the certainty verdict
+  // itself lives beside the candidate scan.
+  const unknownId =
+    !fieldError &&
+    providers !== null &&
+    isCertainlyDanglingId(value, candidates, ctx.yaml);
+  const invalid = fieldError || unknownId;
+  const unknownIdError = unknownId
+    ? renderInlineError(ctx.localize("device.id_reference_unknown_error", { id: value }))
     : nothing;
   // Solo "Add new" CTA only when there's genuinely nothing to show.
   const empty = candidates.length === 0 && !hasOrphanValue;
@@ -106,7 +118,7 @@ export function renderIdReferenceField(
       <div class="field" data-field-key=${fieldKeyAttr(path)}>
         ${renderLabel(entry, ctx)}
         <wa-select
-          class=${invalid ? "invalid" : ""}
+          class=${fieldError ? "invalid" : ""}
           ?disabled=${effectiveDisabled(entry, ctx)}
           placeholder=${ctx.localize("device.id_reference_empty", { domain })}
           @change=${onChange}
@@ -148,7 +160,7 @@ export function renderIdReferenceField(
         })}
         ${addOption}
       </wa-select>
-      ${renderFieldError(path, ctx)}
+      ${renderFieldError(path, ctx)}${unknownIdError}
     </div>
   `;
 }
