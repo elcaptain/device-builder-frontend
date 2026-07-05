@@ -7,6 +7,7 @@ import {
   findComponentsByProviders,
   findReferenceCandidates,
   findUsedPins,
+  yamlHasExternalIdSources,
   yamlHasMergedSources,
 } from "../../src/util/config-entry-yaml-scan.js";
 
@@ -656,5 +657,24 @@ describe("yamlHasMergedSources", () => {
   it("is false for plain YAML and empty input", () => {
     expect(yamlHasMergedSources("ld2410:\n  id: radar\n")).toBe(false);
     expect(yamlHasMergedSources("")).toBe(false);
+  });
+});
+
+describe("yamlHasExternalIdSources", () => {
+  it("is true for merged sources, like yamlHasMergedSources", () => {
+    expect(yamlHasExternalIdSources("packages:\n  base: !include base.yaml\n")).toBe(
+      true
+    );
+    expect(yamlHasExternalIdSources("<<: !include common.yaml\nesphome:\n")).toBe(true);
+  });
+
+  it("is true for a value-position !include, which can define ids elsewhere", () => {
+    expect(yamlHasExternalIdSources("sensor: !include sensors.yaml\n")).toBe(true);
+    expect(yamlHasExternalIdSources("wifi: !include wifi.yaml\n")).toBe(true);
+  });
+
+  it("is false when every id is locally visible", () => {
+    expect(yamlHasExternalIdSources("ld2410:\n  id: radar\n")).toBe(false);
+    expect(yamlHasExternalIdSources("")).toBe(false);
   });
 });
