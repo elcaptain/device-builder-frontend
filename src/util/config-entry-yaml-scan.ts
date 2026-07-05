@@ -474,6 +474,7 @@ export function findReferenceCandidates(
 // can't see. A value-position `!include` (`wifi: !include wifi.yaml`) only
 // replaces that key's value, so it deliberately doesn't match.
 const MERGED_SOURCE_RE = /^(?:packages|<<)\s*:/m;
+const MERGE_KEY_RE = /^\s*<<\s*:/m;
 
 /**
  * Whether the YAML root-merges components the scan can't enumerate.
@@ -498,8 +499,11 @@ export function yamlHasExternalIdSources(yaml: string): boolean {
   if (hit !== undefined) return hit;
   // Any include-family tag — `!include`, `!include_dir_list`,
   // `!include_dir_merge_list`, … — in value or list-item position can
-  // define ids the local scan can't see.
-  const result = yamlHasMergedSources(yaml) || yaml.includes("!include");
+  // define ids the local scan can't see; so can a merge key at any
+  // indent (`<<: *anchor` inside a component can merge an `id:` in),
+  // unlike yamlHasMergedSources' deliberately top-level scope.
+  const result =
+    yamlHasMergedSources(yaml) || MERGE_KEY_RE.test(yaml) || yaml.includes("!include");
   externalMemo.set(yaml, result);
   return result;
 }

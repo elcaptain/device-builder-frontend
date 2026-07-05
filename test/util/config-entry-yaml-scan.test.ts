@@ -710,6 +710,14 @@ describe("yamlHasExternalIdSources", () => {
     );
   });
 
+  it("is true for an indented merge key, which can merge an id in", () => {
+    expect(
+      yamlHasExternalIdSources(
+        "defaults: &d\n  id: buzzer\noutput:\n  - platform: ledc\n    <<: *d\n"
+      )
+    ).toBe(true);
+  });
+
   it("is false when every id is locally visible", () => {
     expect(yamlHasExternalIdSources("ld2410:\n  id: radar\n")).toBe(false);
     expect(yamlHasExternalIdSources("")).toBe(false);
