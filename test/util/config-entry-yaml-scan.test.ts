@@ -7,6 +7,7 @@ import {
   findComponentsByProviders,
   findReferenceCandidates,
   findUsedPins,
+  isCertainlyDanglingId,
   yamlHasExternalIdSources,
   yamlHasMergedSources,
 } from "../../src/util/config-entry-yaml-scan.js";
@@ -657,6 +658,32 @@ describe("yamlHasMergedSources", () => {
   it("is false for plain YAML and empty input", () => {
     expect(yamlHasMergedSources("ld2410:\n  id: radar\n")).toBe(false);
     expect(yamlHasMergedSources("")).toBe(false);
+  });
+});
+
+describe("isCertainlyDanglingId", () => {
+  const CANDIDATES = [{ id: "out_a" }, { id: "out_b" }];
+  const YAML = "output:\n  - platform: ledc\n    id: out_a\n";
+
+  it("is true for an id-shaped value absent from a comparable candidate list", () => {
+    expect(isCertainlyDanglingId("out_c", CANDIDATES, YAML)).toBe(true);
+  });
+
+  it("is false when the value is present, non-identifier, or indirect", () => {
+    expect(isCertainlyDanglingId("out_a", CANDIDATES, YAML)).toBe(false);
+    expect(isCertainlyDanglingId("${sub}", CANDIDATES, YAML)).toBe(false);
+    expect(isCertainlyDanglingId("!secret x", CANDIDATES, YAML)).toBe(false);
+  });
+
+  it("is false when a candidate id needs substitution to compare", () => {
+    expect(isCertainlyDanglingId("out_c", [{ id: "${name}_out" }], YAML)).toBe(false);
+    expect(isCertainlyDanglingId("out_c", [{ id: "$node_out" }], YAML)).toBe(false);
+  });
+
+  it("is false when the buffer pulls ids in from other files", () => {
+    expect(
+      isCertainlyDanglingId("out_c", CANDIDATES, `sensor: !include x.yaml\n${YAML}`)
+    ).toBe(false);
   });
 });
 
