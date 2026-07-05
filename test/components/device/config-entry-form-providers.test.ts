@@ -19,10 +19,10 @@ import type { ComponentProvider } from "../../../src/util/config-entry-yaml-scan
 const resolve = (
   form: ESPHomeConfigEntryForm,
   name: string
-): readonly ComponentProvider[] =>
+): readonly ComponentProvider[] | null =>
   (
     form as unknown as {
-      _resolveInterfaceProviders(n: string): readonly ComponentProvider[];
+      _resolveInterfaceProviders(n: string): readonly ComponentProvider[] | null;
     }
   )._resolveInterfaceProviders(name);
 
@@ -54,14 +54,14 @@ describe("config-entry-form _resolveInterfaceProviders", () => {
     document.body.innerHTML = "";
   });
 
-  it("returns [] on the first miss, then the fetched providers, fetching once", async () => {
+  it("returns null on the first miss, then the fetched providers, fetching once", async () => {
     const getComponents = vi
       .fn()
       .mockResolvedValue(response(["sensor.adc", "sensor.ads1115"]));
     const form = withApi(getComponents);
 
-    // First miss: synchronous empty, fetch kicked off.
-    expect(resolve(form, "voltage_sampler")).toEqual([]);
+    // First miss: unsettled (null), fetch kicked off.
+    expect(resolve(form, "voltage_sampler")).toBeNull();
     // A second call while in flight must not fire a duplicate fetch.
     resolve(form, "voltage_sampler");
     await flush();
@@ -95,9 +95,9 @@ describe("config-entry-form _resolveInterfaceProviders", () => {
 
     resolve(form, "voltage_sampler");
     await flush();
-    // Failure left the cache unset — the next call retries rather than
-    // returning a poisoned empty list forever.
-    expect(resolve(form, "voltage_sampler")).toEqual([]);
+    // Failure left the cache unset — the next call retries (still
+    // unsettled) rather than returning a poisoned empty list forever.
+    expect(resolve(form, "voltage_sampler")).toBeNull();
     await flush();
     expect(getComponents).toHaveBeenCalledTimes(2);
     expect(resolve(form, "voltage_sampler")).toEqual([{ domain: "sensor", stem: "adc" }]);

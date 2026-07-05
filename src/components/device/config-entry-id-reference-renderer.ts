@@ -10,9 +10,9 @@ import type { ConfigEntry } from "../../api/types/config-entries.js";
 import {
   findReferenceCandidates,
   resolveSoleCandidate,
-  yamlHasMergedSources,
+  yamlHasExternalIdSources,
 } from "../../util/config-entry-yaml-scan.js";
-import { isValidEsphomeId } from "../../util/esphome-id.js";
+import { isValidEspHomeId } from "../../util/esphome-id.js";
 import { renderInlineError } from "../../util/render-error.js";
 import { resolveSubstitutions } from "../../util/substitutions.js";
 import {
@@ -32,11 +32,8 @@ export function renderIdReferenceField(
   ctx: RenderCtx
 ) {
   const domain = entry.references_component || "";
-  const candidates = findReferenceCandidates(
-    ctx.yaml,
-    domain,
-    ctx.resolveInterfaceProviders(domain)
-  );
+  const providers = ctx.resolveInterfaceProviders(domain);
+  const candidates = findReferenceCandidates(ctx.yaml, domain, providers ?? []);
   const raw = ctx.getAt(path);
   const bail = renderYamlOnlyFallbackIfNonPrimitive(entry, path, ctx, raw);
   if (bail) return bail;
@@ -71,23 +68,23 @@ export function renderIdReferenceField(
     ? idOption(value, value, ctx.localize("device.id_reference_unresolved", { domain }))
     : nothing;
   // A dangling reference we can be sure about gets an inline error without
-  // waiting for the backend lint round trip: plain identifier (substitutions
-  // and !secret indirections can't be checked), no merged sources that could
-  // define the id in another file, and the provider fetch has settled so the
-  // candidate list is complete. Backend validation stays the authority; a
-  // field-level error from it takes precedence below.
+  // waiting for the backend lint round trip: the provider fetch has settled
+  // (candidate list is complete), the value is a plain identifier
+  // (substitutions and !secret indirections can't be checked), no candidate
+  // id needs substitution to compare, and nothing pulls ids in from other
+  // files. Backend validation stays the authority: a field-level error from
+  // it takes precedence.
   const unknownId =
+    !fieldError &&
     hasOrphanValue &&
-    isValidEsphomeId(value) &&
-    !ctx.interfaceProvidersPending(domain) &&
-    !yamlHasMergedSources(ctx.yaml);
+    providers !== null &&
+    isValidEspHomeId(value) &&
+    !candidates.some((c) => c.id.includes("${")) &&
+    !yamlHasExternalIdSources(ctx.yaml);
   const invalid = fieldError || unknownId;
-  const unknownIdError =
-    unknownId && !fieldError
-      ? renderInlineError(
-          ctx.localize("device.id_reference_unknown_error", { id: value })
-        )
-      : nothing;
+  const unknownIdError = unknownId
+    ? renderInlineError(ctx.localize("device.id_reference_unknown_error", { id: value }))
+    : nothing;
   // Solo "Add new" CTA only when there's genuinely nothing to show.
   const empty = candidates.length === 0 && !hasOrphanValue;
 

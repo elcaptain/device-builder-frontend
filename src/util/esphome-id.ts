@@ -36,6 +36,6 @@ export function normalizeEspHomeId(input: string): string {
 }
 
 /** Whether *value* is already a well-formed ESPHome id. */
-export function isValidEsphomeId(value: string): boolean {
+export function isValidEspHomeId(value: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
 }

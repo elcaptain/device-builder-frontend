@@ -471,7 +471,8 @@ export function findReferenceCandidates(
 // constructs that merge whole component sections in from sources the scan
 // can't see. A value-position `!include` (`wifi: !include wifi.yaml`) only
 // replaces that key's value, so it deliberately doesn't match.
-const MERGED_SOURCE_RE = /^(?:packages|<<)\s*:/;
+const MERGED_SOURCE_RE = /^(?:packages|<<)\s*:/m;
+const INCLUDE_VALUE_RE = /:\s*!include\b/;
 
 /**
  * Whether the YAML root-merges components the scan can't enumerate.
@@ -482,7 +483,18 @@ const MERGED_SOURCE_RE = /^(?:packages|<<)\s*:/;
  */
 export function yamlHasMergedSources(yaml: string): boolean {
   if (!yaml) return false;
-  return yaml.split("\n").some((line) => MERGED_SOURCE_RE.test(line));
+  return MERGED_SOURCE_RE.test(yaml);
+}
+
+/**
+ * Whether the YAML pulls in ids the local scan can't see: merged sources
+ * (`packages:` / `<<:`) or any `!include`d value (`sensor: !include x.yaml`
+ * defines that domain's ids in another file). When true, a value missing
+ * from the candidate scan isn't proof of a dangling reference.
+ */
+export function yamlHasExternalIdSources(yaml: string): boolean {
+  if (!yaml) return false;
+  return MERGED_SOURCE_RE.test(yaml) || INCLUDE_VALUE_RE.test(yaml);
 }
 
 /**

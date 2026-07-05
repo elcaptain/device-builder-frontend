@@ -207,10 +207,33 @@ describe("renderIdReferenceField — inline error for an unknown id", () => {
     expect(errorTexts(renderOutputRef(merged, "buzzer_output"))).toHaveLength(0);
   });
 
-  it("does not flag while the provider fetch is still pending", () => {
+  it("does not flag while the provider fetch is unsettled", () => {
     const tmpl = renderOutputRef(APOLLO_YAML, "buzzer_output", {
-      interfaceProvidersPending: () => true,
+      resolveInterfaceProviders: () => null,
     });
     expect(errorTexts(tmpl)).toHaveLength(0);
+  });
+
+  it("does not flag when an included value could define the id elsewhere", () => {
+    const withInclude = `binary_sensor: !include sensors.yaml\n\n${APOLLO_YAML}`;
+    expect(errorTexts(renderOutputRef(withInclude, "buzzer_output"))).toHaveLength(0);
+  });
+
+  it("does not flag when a candidate id needs substitution to compare", () => {
+    const subbed = APOLLO_YAML.replace("id: buzzer_outputd", "id: ${name}_buzzer");
+    expect(errorTexts(renderOutputRef(subbed, "buzzer_output"))).toHaveLength(0);
+  });
+
+  it("yields to a backend error on the same field", () => {
+    const tmpl = renderOutputRef(APOLLO_YAML, "buzzer_output", {
+      errorAt: () => ({
+        key: "output",
+        code: "validation.backend",
+        params: { message: "backend says no" },
+      }),
+    });
+    const texts = errorTexts(tmpl);
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).not.toBe("device.id_reference_unknown_error");
   });
 });
