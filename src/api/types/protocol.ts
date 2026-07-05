@@ -47,6 +47,10 @@ export interface ServerInfoMessage {
   /** ESPHome Desktop wrapper version, from ESPHOME_DESKTOP_VERSION on the
    * backend; absent or "" when not running under the desktop app. */
   desktop_version?: string;
+  /** True when the desktop app (0.14.0+) exposes its update `api` via
+   * ESPHOME_DESKTOP_BIN; gates the "Check for updates" menu item. Older
+   * desktop apps set desktop_version but not this. */
+  desktop_update_capable?: boolean;
 }
 
 export type ServerMessage = ResultMessage | ErrorMessage | EventMessage;

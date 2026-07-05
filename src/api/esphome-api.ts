@@ -33,6 +33,7 @@ import type {
   ComponentCatalogEntry,
   PagedComponentsResponse,
 } from "./types/components.js";
+import type { DesktopUpdateCheck, DesktopUpdateStarted } from "./types/desktop.js";
 import type {
   AddComponentResponse,
   ConfiguredDevice,
@@ -740,6 +741,24 @@ export class ESPHomeAPI {
   /** Trigger device state polling. */
   async getDeviceStates(): Promise<Record<string, never>> {
     return this.sendCommand("devices/get_states");
+  }
+
+  /**
+   * Check whether the desktop app, ESPHome, or the device builder has an
+   * update available. Only valid when running under an update-capable ESPHome
+   * Desktop app (`ServerInfoMessage.desktop_update_capable`).
+   */
+  async desktopCheckUpdate(): Promise<DesktopUpdateCheck> {
+    return this.sendCommand<DesktopUpdateCheck>("desktop/check_update");
+  }
+
+  /**
+   * Trigger the full desktop update (desktop app, ESPHome, device builder).
+   * Fire-and-forget: the desktop app restarts this backend to install, so the
+   * connection drops; re-check after reconnecting.
+   */
+  async desktopInstallUpdate(): Promise<DesktopUpdateStarted> {
+    return this.sendCommand<DesktopUpdateStarted>("desktop/update");
   }
 
   /**
