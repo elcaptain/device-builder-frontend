@@ -13,6 +13,10 @@ import type { BoardCatalogEntry, SlimBoard } from "../../api/types/boards.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { apiContext, localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import {
+  NO_INSTANCE_ERRORS,
+  type InstanceBackendErrors,
+} from "../../util/backend-field-errors.js";
 import { boardImageUrl, onBoardImageError } from "../../util/board-image.js";
 import { renderMarkdown } from "../../util/markdown.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
@@ -86,8 +90,10 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
 
   /** Forwarded from the editor — true when the YAML pane is currently
    *  rendered in the layout. Section editor uses this to decide
-   *  whether to show its "Show YAML editor" CTA. */
-  @property({ type: Boolean })
+   *  whether to show its "Show YAML editor" CTA. Property-only: a
+   *  default-true boolean can't receive false through an attribute
+   *  binding on first render. */
+  @property({ attribute: false })
   yamlPaneVisible = true;
 
   @property({ attribute: false })
@@ -99,6 +105,10 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
   /** Instance-relative field path to scroll into view, from the YAML cursor. */
   @property({ attribute: false })
   focusFieldPath?: string[];
+
+  /** The selected section's backend errors; forwarded to the section editor. */
+  @property({ attribute: false })
+  backendErrors: InstanceBackendErrors = NO_INSTANCE_ERRORS;
 
   @query("esphome-device-section-config")
   private _sectionConfig!: ESPHomeDeviceSectionConfig;
@@ -423,10 +433,11 @@ export class ESPHomeDeviceBoardInfo extends LitElement {
       .sectionKey=${key}
       .fromLine=${this.selectedFromLine}
       .focusFieldPath=${this.focusFieldPath}
+      .backendErrors=${this.backendErrors}
       .yaml=${this.yaml}
       .board=${this.board}
       .boardName=${this.board?.name ?? ""}
-      ?yamlPaneVisible=${this.yamlPaneVisible}
+      .yamlPaneVisible=${this.yamlPaneVisible}
     ></esphome-device-section-config>`;
   }
 

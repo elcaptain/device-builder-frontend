@@ -1,5 +1,6 @@
 import { consume } from "@lit/context";
 import {
+  mdiAlertCircleOutline,
   mdiDelete,
   mdiInformationOutline,
   mdiOpenInNew,
@@ -8,14 +9,20 @@ import {
 } from "@mdi/js";
 import { html, LitElement, nothing } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
+import memoizeOne from "memoize-one";
 import toast from "sonner-js";
 import type { ESPHomeAPI } from "../../api/index.js";
 import type { BoardCatalogEntry } from "../../api/types/boards.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { apiContext, localizeContext } from "../../context/index.js";
+import { dangerBannerStyles } from "../../styles/banners.js";
 import { inputStyles } from "../../styles/inputs.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { actionFieldLabel } from "../../util/action-field-label.js";
+import {
+  NO_INSTANCE_ERRORS,
+  type InstanceBackendErrors,
+} from "../../util/backend-field-errors.js";
 import { defaultBoardImageUrl, onBoardImageError } from "../../util/board-image.js";
 import { pathIsAdvanced } from "../../util/config-entry-tree.js";
 import type { ValidationError } from "../../util/config-validation.js";
@@ -67,6 +74,7 @@ import {
 import { isSecuritySection, type ApplySecuritySecretsDetail } from "./security-notice.js";
 
 registerMdiIcons({
+  "alert-circle-outline": mdiAlertCircleOutline,
   delete: mdiDelete,
   "information-outline": mdiInformationOutline,
   "open-in-new": mdiOpenInNew,
@@ -97,6 +105,13 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
   // Instance-relative field path to scroll into view, from the YAML cursor.
   @property({ attribute: false }) focusFieldPath?: string[];
 
+  // This section instance's backend errors, refreshed per lint pass.
+  // Field errors merge under the client-side _fieldErrors; the message
+  // lists feed the section alert so a navigator badge always leads to a
+  // readable message.
+  @property({ attribute: false }) backendErrors: InstanceBackendErrors =
+    NO_INSTANCE_ERRORS;
+
   // Same string the YAML pane shows including unsaved edits. Save and delete
   // operate on this rather than re-fetching: the navigator emits fromLine
   // relative to live YAML, so an out-of-sync version would point the splice
@@ -104,8 +119,10 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
   @property() yaml = "";
 
   // Whether the device editor's YAML pane is currently visible — when not,
-  // the YAML-only notice surfaces a "Show YAML editor" CTA.
-  @property({ type: Boolean }) yamlPaneVisible = true;
+  // the YAML-only notice surfaces a "Show YAML editor" CTA. Property-only:
+  // a default-true boolean can't receive false through an attribute
+  // binding on first render (absence is indistinguishable from unset).
+  @property({ attribute: false }) yamlPaneVisible = true;
 
   @property({ attribute: false }) board: BoardCatalogEntry | null = null;
 
@@ -133,6 +150,11 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
   @state() _isUnknown = false;
 
   @state() _fieldErrors: Map<string, ValidationError> = new Map();
+
+  // Backend-error paths the user has edited since the last lint pass —
+  // suppressed until the next backendErrors refresh re-evaluates them, so
+  // a fixed value doesn't keep its stale error for the lint round-trip.
+  @state() _clearedBackendPaths: Set<string> = new Set();
 
   // Per-section so switching components doesn't bleed state.
   @state() _advancedShownSections = new Set<string>();
@@ -174,6 +196,27 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
   // between fields, long enough to coalesce typing into one splice.
   private static readonly DRAFT_DEBOUNCE_MS = 200;
 
+  /** Backend errors under client-side ones — the client map is live per
+   *  keystroke while the backend map lags a lint round-trip, so on a path
+   *  collision the client's message wins. Memoised so per-keystroke renders
+   *  keep the form's errors prop identity stable. */
+  private _mergeErrors = memoizeOne(
+    (
+      backend: Map<string, ValidationError>,
+      cleared: Set<string>,
+      field: Map<string, ValidationError>
+    ): Map<string, ValidationError> => {
+      if (backend.size === 0) return field;
+      const merged = new Map<string, ValidationError>();
+      for (const [path, err] of backend) {
+        if (!cleared.has(path)) merged.set(path, err);
+      }
+      if (merged.size === 0) return field;
+      for (const [path, err] of field) merged.set(path, err);
+      return merged;
+    }
+  );
+
   private get _showAdvanced(): boolean {
     return this._advancedShownSections.has(this.sectionKey);
   }
@@ -189,9 +232,19 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     this._setShowAdvanced(e.detail.show);
   };
 
-  static styles = [espHomeStyles, inputStyles, deviceSectionConfigStyles];
+  static styles = [
+    espHomeStyles,
+    inputStyles,
+    dangerBannerStyles,
+    deviceSectionConfigStyles,
+  ];
 
   willUpdate(changedProperties: Map<string, unknown>) {
+    // A fresh lint pass re-evaluated every path; drop the local
+    // suppressions so still-broken fields regain their error.
+    if (changedProperties.has("backendErrors") && this._clearedBackendPaths.size) {
+      this._clearedBackendPaths = new Set();
+    }
     // loadConfig synchronously flips _loading/_config/_error; running it in
     // willUpdate folds those into the in-progress render rather than
     // scheduling a second one.
@@ -205,26 +258,47 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
       void loadConfig(this);
     }
     this._revealAdvancedForFocus(changedProperties);
+    this._revealAdvancedForErrors(changedProperties);
+  }
+
+  /**
+   * When a backend error lands on an advanced field that's currently
+   * hidden, reveal the advanced fields so the inline message is visible.
+   */
+  private _revealAdvancedForErrors(changedProperties: Map<string, unknown>): void {
+    if (!changedProperties.has("backendErrors") && !changedProperties.has("_config")) {
+      return;
+    }
+    if (!this.backendErrors.fields.size) return;
+    this._autoRevealAdvanced(
+      [...this.backendErrors.fields.keys()].map((path) => path.split("."))
+    );
   }
 
   /**
    * When the caret follows to an advanced field that's currently hidden (Show
    * advanced off and the field has no value yet, so it isn't rendered), reveal
    * the section's advanced fields here in willUpdate so the field renders this
-   * pass and the form's scroll-to-field can reach it. Revealed at most once per
-   * section so a later deliberate collapse sticks (mirrors config-entry-form's
-   * seed-once nested-disclosure behaviour — caret-follow shouldn't fight the
-   * user's choice).
+   * pass and the form's scroll-to-field can reach it.
    */
   private _revealAdvancedForFocus(changedProperties: Map<string, unknown>): void {
     if (!changedProperties.has("focusFieldPath") && !changedProperties.has("_config")) {
       return;
     }
-    const path = this.focusFieldPath;
-    if (!path?.length || this._showAdvanced || !this._config) return;
+    if (this.focusFieldPath?.length) this._autoRevealAdvanced([this.focusFieldPath]);
+  }
+
+  /**
+   * Reveal the section's hidden advanced fields when any of *paths* is
+   * advanced. At most once per section so a later deliberate collapse
+   * sticks (mirrors config-entry-form's seed-once nested-disclosure
+   * behaviour — auto-reveal shouldn't fight the user's choice).
+   */
+  private _autoRevealAdvanced(paths: readonly string[][]): void {
+    if (this._showAdvanced || !this._config) return;
     if (this._autoRevealedSections.has(this.sectionKey)) return;
     const entries = resolveSectionEntries(this.sectionKey, this._config.entries);
-    if (!pathIsAdvanced(entries, path)) return;
+    if (!paths.some((path) => pathIsAdvanced(entries, path))) return;
     this._autoRevealedSections.add(this.sectionKey);
     this._setShowAdvanced(true);
   }
@@ -345,6 +419,15 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
     // regression). Zero-entries sections also fall back here.
     const yamlOnly = isYamlOnlySection(this.sectionKey, renderEntries.length);
 
+    // Backend messages this pane must carry: section-level ones when the
+    // banner's pane is hidden, and field-mapped ones for yaml-only
+    // sections in every layout — with no form to render them inline,
+    // their only other surface is the squiggle hover.
+    const sectionAlerts = [
+      ...(this.yamlPaneVisible ? [] : this.backendErrors.sectionMessages),
+      ...(yamlOnly ? this.backendErrors.fieldMessages : []),
+    ];
+
     const canDelete = !UNDELETABLE_SECTIONS.has(this.sectionKey);
 
     return html`
@@ -399,6 +482,16 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
         }
       </div>
       ${
+        sectionAlerts.length > 0
+          ? html`<div class="danger-banner section-error-banner" role="alert">
+              <wa-icon library="mdi" name="alert-circle-outline"></wa-icon>
+              <div class="danger-banner-text">
+                ${sectionAlerts.map((msg) => html`<p>${msg}</p>`)}
+              </div>
+            </div>`
+          : nothing
+      }
+      ${
         yamlOnly
           ? html`<div class="yaml-only-notice" role="note">
                 <wa-icon library="mdi" name="information-outline"></wa-icon>
@@ -435,7 +528,11 @@ export class ESPHomeDeviceSectionConfig extends LitElement {
                 .entries=${renderEntries}
                 .requiredGroups=${this._config.required_groups}
                 .values=${this._values}
-                .errors=${this._fieldErrors}
+                .errors=${this._mergeErrors(
+                  this.backendErrors.fields,
+                  this._clearedBackendPaths,
+                  this._fieldErrors
+                )}
                 .board=${this.board}
                 .yaml=${this.yaml}
                 .fromLine=${this._resolvedFromLine}

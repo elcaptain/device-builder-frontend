@@ -82,6 +82,20 @@ describe("retargetBlockDiagnostic", () => {
     expect(to).toBe(apccciLine.to);
     expect(doc.sliceString(from, to)).toBe("apccci:");
   });
+
+  it("passes through a range trimmed of blank-line spill as single-line content", async () => {
+    const { retargetBlockDiagnostic, trimRangeToContent } =
+      await import("../../src/util/yaml-lint-backend.js");
+    const doc = EditorState.create({ doc: DOC }).doc;
+    // esphome's end mark often lands at column 0 past a blank separator
+    // (a last-list-item range); walking up to the enclosing key there
+    // would attribute the error to the whole block instead of the item.
+    const boardLine = doc.lineAt(offsetOf("  board: esp01_1m"));
+    const raw = { from: boardLine.from + 2, to: offsetOf("apccci:") };
+    const trimmed = trimRangeToContent(doc, raw);
+    expect(trimmed).toEqual({ from: boardLine.from + 2, to: boardLine.to });
+    expect(retargetBlockDiagnostic(doc, trimmed)).toEqual(trimmed);
+  });
 });
 
 describe("sanitizeMessage", () => {

@@ -190,22 +190,55 @@ export function getTopLevelKey(state: EditorState, pos: number): string | null {
  */
 export function getKeyPath(state: EditorState, pos: number): string[] {
   const keys: string[] = [];
-  const tree = syntaxTree(state);
-  let cur = findEnclosingPair(tree.resolveInner(pos, -1));
-  if (!cur) {
-    // A cursor in an empty value / trailing whitespace (``key: ``) resolves to
-    // the document root, not the pair. Re-anchor on the line's last non-space
-    // char (the ``:`` or key) so a nested ``key: `` still yields its path.
-    const line = state.doc.lineAt(pos);
-    const upto = line.text.slice(0, pos - line.from).trimEnd();
-    if (upto) cur = findEnclosingPair(tree.resolveInner(line.from + upto.length - 1, -1));
-  }
+  let cur = findEnclosingPair(resolveAnchoredNode(state, pos));
   while (cur) {
     const k = getPairKey(state, cur);
     if (k) keys.push(k);
     cur = findEnclosingPair(cur.parent?.parent ?? null);
   }
   return keys.reverse();
+}
+
+/**
+ * Like ``getKeyPath``, but block-sequence items contribute their
+ * numeric index, so a field inside ``esphome: areas: - id:`` yields
+ * ``["esphome", "areas", 0, "id"]`` — the shape value paths use for
+ * fields nested in list entries.
+ */
+export function getKeyPathWithListIndices(
+  state: EditorState,
+  pos: number
+): (string | number)[] {
+  const segs: (string | number)[] = [];
+  for (let node = resolveAnchoredNode(state, pos); node; node = node.parent) {
+    if (node.name === "Pair") {
+      const k = getPairKey(state, node);
+      if (k) segs.push(k);
+    } else if (node.name === "Item" && node.parent?.name === "BlockSequence") {
+      let idx = 0;
+      for (let s = node.prevSibling; s; s = s.prevSibling) {
+        if (s.name === "Item") idx++;
+      }
+      segs.push(idx);
+    }
+  }
+  return segs.reverse();
+}
+
+/**
+ * The deepest node at *pos*, re-anchored for the empty-value case: a
+ * cursor in an empty value / trailing whitespace (``key: ``) resolves to
+ * the document root, not the pair, so re-resolve on the line's last
+ * non-space char (the ``:`` or key) when *pos* has no enclosing pair.
+ */
+function resolveAnchoredNode(state: EditorState, pos: number): SyntaxNode | null {
+  const tree = syntaxTree(state);
+  const node: SyntaxNode | null = tree.resolveInner(pos, -1);
+  if (findEnclosingPair(node)) return node;
+  const line = state.doc.lineAt(pos);
+  const upto = line.text.slice(0, pos - line.from).trimEnd();
+  if (!upto) return node;
+  return tree.resolveInner(line.from + upto.length - 1, -1);
 }
 
 /**

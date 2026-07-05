@@ -23,7 +23,31 @@ import {
 import { gutterLineClass, GutterMarker, type EditorView } from "@codemirror/view";
 import type { ESPHomeAPI } from "../api/esphome-api.js";
 import type { EditorValidateResponse } from "../api/types/editor.js";
+import { formRelativePath } from "./backend-field-errors.js";
 import { splitTextLinks } from "./markdown.js";
+import { getKeyPathWithListIndices } from "./yaml-ast.js";
+import { isOpenConfigFile } from "./yaml-validation-summary.js";
+
+/** A validation error resolved to a key chain in the open document. */
+export interface MappedValidationError {
+  message: string;
+  /** 1-indexed line where the error's own range starts — inside the
+   *  errored node, not the retargeted squiggle position, so list-item
+   *  errors resolve to the right instance. */
+  line: number;
+  /** Key chain from the top-level section key down to the errored field;
+   *  block-sequence items contribute their numeric index. */
+  keyPath: (string | number)[];
+}
+
+/** Detail payload of the yaml-diagnostics event the editor re-emits. */
+export interface YamlDiagnosticsDetail {
+  /** Banner material: errors with no form field to carry their message. */
+  errors: string[];
+  /** Errors resolved to a key path, for form fields and navigator badges. */
+  mapped: MappedValidationError[];
+  configuration: string;
+}
 
 interface BackendLinterOptions {
   api: ESPHomeAPI;
@@ -33,10 +57,17 @@ interface BackendLinterOptions {
    * Called after every lint pass with the resulting error messages and the
    * configuration they were computed for, so the host can surface a
    * document-level "configuration invalid" indicator that names the actual
-   * errors and ignore a late result from a since-switched device. Fires with
-   * `[]` for an empty/un-configured buffer or a failed round-trip.
+   * errors and ignore a late result from a since-switched device. The
+   * mapped list carries the validation errors that resolved to a key path
+   * in the open document, so the host can route them onto form fields.
+   * Fires with empty lists for an empty/un-configured buffer or a failed
+   * round-trip.
    */
-  onResult?: (errors: string[], configuration: string) => void;
+  onResult?: (
+    errors: string[],
+    mapped: MappedValidationError[],
+    configuration: string
+  ) => void;
 }
 
 /**
@@ -158,12 +189,35 @@ function keyAt(doc: Text, offset: number): string | null {
 }
 
 /**
+ * Trim a range that only spills onto blank lines (or the start of the
+ * next line) back to its last content line. ESPHome's end marks often
+ * land at column 0 past a blank separator, making single-line content
+ * read as multi-line.
+ */
+export function trimRangeToContent(
+  doc: Text,
+  range: { from: number; to: number }
+): { from: number; to: number } {
+  const startLine = doc.lineAt(range.from);
+  let toLine = doc.lineAt(range.to);
+  while (
+    toLine.number > startLine.number &&
+    !doc.sliceString(toLine.from, Math.min(range.to, toLine.to)).trim()
+  ) {
+    toLine = doc.line(toLine.number - 1);
+    range = { from: range.from, to: toLine.to };
+  }
+  return range;
+}
+
+/**
  * Move a block-level validation error onto the key of its enclosing block.
  *
  * ESPHome marks "Component not found" / "Platform missing" on the block's
  * value mapping, so a multi-line range spans the children. Walk it up to
  * the first less-indented `key:` line (clamp to the first line if none).
- * Single-line ranges are already precise and pass through untouched.
+ * Expects a range already trimmed with trimRangeToContent, so single-line
+ * content passes through untouched — it's already precise.
  */
 export function retargetBlockDiagnostic(
   doc: Text,
@@ -260,12 +314,12 @@ export function createBackendYamlLinter(opts: BackendLinterOptions): Extension {
     async (view) => {
       const configuration = opts.getConfiguration();
       if (!configuration) {
-        opts.onResult?.([], configuration);
+        opts.onResult?.([], [], configuration);
         return [];
       }
       const content = view.state.doc.toString();
       if (!content.trim()) {
-        opts.onResult?.([], configuration);
+        opts.onResult?.([], [], configuration);
         return [];
       }
 
@@ -276,16 +330,19 @@ export function createBackendYamlLinter(opts: BackendLinterOptions): Extension {
         // Surface backend errors quietly in the console — we don't want a
         // network blip to flood the editor with spurious diagnostics.
         console.debug("[yaml-lint] validate_yaml failed:", err);
-        opts.onResult?.([], configuration);
+        opts.onResult?.([], [], configuration);
         return [];
       }
       _lastValidated.set(configuration, { content, result: res, at: performance.now() });
 
       const diagnostics: Diagnostic[] = [];
       // Whole-config errors (a structural error esphome pins on the root
-      // `esphome:` block, or an unplaceable parse error) go in the banner
-      // instead of a squiggle; localized errors keep their squiggle.
+      // esphome block, an included-file error, or an unplaceable parse
+      // error) go in the banner instead of a squiggle; localized errors
+      // keep their squiggle and are also resolved to a key path so the
+      // host can pin them on the matching form field.
       const bannerErrors: string[] = [];
+      const mapped: MappedValidationError[] = [];
 
       // YAML parse errors — usually one, no range, message contains
       // "line N, column M".
@@ -312,12 +369,18 @@ export function createBackendYamlLinter(opts: BackendLinterOptions): Extension {
       for (const err of res.validation_errors ?? []) {
         const message =
           sanitizeMessage((err.message ?? "").trim()) || "Invalid configuration";
-        const { from, to } = retargetBlockDiagnostic(
-          view.state.doc,
-          rangeToOffsets(view, err.range)
-        );
+        // The upstream validator emits a null range when it can't place the
+        // error, and a foreign document when the error lives in an included
+        // file — neither has a location in this buffer.
+        if (!err.range || !isOpenConfigFile(err.range.document ?? "", configuration)) {
+          bannerErrors.push(message);
+          continue;
+        }
+        const doc = view.state.doc;
+        const anchor = trimRangeToContent(doc, rangeToOffsets(view, err.range));
+        const { from, to } = retargetBlockDiagnostic(doc, anchor);
         // Pinned on the `esphome:` core block → whole-config error → banner.
-        if (keyAt(view.state.doc, from) === CORE_BLOCK_KEY) {
+        if (keyAt(doc, from) === CORE_BLOCK_KEY) {
           bannerErrors.push(message);
           continue;
         }
@@ -329,9 +392,40 @@ export function createBackendYamlLinter(opts: BackendLinterOptions): Extension {
           message,
           renderMessage: () => renderMessageNode(message),
         });
+        // Map from the range's own start, not the retargeted squiggle: a
+        // block error walked up to its enclosing key would attribute to
+        // the wrong list instance (the range starts inside the broken
+        // item; the enclosing key covers them all). Anchor inside the
+        // first token — side -1 at the exact start would resolve to the
+        // preceding node.
+        let keyPath = getKeyPathWithListIndices(
+          view.state,
+          Math.min(anchor.from + 1, anchor.to)
+        );
+        // A multi-line range anchored on a key token is a container-level
+        // error: esphome marked a whole mapping, whose range starts at its
+        // first key. That key is incidental — attribute the error to the
+        // container so it lands on the section, not on an unrelated field.
+        const anchorLine = doc.lineAt(anchor.from);
+        if (
+          keyPath.length > 0 &&
+          doc.lineAt(anchor.to).number !== anchorLine.number &&
+          KEY_LINE_RE.test(anchorLine.text.slice(anchor.from - anchorLine.from))
+        ) {
+          keyPath = keyPath.slice(0, -1);
+        }
+        if (keyPath.length > 0) {
+          mapped.push({ message, line: anchorLine.number, keyPath });
+        }
+        // No form field to carry the message (a bare section header, or the
+        // AST couldn't place it) — keep it in the banner; a section-level
+        // error still badges the navigator through the mapped entry.
+        if (formRelativePath(keyPath).length === 0) {
+          bannerErrors.push(message);
+        }
       }
 
-      opts.onResult?.(bannerErrors, configuration);
+      opts.onResult?.(bannerErrors, mapped, configuration);
       return diagnostics;
     },
     {

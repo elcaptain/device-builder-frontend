@@ -17,7 +17,12 @@ import { customElement, property, query, state } from "lit/decorators.js";
 import type { BoardCatalogEntry } from "../../api/types/boards.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { expertModeContext, localizeContext } from "../../context/index.js";
+import { dangerBannerStyles } from "../../styles/banners.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import {
+  NO_INSTANCE_ERRORS,
+  type InstanceBackendErrors,
+} from "../../util/backend-field-errors.js";
 import { renderTextLinks } from "../../util/markdown.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { SaveShortcutController } from "../../util/save-shortcut-controller.js";
@@ -29,6 +34,7 @@ import {
   nextSplitRatioForKey,
   saveSplitRatio,
 } from "../../util/split-ratio.js";
+import type { YamlDiagnosticsDetail } from "../../util/yaml-lint-backend.js";
 import type { HighlightRange } from "../yaml-editor.js";
 import { renderEditorToolbar } from "./device-editor-toolbar.js";
 import { deviceEditorStyles } from "./device-editor.styles.js";
@@ -136,6 +142,10 @@ export class ESPHomeDeviceEditor extends LitElement {
   @property({ attribute: false })
   focusFieldPath?: string[];
 
+  /** The selected section's backend errors; forwarded to the section editor. */
+  @property({ attribute: false })
+  backendErrors: InstanceBackendErrors = NO_INSTANCE_ERRORS;
+
   /** Yaml content at last save/load — compared against current yaml to detect changes. */
   @property({ attribute: false })
   savedYaml = "";
@@ -202,7 +212,7 @@ export class ESPHomeDeviceEditor extends LitElement {
   @query(".editor-layout")
   private _layoutEl?: HTMLElement;
 
-  static styles = [espHomeStyles, deviceEditorStyles];
+  static styles = [espHomeStyles, dangerBannerStyles, deviceEditorStyles];
 
   protected render() {
     // On mobile we collapse the split view down to a single pane to
@@ -320,8 +330,9 @@ export class ESPHomeDeviceEditor extends LitElement {
                 .selectedSection=${this.selectedSection}
                 .selectedFromLine=${this.selectedFromLine}
                 .focusFieldPath=${this.focusFieldPath}
+                .backendErrors=${this.backendErrors}
                 .justCreated=${this.justCreated}
-                ?yamlPaneVisible=${effectiveLayout !== "left"}
+                .yamlPaneVisible=${effectiveLayout !== "left"}
                 @show-yaml-editor=${this._onShowYamlEditor}
               ></esphome-device-board-info>
             </div>
@@ -347,21 +358,12 @@ export class ESPHomeDeviceEditor extends LitElement {
             <div class="editor-pane editor-pane--right">
               ${
                 !this._showDiff && this._liveErrors.length > 0
-                  ? html`<div class="invalid-banner" role="alert">
-                      <wa-icon
-                        library="mdi"
-                        name="alert-circle-outline"
-                        class="invalid-banner-icon"
-                      ></wa-icon>
-                      <div class="invalid-banner-text">
+                  ? html`<div class="danger-banner invalid-banner" role="alert">
+                      <wa-icon library="mdi" name="alert-circle-outline"></wa-icon>
+                      <div class="danger-banner-text">
                         ${this._liveErrors
                           .slice(0, MAX_BANNER_ERRORS)
-                          .map(
-                            (msg) =>
-                              html`<span class="invalid-banner-error"
-                                >${renderTextLinks(msg)}</span
-                              >`
-                          )}
+                          .map((msg) => html`<span>${renderTextLinks(msg)}</span>`)}
                         ${
                           this._liveErrors.length > MAX_BANNER_ERRORS
                             ? html`<span class="invalid-banner-more"
@@ -473,9 +475,7 @@ export class ESPHomeDeviceEditor extends LitElement {
     }
   }
 
-  private _onYamlDiagnostics(
-    e: CustomEvent<{ errors: string[]; configuration: string }>
-  ) {
+  private _onYamlDiagnostics(e: CustomEvent<YamlDiagnosticsDetail>) {
     // Ignore a late lint result for a since-switched device, so a stale
     // "invalid" banner can't flash over the freshly-opened config.
     if (e.detail.configuration !== this.configuration) return;
