@@ -673,6 +673,10 @@ describe("yamlHasExternalIdSources", () => {
     expect(yamlHasExternalIdSources("wifi: !include wifi.yaml\n")).toBe(true);
   });
 
+  it("is true for a list-item !include, which can define ids elsewhere", () => {
+    expect(yamlHasExternalIdSources("sensor:\n  - !include sensor_a.yaml\n")).toBe(true);
+  });
+
   it("is false when every id is locally visible", () => {
     expect(yamlHasExternalIdSources("ld2410:\n  id: radar\n")).toBe(false);
     expect(yamlHasExternalIdSources("")).toBe(false);
