@@ -677,6 +677,12 @@ describe("yamlHasExternalIdSources", () => {
     expect(yamlHasExternalIdSources("sensor:\n  - !include sensor_a.yaml\n")).toBe(true);
   });
 
+  it("is true for include-family directory tags", () => {
+    expect(yamlHasExternalIdSources("sensor: !include_dir_merge_list sensors/\n")).toBe(
+      true
+    );
+  });
+
   it("is false when every id is locally visible", () => {
     expect(yamlHasExternalIdSources("ld2410:\n  id: radar\n")).toBe(false);
     expect(yamlHasExternalIdSources("")).toBe(false);
