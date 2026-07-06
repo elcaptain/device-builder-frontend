@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chunksToVisualLines } from "../../src/components/ansi-log.js";
+import { chunksToVisualLines } from "../../src/util/log-chunks.js";
 
 describe("chunksToVisualLines", () => {
   it("appends \\n-terminated chunks as discrete lines", () => {

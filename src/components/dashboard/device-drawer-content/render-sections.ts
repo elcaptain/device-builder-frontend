@@ -1,5 +1,7 @@
 import { html, nothing, type TemplateResult } from "lit";
+import type { IntegrationDoc } from "../../../api/types/components.js";
 import type { ConfiguredDevice } from "../../../api/types/devices.js";
+import { isSafeDocsUrl } from "../../../common/docs.js";
 import type { LocalizeFunc } from "../../../common/localize.js";
 import { mdnsOnline } from "../../../util/device-sync.js";
 import {
@@ -11,18 +13,6 @@ import { splitIntegrations } from "../../../util/integration-split.js";
 import { buildWebUiUrlForHost } from "../../../util/web-ui-url.js";
 import type { ESPHomeDeviceDrawerContent } from "../device-drawer-content.js";
 import { renderAddressValue } from "../device-drawer-render.js";
-
-// Whitelist docs URLs to https://esphome.io. The map is backend-populated;
-// a compromised entry interpolating a javascript: / data: scheme would run
-// code on click, so bound the rendered anchors to the canonical host.
-function isSafeDocsUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "https:" && parsed.hostname === "esphome.io";
-  } catch {
-    return false;
-  }
-}
 
 export function renderRow(
   icon: string,
@@ -72,9 +62,9 @@ export function renderEncryptionBadge(
 
 function renderIntegrationTag(
   name: string,
-  integrationDocs: Record<string, string>
+  integrationDocs: Record<string, IntegrationDoc>
 ): TemplateResult {
-  const url = integrationDocs[name];
+  const url = integrationDocs[name]?.url;
   return url && isSafeDocsUrl(url)
     ? html`<a class="tag tag--link" href=${url} target="_blank" rel="noopener noreferrer"
         >${name}</a
@@ -89,7 +79,7 @@ function renderIntegrationTag(
 export function renderLoadedIntegrationsSection(
   d: ConfiguredDevice,
   localize: LocalizeFunc,
-  integrationDocs: Record<string, string>
+  integrationDocs: Record<string, IntegrationDoc>
 ): TemplateResult | typeof nothing {
   if (!d.loaded_integrations || d.loaded_integrations.length === 0) {
     return nothing;

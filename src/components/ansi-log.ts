@@ -4,9 +4,33 @@
  * Renders log lines with ANSI color codes converted to styled HTML spans.
  * Supports auto-scrolling to the bottom as new lines arrive.
  */
-import { LitElement, css, html, nothing } from "lit";
+import { consume } from "@lit/context";
+import { LitElement, css, html } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
+import type { IntegrationDoc } from "../api/types/components.js";
+import type { LocalizeFunc } from "../common/localize.js";
+import { integrationDocsContext, localizeContext } from "../context/index.js";
 import { ansiLogThemes } from "../styles/ansi-log/index.js";
+import { ANSI_ESCAPE_RE } from "../util/ansi-escapes.js";
+import { chunksToVisualLines } from "../util/log-chunks.js";
+import {
+  type LogDocLink,
+  type LogDocLinks,
+  parseLogLine,
+  resolveLogDocLink,
+} from "../util/log-doc-links.js";
+import {
+  type AnsiSpan,
+  docPopoverText,
+  logDocLinkStyles,
+  renderActionableLine,
+  renderComponentLineChildren,
+  renderSpanChildren,
+  renderSpanChildrenWithTagLink,
+} from "./ansi-log-render.js";
+import type { ESPHomeLogDocPopover } from "./log-doc-popover.js";
+
+import "./log-doc-popover.js";
 
 /**
  * ANSI 4-bit colour palette as CSS variable references. The
@@ -61,14 +85,6 @@ const ANSI_BG_COLORS: Record<number, string> = {
   107: "var(--ansi-bg-107)",
 };
 
-interface AnsiSpan {
-  text: string;
-  color?: string;
-  bgColor?: string;
-  bold?: boolean;
-  dim?: boolean;
-}
-
 /**
  * ESPHome log level colors.
  * Applied when a line matches `[timestamp][LEVEL][component:]` but has no ANSI codes.
@@ -86,32 +102,9 @@ const LOG_LEVEL_COLORS: Record<string, string> = {
 
 /** Detect ESPHome log level from a line like `[22:40:23.513][C][component:123]: text` */
 function detectLogLevelColor(line: string): string | undefined {
-  const match = line.match(/^\[[\d:.]+\]\[([EWICDV]V?)\]\[/);
-  return match ? LOG_LEVEL_COLORS[match[1]] : undefined;
+  const level = parseLogLine(line)?.level;
+  return level ? LOG_LEVEL_COLORS[level] : undefined;
 }
-
-/**
- * Match every ANSI escape sequence we care about as one of three
- * shapes:
- *   - CSI: `ESC [` <params> <intermediate> <final> — group 1 is the
- *     final byte. SGR (`m`) drives colors; everything else (cursor
- *     positioning, erase-line, DECTCEM `?25l/?25h`, ...) we silently
- *     discard so it doesn't leak into the rendered text.
- *   - OSC: `ESC ]` ... terminator — terminal title sets, hyperlinks,
- *     etc. Always discarded.
- *   - Two-char escapes: `ESC` + a single control char. Also discarded.
- * Final-byte / intermediate / parameter ranges follow ECMA-48.
- *
- * The introducer alternation matches BOTH the real `\x1b` byte AND
- * the four-character literal `\033` text that ESPHome's `--dashboard`
- * log formatter emits. ESPHome rewrites `\x1b` to literal `\033` so
- * `colorama` can't strip the codes when stdout is piped to us — without
- * matching the literal form here, the colours would render as plain
- * `\033[32m` text. The original ESPHome dashboard's frontend matches
- * both forms for the same reason.
- */
-const ANSI_ESCAPE_RE =
-  /(?:\u001b|\\033)\[[\x30-\x3f]*[\x20-\x2f]*([\x40-\x7e])|(?:\u001b|\\033)\][^\u0007\u001b]*(?:\u0007|\u001b\\|\\033\\)|(?:\u001b|\\033)[NOPVWX^_=>]/g;
 
 /**
  * Mutable SGR state carried *across* ``parseAnsiLine`` calls.
@@ -129,6 +122,11 @@ interface AnsiState {
   bold: boolean;
   dim: boolean;
 }
+
+// Doc-link cache cap — comfortably above the log dialogs' 5000-line buffer
+// so steady-state streaming never prunes; the prune only bounds very long
+// sessions whose unique lines churn past the buffer.
+const DOC_LINK_CACHE_MAX = 10_000;
 
 function newAnsiState(): AnsiState {
   return { color: undefined, bgColor: undefined, bold: false, dim: false };
@@ -211,43 +209,6 @@ function parseAnsiLine(line: string, state: AnsiState): AnsiSpan[] {
   return spans;
 }
 
-/** Strip leading non-SGR ANSI controls and trailing whitespace. */
-export function cleanLine(line: string): string {
-  return line
-    .replace(
-      /^(?:(?:\u001b|\\033)\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x6c\x6e-\x7e]|(?:\u001b|\\033)\][^\u0007\u001b]*(?:\u0007|\u001b\\|\\033\\)|(?:\u001b|\\033)[NOPVWX^_=>])*/g,
-      ""
-    )
-    .replace(/\s+$/, "");
-}
-
-/**
- * Fold ``\r``- and ``\n``-terminated output chunks into visual lines.
- *
- * An empty-after-cleaning chunk (PIO's ``\x1b[K\r`` between progress
- * ticks, a bare ``\r``) is a no-op that doesn't toggle the overwrite
- * flag; without that, the next real tick pops a non-progress line
- * above the bar instead of starting fresh (#840).
- */
-export function chunksToVisualLines(chunks: string[]): string[] {
-  const visual: string[] = [];
-  let prevEndedInCR = false;
-  for (const chunk of chunks) {
-    const text = cleanLine(chunk.replace(/[\r\n]+$/, ""));
-    const hasContent = text.replace(ANSI_ESCAPE_RE, "").trim().length > 0;
-    if (hasContent) {
-      if (prevEndedInCR && chunk !== "\n" && visual.length > 0) {
-        visual.pop();
-      }
-      visual.push(text);
-      prevEndedInCR = chunk.endsWith("\r");
-    } else if (chunk.endsWith("\n")) {
-      prevEndedInCR = false;
-    }
-  }
-  return visual;
-}
-
 @customElement("esphome-ansi-log")
 export class ESPHomeAnsiLog extends LitElement {
   /** Use light theme instead of dark. */
@@ -269,8 +230,29 @@ export class ESPHomeAnsiLog extends LitElement {
   @state()
   private _isUserScrolled = false;
 
+  // Backend component-name → esphome.io docs URL map; drives the per-line
+  // component links. Defaults empty when no provider (isolated use / tests).
+  @consume({ context: integrationDocsContext, subscribe: true })
+  @state()
+  private _integrationDocs: Record<string, IntegrationDoc> = {};
+
+  @consume({ context: localizeContext, subscribe: true })
+  @state()
+  private _localize: LocalizeFunc = (key) => key;
+
   @query(".log-container")
   private _container!: HTMLDivElement;
+
+  @query("esphome-log-doc-popover")
+  private _docPopover?: ESPHomeLogDocPopover;
+
+  // Doc-link resolutions keyed by line text. Logs are append-mostly, so
+  // insertion order approximates age; when the map outgrows the cap the
+  // oldest half is pruned instead of rebuilding it every render (an LRU's
+  // per-hit recency bump would double the work for no better retention —
+  // each frame touches every visible key anyway). ``null`` = resolved to
+  // no links, distinct from "never resolved".
+  private _docLinkCache = new Map<string, LogDocLinks | null>();
 
   static styles = [
     /* Theme-aware ANSI palette + log surface variables. Each theme
@@ -343,7 +325,14 @@ export class ESPHomeAnsiLog extends LitElement {
         opacity: 0.6;
       }
     `,
+    logDocLinkStyles,
   ];
+
+  protected willUpdate(changedProperties: Map<string, unknown>) {
+    // Resolutions are pure in (line, docs map); a docs-map change is the one
+    // input the line-keyed cache can't see, so drop it here.
+    if (changedProperties.has("_integrationDocs")) this._docLinkCache.clear();
+  }
 
   protected updated(changedProperties: Map<string, unknown>) {
     if (changedProperties.has("lines") && this.autoScroll && !this._isUserScrolled) {
@@ -359,63 +348,122 @@ export class ESPHomeAnsiLog extends LitElement {
     // records (a WARNING that opens ``\x1b[33m`` on line 1 and only
     // resets on line 5) keep their colour on the continuation lines.
     const state = newAnsiState();
+    const rows =
+      visual.length === 0 && this.placeholder
+        ? html`<div class="log-line placeholder">${this.placeholder}</div>`
+        : visual.map((line) => this._renderLine(line, state));
     return html`
-      <div class="log-container" @scroll=${this._handleScroll}>
-        ${
-          visual.length === 0 && this.placeholder
-            ? html`<div class="log-line placeholder">${this.placeholder}</div>`
-            : visual.map((line) => this._renderLine(line, state))
-        }
-      </div>
+      <div class="log-container" @scroll=${this._handleScroll}>${rows}</div>
+      <esphome-log-doc-popover></esphome-log-doc-popover>
     `;
   }
 
   private _renderLine(line: string, state: AnsiState) {
     const spans = parseAnsiLine(line, state);
     const hasAnsiColor = spans.some((s) => s.color || s.bgColor);
+    const resolved = this._resolveDocLinkCached(line);
+    const component = resolved?.component;
 
-    // If no ANSI colors, try ESPHome log-level colorization
-    if (!hasAnsiColor) {
-      const levelColor = detectLogLevelColor(line);
-      if (levelColor) {
-        return html`<div class="log-line" style="color:${levelColor}">${line}</div>`;
+    // Line content first — the two facets are independent, so a curated
+    // warning on a catalogued tag gets its tag wrapped AND the icon below.
+    let inner: unknown;
+    let colorStyle = "";
+    if (component && (hasAnsiColor || spans.some((s) => s.bold || s.dim))) {
+      // ANSI-styled lines wrap the tag at the span level so per-span
+      // colours (and bold/dim) survive.
+      inner = renderSpanChildrenWithTagLink(
+        spans,
+        component,
+        this._localize,
+        this._openDoc
+      );
+    } else if (component) {
+      const levelColor = resolved?.level && LOG_LEVEL_COLORS[resolved.level];
+      colorStyle = levelColor ? `color:${levelColor}` : "";
+      inner = renderComponentLineChildren(component, this._localize, this._openDoc);
+    } else {
+      if (!hasAnsiColor) {
+        const levelColor = detectLogLevelColor(line);
+        if (levelColor) {
+          colorStyle = `color:${levelColor}`;
+          inner = line;
+        }
       }
+      if (inner === undefined) inner = renderSpanChildren(spans);
     }
 
-    // The ``<div class="log-line">`` opening tag, the ``${spans.map(...)}``
-    // children, and the closing ``</div>`` MUST stay on one logical line:
-    // ``.log-line`` has ``white-space: pre-wrap`` (preserves runs of
-    // newlines and leading spaces in the log text), so inter-tag
-    // whitespace from a multi-line template literal renders as a
-    // visible blank row + leading-space indent on every log line.
-    // Prettier reformatting will silently re-introduce the bug — keep
-    // the prettier-ignore directive here. The same shape applies to
-    // the per-span ``<span ...>`` template below.
-    /* prettier-ignore */
-    const children = spans.map((span) => {
-      const style = [
-        span.color ? `color:${span.color}` : "",
-        span.bgColor ? `background:${span.bgColor}` : "",
-      ]
-        .filter(Boolean)
-        .join(";");
-      const classes = [span.bold ? "bold" : "", span.dim ? "dim" : ""]
-        .filter(Boolean)
-        .join(" ");
-      if (style || classes) {
-        // prettier-ignore
-        return html`<span class=${classes || nothing} style=${style || nothing}>${span.text}</span>`;
+    if (resolved?.actionable) {
+      // The icon inherits the container colour, so give ANSI-styled lines
+      // (whose colour lives on inner spans) the level colour there too.
+      let containerStyle = colorStyle;
+      if (!containerStyle && resolved.level) {
+        const levelColor = LOG_LEVEL_COLORS[resolved.level];
+        if (levelColor) containerStyle = `color:${levelColor}`;
       }
-      return span.text;
-    });
-    // prettier-ignore
-    return html`<div class="log-line">${children}</div>`;
+      return renderActionableLine(
+        inner,
+        containerStyle,
+        resolved.actionable,
+        this._localize,
+        this._openDoc
+      );
+    }
+
+    // The ``<div class="log-line">`` opening tag, the children, and the
+    // closing ``</div>`` MUST stay on one logical line: ``.log-line`` has
+    // ``white-space: pre-wrap`` (preserves runs of newlines and leading
+    // spaces in the log text), so inter-tag whitespace from a multi-line
+    // template literal renders as a visible blank row + leading-space indent
+    // on every log line. Prettier reformatting will silently re-introduce the
+    // bug — keep the prettier-ignore directive here.
+    /* prettier-ignore */
+    return colorStyle
+      ? html`<div class="log-line" style=${colorStyle}>${inner}</div>`
+      : html`<div class="log-line">${inner}</div>`;
   }
+
+  // Resolve once per unique line; a steady-state cache hit is one Map.get.
+  private _resolveDocLinkCached(line: string): LogDocLinks | undefined {
+    const cache = this._docLinkCache;
+    const hit = cache.get(line);
+    if (hit !== undefined) return hit ?? undefined;
+    const links = resolveLogDocLink(line, this._integrationDocs) ?? null;
+    if (cache.size >= DOC_LINK_CACHE_MAX) {
+      // Prune the oldest half (Map iterates in insertion order).
+      let drop = cache.size - DOC_LINK_CACHE_MAX / 2;
+      for (const key of cache.keys()) {
+        if (drop-- <= 0) break;
+        cache.delete(key);
+      }
+    }
+    cache.set(line, links);
+    return links ?? undefined;
+  }
+
+  // Populate the shared popover from the clicked line's link and anchor it to
+  // the trigger. stopPropagation so the log-container's own handlers (and the
+  // popover's outside-click dismissal) don't treat this as a dismiss.
+  private _openDoc = (e: MouseEvent, link: LogDocLink) => {
+    e.stopPropagation();
+    const pop = this._docPopover;
+    const target = e.currentTarget;
+    if (!pop || !(target instanceof HTMLElement)) return;
+    const text = docPopoverText(link, this._localize);
+    pop.heading = text.heading;
+    pop.body = text.body;
+    pop.url = link.url;
+    pop.linkLabel = text.linkLabel;
+    void pop.showAt(target);
+  };
 
   private _ignoreNextScroll = false;
 
   private _handleScroll() {
     if (!this._container) return;
+    // ANY scroll — user or streaming auto-scroll — moves lines out from
+    // under an open popover; close it before the programmatic early-return
+    // so it can't hang fixed over an unrelated line.
+    this._docPopover?.hide();
     if (this._ignoreNextScroll) {
       this._ignoreNextScroll = false;
       return;

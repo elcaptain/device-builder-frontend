@@ -31,6 +31,7 @@ import type {
 } from "./types/boards.js";
 import type {
   ComponentCatalogEntry,
+  IntegrationDoc,
   PagedComponentsResponse,
 } from "./types/components.js";
 import type { DesktopUpdateCheck, DesktopUpdateStarted } from "./types/desktop.js";
@@ -1439,27 +1440,43 @@ export class ESPHomeAPI {
   }
 
   /**
-   * Map of integration name → esphome.io docs URL for every
-   * loaded-integration name we can resolve. Names with no docs page
-   * are simply absent from the map; the dashboard renders those as
-   * plain text. Fetched once at app load — the dataset only refreshes
-   * with a backend release.
+   * Map of integration name → its esphome.io docs URL + catalog display
+   * name, for every loaded-integration name we can resolve. Names with
+   * no docs page are simply absent from the map; the dashboard renders
+   * those as plain text. Fetched once at app load — the dataset only
+   * refreshes with a backend release.
    *
    * The WS layer doesn't enforce a shape, so we filter the payload to
-   * the ``{string: string}`` contract here: anything that isn't a
-   * plain object is replaced with ``{}``, and entries with non-string
-   * keys/values are dropped. Consumers can rely on the result being
-   * safe to spread into a context without further validation.
+   * the ``{string: {url, name, description}}`` contract here: anything
+   * that isn't a plain object is replaced with ``{}``, entries whose
+   * value lacks string ``url``/``name`` fields are dropped, and a
+   * missing ``description`` coerces to ``""``. Consumers can rely on
+   * the result being safe to spread into a context without further
+   * validation.
    */
-  async getIntegrationDocs(): Promise<Record<string, string>> {
+  async getIntegrationDocs(): Promise<Record<string, IntegrationDoc>> {
     const raw = await this.sendCommand<unknown>("components/get_integration_docs");
+    // Null-prototype so an untrusted ``__proto__`` / ``constructor`` key
+    // can't pollute the prototype when assigned below.
+    const result: Record<string, IntegrationDoc> = Object.create(null);
     if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-      return {};
+      return result;
     }
-    const result: Record<string, string> = {};
     for (const [key, value] of Object.entries(raw)) {
-      if (typeof key === "string" && typeof value === "string" && value) {
-        result[key] = value;
+      if (typeof key !== "string" || value === null || typeof value !== "object") {
+        continue;
+      }
+      const { url, name, description } = value as {
+        url?: unknown;
+        name?: unknown;
+        description?: unknown;
+      };
+      if (typeof url === "string" && url && typeof name === "string" && name) {
+        result[key] = {
+          url,
+          name,
+          description: typeof description === "string" ? description : "",
+        };
       }
     }
     return result;
