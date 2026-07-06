@@ -35,6 +35,7 @@ import { espHomeStyles } from "../../styles/shared.js";
 import { DialogOpenController } from "../../util/dialog-open-controller.js";
 import { getErrorMessage } from "../../util/error-message.js";
 import { normalizeEspHomeId } from "../../util/esphome-id.js";
+import { formatApiError } from "../../util/format-api-error.js";
 import { renderMarkdown } from "../../util/markdown.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { dispatchAutomationAdded } from "./dispatch-automation-added.js";
@@ -246,10 +247,7 @@ export class ESPHomeAddScriptDialog extends LitElement {
       dispatchAutomationAdded(this, this.yaml, location, yaml_diff);
       this._dialog.open = false;
     } catch (err) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : this._localize("device.automation_save_error");
+      const msg = formatApiError(err, this._localize, "device.automation_save_error");
       this._error = msg;
       notifyError(this._localize("device.automation_save_error"), {
         description: msg,
