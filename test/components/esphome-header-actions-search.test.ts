@@ -23,6 +23,37 @@ describe("header-actions Search item", () => {
     expect(el.shadowRoot!.querySelector(".menu-item-shortcut")).not.toBeNull();
   });
 
+  it("localizes the Ctrl shortcut hint so it can be translated (e.g. STRG)", async () => {
+    const el = await renderOpenHeaderMenu({
+      _localize: (key) => (key === "layout.search_shortcut" ? "Strg K" : key),
+    });
+    expect(el.shadowRoot!.querySelector(".menu-item-shortcut")!.textContent!.trim()).toBe(
+      "Strg K"
+    );
+  });
+
+  it("keeps the ⌘ glyph on Apple platforms, never the localized label", async () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, "userAgentData");
+    Object.defineProperty(navigator, "userAgentData", {
+      value: { platform: "macOS" },
+      configurable: true,
+    });
+    try {
+      const el = await renderOpenHeaderMenu({
+        _localize: (key) => (key === "layout.search_shortcut" ? "Strg K" : key),
+      });
+      expect(
+        el.shadowRoot!.querySelector(".menu-item-shortcut")!.textContent!.trim()
+      ).toBe("⌘K");
+    } finally {
+      if (original) {
+        Object.defineProperty(navigator, "userAgentData", original);
+      } else {
+        Reflect.deleteProperty(navigator, "userAgentData");
+      }
+    }
+  });
+
   it("fires the open-palette event and closes the menu on click", async () => {
     const el = await renderOpenHeaderMenu();
     const listener = vi.fn();
