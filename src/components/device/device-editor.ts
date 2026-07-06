@@ -35,6 +35,7 @@ import {
   saveSplitRatio,
 } from "../../util/split-ratio.js";
 import type { YamlDiagnosticsDetail } from "../../util/yaml-lint-backend.js";
+import { tourAnchor } from "../guided-tour/tour-anchor.js";
 import type { HighlightRange } from "../yaml-editor.js";
 import { renderEditorToolbar } from "./device-editor-toolbar.js";
 import { deviceEditorStyles } from "./device-editor.styles.js";
@@ -251,11 +252,9 @@ export class ESPHomeDeviceEditor extends LitElement {
           <div class="editor-header-main">
             <div class="editor-header-titlerow">
               <h2 class="editor-header-title">${title}</h2>
-              ${
-                this.configuration && !compactHeader
-                  ? html`<span class="editor-header-file">${this.configuration}</span>`
-                  : nothing
-              }
+              ${this.configuration && !compactHeader
+                ? html`<span class="editor-header-file">${this.configuration}</span>`
+                : nothing}
             </div>
           </div>
           ${renderEditorToolbar({
@@ -282,15 +281,14 @@ export class ESPHomeDeviceEditor extends LitElement {
                  hint reachable for mouse users. -->
             <span
               class="validate-button-wrap"
-              title=${
-                this.hasUnsavedEdits
-                  ? this._localize("device.validate_disabled_pending")
-                  : this._localize("device.validate_yaml")
-              }
+              title=${this.hasUnsavedEdits
+                ? this._localize("device.validate_disabled_pending")
+                : this._localize("device.validate_yaml")}
             >
               <button
                 type="button"
                 class="validate-button"
+                ${tourAnchor("validate")}
                 ?disabled=${this.hasUnsavedEdits}
                 @click=${this._onValidate}
               >
@@ -301,28 +299,25 @@ export class ESPHomeDeviceEditor extends LitElement {
             <button
               type="button"
               class="save-button"
+              ${tourAnchor("save")}
               ?disabled=${!this.hasUnsavedEdits || this.saving}
               aria-busy=${this.saving}
               @click=${this._onSave}
               title=${this._localize("device.save_yaml")}
             >
-              ${
-                this.saving
-                  ? html`<wa-spinner></wa-spinner>`
-                  : html`<wa-icon library="mdi" name="content-save"></wa-icon>`
-              }
+              ${this.saving
+                ? html`<wa-spinner></wa-spinner>`
+                : html`<wa-icon library="mdi" name="content-save"></wa-icon>`}
               ${this._localize("device.save")}
             </button>
           </div>
           <div
             class="editor-layout ${layoutClass} ${this._dragging ? "dragging" : ""}"
-            style=${
-              effectiveLayout === "both"
-                ? `grid-template-columns: ${this._splitRatio}fr var(--pane-divider-width) ${1 - this._splitRatio}fr`
-                : ""
-            }
+            style=${effectiveLayout === "both"
+              ? `grid-template-columns: ${this._splitRatio}fr var(--pane-divider-width) ${1 - this._splitRatio}fr`
+              : ""}
           >
-            <div class="editor-pane editor-pane--left">
+            <div class="editor-pane editor-pane--left" ${tourAnchor("central")}>
               <esphome-device-board-info
                 .board=${this.board}
                 .yaml=${this.yaml}
@@ -336,65 +331,57 @@ export class ESPHomeDeviceEditor extends LitElement {
                 @show-yaml-editor=${this._onShowYamlEditor}
               ></esphome-device-board-info>
             </div>
-            ${
-              effectiveLayout === "both"
-                ? html`<div
-                    class="pane-divider ${this._dragging ? "dragging" : ""}"
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label=${this._localize("device.resize_panes")}
-                    aria-valuemin=${Math.round(MIN_SPLIT_RATIO * 100)}
-                    aria-valuemax=${Math.round(MAX_SPLIT_RATIO * 100)}
-                    aria-valuenow=${Math.round(this._splitRatio * 100)}
-                    aria-valuetext=${this._localize("device.resize_panes_value", {
-                      percent: Math.round(this._splitRatio * 100),
-                    })}
-                    tabindex="0"
-                    @pointerdown=${this._onDividerPointerDown}
-                    @keydown=${this._onDividerKeydown}
-                  ></div>`
-                : nothing
-            }
-            <div class="editor-pane editor-pane--right">
-              ${
-                !this._showDiff && this._liveErrors.length > 0
-                  ? html`<div class="danger-banner invalid-banner" role="alert">
-                      <wa-icon library="mdi" name="alert-circle-outline"></wa-icon>
-                      <div class="danger-banner-text">
-                        ${this._liveErrors
-                          .slice(0, MAX_BANNER_ERRORS)
-                          .map((msg) => html`<span>${renderTextLinks(msg)}</span>`)}
-                        ${
-                          this._liveErrors.length > MAX_BANNER_ERRORS
-                            ? html`<span class="invalid-banner-more"
-                                >${this._localize("device.editor_invalid_more", {
-                                  count: this._liveErrors.length - MAX_BANNER_ERRORS,
-                                })}</span
-                              >`
-                            : nothing
-                        }
-                      </div>
-                    </div>`
-                  : nothing
-              }
+            ${effectiveLayout === "both"
+              ? html`<div
+                  class="pane-divider ${this._dragging ? "dragging" : ""}"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label=${this._localize("device.resize_panes")}
+                  aria-valuemin=${Math.round(MIN_SPLIT_RATIO * 100)}
+                  aria-valuemax=${Math.round(MAX_SPLIT_RATIO * 100)}
+                  aria-valuenow=${Math.round(this._splitRatio * 100)}
+                  aria-valuetext=${this._localize("device.resize_panes_value", {
+                    percent: Math.round(this._splitRatio * 100),
+                  })}
+                  tabindex="0"
+                  @pointerdown=${this._onDividerPointerDown}
+                  @keydown=${this._onDividerKeydown}
+                ></div>`
+              : nothing}
+            <div class="editor-pane editor-pane--right" ${tourAnchor("yaml")}>
+              ${!this._showDiff && this._liveErrors.length > 0
+                ? html`<div class="danger-banner invalid-banner" role="alert">
+                    <wa-icon library="mdi" name="alert-circle-outline"></wa-icon>
+                    <div class="danger-banner-text">
+                      ${this._liveErrors
+                        .slice(0, MAX_BANNER_ERRORS)
+                        .map((msg) => html`<span>${renderTextLinks(msg)}</span>`)}
+                      ${this._liveErrors.length > MAX_BANNER_ERRORS
+                        ? html`<span class="invalid-banner-more"
+                            >${this._localize("device.editor_invalid_more", {
+                              count: this._liveErrors.length - MAX_BANNER_ERRORS,
+                            })}</span
+                          >`
+                        : nothing}
+                    </div>
+                  </div>`
+                : nothing}
               <div class="editor-pane-body">
-                ${
-                  this._showDiff
-                    ? html`<esphome-yaml-diff
-                        .oldValue=${this.savedYaml}
-                        .newValue=${this.yaml}
-                      ></esphome-yaml-diff>`
-                    : html`<esphome-yaml-editor
-                        .value=${this.yaml}
-                        .configuration=${this.configuration}
-                        .board=${this.board}
-                        .highlightRange=${this.highlightRange}
-                        .scrollToHighlight=${this.scrollToHighlight}
-                        .revealSensitive=${this._revealSensitive}
-                        @yaml-change=${this._onYamlChange}
-                        @yaml-diagnostics=${this._onYamlDiagnostics}
-                      ></esphome-yaml-editor>`
-                }
+                ${this._showDiff
+                  ? html`<esphome-yaml-diff
+                      .oldValue=${this.savedYaml}
+                      .newValue=${this.yaml}
+                    ></esphome-yaml-diff>`
+                  : html`<esphome-yaml-editor
+                      .value=${this.yaml}
+                      .configuration=${this.configuration}
+                      .board=${this.board}
+                      .highlightRange=${this.highlightRange}
+                      .scrollToHighlight=${this.scrollToHighlight}
+                      .revealSensitive=${this._revealSensitive}
+                      @yaml-change=${this._onYamlChange}
+                      @yaml-diagnostics=${this._onYamlDiagnostics}
+                    ></esphome-yaml-editor>`}
               </div>
             </div>
           </div>
