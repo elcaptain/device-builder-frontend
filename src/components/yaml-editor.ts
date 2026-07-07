@@ -2,7 +2,7 @@ import { autocompletion } from "@codemirror/autocomplete";
 import { indentWithTab, undoDepth } from "@codemirror/commands";
 import { indentUnit } from "@codemirror/language";
 import { forceLinting } from "@codemirror/lint";
-import { StateEffect, StateField } from "@codemirror/state";
+import { StateEffect, StateField, type Text } from "@codemirror/state";
 import { Decoration, keymap, type DecorationSet } from "@codemirror/view";
 import { consume } from "@lit/context";
 import { indentationMarkers } from "@replit/codemirror-indentation-markers";
@@ -34,12 +34,15 @@ import { createYamlHoverTooltip } from "../util/yaml-hover.js";
 import {
   blankLineContext,
   fieldPathByIndent,
+  indentOf,
   keyPathByIndent,
+  parseListItemMarker,
 } from "../util/yaml-line-walker.js";
 import {
   createBackendYamlLinter,
   lintErrorLineGutter,
   relintEffect,
+  type YamlAutoFix,
   type YamlDiagnosticsDetail,
 } from "../util/yaml-lint-backend.js";
 import type { YamlSection } from "../util/yaml-sections.js";
@@ -51,6 +54,10 @@ import { yamlStickyScroll } from "../util/yaml-sticky-scroll.js";
 import { CodeMirrorEditorElement } from "./codemirror-editor-element.js";
 
 export type HighlightRange = Pick<YamlSection, "fromLine" | "toLine">;
+
+/** Result of an auto-fix attempt: applied, user-declined, a stale/no-target
+ *  no-op (the doc shifted since the banner), or an unreachable defensive bail. */
+export type AutoFixOutcome = "applied" | "declined" | "stale" | "unavailable";
 
 // Delay before an at-rest caret opens the completion popup for discovery.
 const IDLE_COMPLETION_DELAY_MS = 1500;
@@ -504,6 +511,7 @@ export class ESPHomeYamlEditor extends CodeMirrorEditorElement {
         createBackendYamlLinter({
           api: this._api,
           getConfiguration: () => this.configuration,
+          localize: this._localize,
           onResult: (errors, mapped, configuration) =>
             this.dispatchEvent(
               new CustomEvent<YamlDiagnosticsDetail>("yaml-diagnostics", {
@@ -548,6 +556,83 @@ export class ESPHomeYamlEditor extends CodeMirrorEditorElement {
     // Remount paths in updated() return before the highlightRange
     // branch, so re-apply a pending highlight (+ scroll) here.
     if (this.highlightRange) this._applyHighlight();
+  }
+
+  /**
+   * Validate a proposed indentation fix, then apply it. When the proposed
+   * document validates cleanly the fix applies straight away; when errors
+   * remain `confirm` decides whether to apply anyway. Applied as a real,
+   * undoable transaction.
+   *
+   * The re-validation is the real safety net against a stale banner: the
+   * `- <key>` re-check (before and after the async step) is a cheap filter,
+   * but the key is often a shared token (`platform`), so validating the
+   * proposed document is what actually catches indenting the wrong item or
+   * double-indenting one already fixed. A validation failure rejects (the
+   * caller surfaces it) rather than silently applying.
+   */
+  async applyIndentFix(
+    fix: YamlAutoFix,
+    confirm?: () => Promise<boolean>
+  ): Promise<AutoFixOutcome> {
+    const view = this._view;
+    if (!view || !this._api || fix.indent <= 0) return "unavailable";
+    // Resolve the target only when it is still the same `- <key>` item that
+    // still needs exactly `fix.indent` — recomputing the delta from its first
+    // property bails on an item the user already fixed by hand (whose key still
+    // matches), so a stale click can't double-indent it.
+    const targetFrom = (): number | null => {
+      const doc = view.state.doc;
+      if (fix.line < 1 || fix.line > doc.lines) return null;
+      const t = doc.line(fix.line);
+      const marker = parseListItemMarker(t.text);
+      if (!marker || marker.key !== fix.key) return null;
+      if (this._firstPropertyDelta(doc, fix.line, marker.contentCol) !== fix.indent) {
+        return null;
+      }
+      return t.from;
+    };
+    const from = targetFrom();
+    if (from === null) return "stale";
+
+    const doc = view.state.doc;
+    const spaces = " ".repeat(fix.indent);
+    const proposed = doc.sliceString(0, from) + spaces + doc.sliceString(from);
+    // A validation failure propagates: don't apply blindly, and let the caller
+    // surface it rather than swallowing the click.
+    const res = await this._api.validateYaml(this.configuration, proposed);
+    // Clean result → just do it; otherwise ask before applying over errors.
+    const clean = !res.yaml_errors?.length && !res.validation_errors?.length;
+    const proceed = clean || (await (confirm?.() ?? Promise.resolve(false)));
+    if (!proceed) return "declined";
+
+    // Re-resolve the target: the doc may have changed while we awaited.
+    const settled = targetFrom();
+    if (settled === null) return "stale";
+    view.dispatch({
+      changes: { from: settled, insert: spaces },
+      scrollIntoView: true,
+    });
+    view.focus();
+    return "applied";
+  }
+
+  /** Indent of the list item's first property line minus `contentCol` (where
+   *  its key starts), or null when the item has no property line — the next
+   *  content is a shallower sibling/dedent (indent below `contentCol`), not a
+   *  property, so it never reports a spurious negative delta. */
+  private _firstPropertyDelta(
+    doc: Text,
+    line: number,
+    contentCol: number
+  ): number | null {
+    for (let n = line + 1; n <= doc.lines; n++) {
+      const text = doc.line(n).text;
+      if (!text.trim() || text.trimStart().startsWith("#")) continue;
+      const indent = indentOf(text);
+      return indent < contentCol ? null : indent - contentCol;
+    }
+    return null;
   }
 
   /** Set (or clear) the highlight mark and scroll it into view. */

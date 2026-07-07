@@ -24,6 +24,7 @@ import {
   type InstanceBackendErrors,
 } from "../../util/backend-field-errors.js";
 import { renderTextLinks } from "../../util/markdown.js";
+import { notifyError, notifyWarning } from "../../util/notify.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { SaveShortcutController } from "../../util/save-shortcut-controller.js";
 import {
@@ -34,8 +35,9 @@ import {
   nextSplitRatioForKey,
   saveSplitRatio,
 } from "../../util/split-ratio.js";
-import type { YamlDiagnosticsDetail } from "../../util/yaml-lint-backend.js";
-import type { HighlightRange } from "../yaml-editor.js";
+import type { BannerError, YamlDiagnosticsDetail } from "../../util/yaml-lint-backend.js";
+import type { ESPHomeConfirmDialog } from "../confirm-dialog.js";
+import type { ESPHomeYamlEditor, HighlightRange } from "../yaml-editor.js";
 import { renderEditorToolbar } from "./device-editor-toolbar.js";
 import { deviceEditorStyles } from "./device-editor.styles.js";
 import { renderInstallAction } from "./install-action.js";
@@ -43,6 +45,7 @@ import { renderInstallAction } from "./install-action.js";
 import "@home-assistant/webawesome/dist/components/button/button.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
+import "../confirm-dialog.js";
 import "../yaml-diff.js";
 import "../yaml-editor.js";
 import "./device-board-info.js";
@@ -201,7 +204,7 @@ export class ESPHomeDeviceEditor extends LitElement {
   /** Live lint error messages from the editor's backend linter. Drives the
    *  "configuration invalid" banner above the editor. */
   @state()
-  private _liveErrors: string[] = [];
+  private _liveErrors: BannerError[] = [];
 
   @state()
   private _splitRatio = loadSplitRatio();
@@ -211,6 +214,12 @@ export class ESPHomeDeviceEditor extends LitElement {
 
   @query(".editor-layout")
   private _layoutEl?: HTMLElement;
+
+  @query("esphome-yaml-editor")
+  private _yamlEditor?: ESPHomeYamlEditor;
+
+  @query("esphome-confirm-dialog.auto-fix-confirm")
+  private _autoFixConfirmDialog?: ESPHomeConfirmDialog;
 
   static styles = [espHomeStyles, dangerBannerStyles, deviceEditorStyles];
 
@@ -361,9 +370,39 @@ export class ESPHomeDeviceEditor extends LitElement {
                   ? html`<div class="danger-banner invalid-banner" role="alert">
                       <wa-icon library="mdi" name="alert-circle-outline"></wa-icon>
                       <div class="danger-banner-text">
-                        ${this._liveErrors
-                          .slice(0, MAX_BANNER_ERRORS)
-                          .map((msg) => html`<span>${renderTextLinks(msg)}</span>`)}
+                        ${this._liveErrors.slice(0, MAX_BANNER_ERRORS).map(
+                          (err) =>
+                            html`<span
+                              >${renderTextLinks(err.message)}${
+                                err.fix
+                                  ? html`
+                                      <button
+                                        type="button"
+                                        class="invalid-banner-goto"
+                                        title=${this._localize("yaml_editor.error_auto_fix_hint")}
+                                        @click=${() => this._autoFix(err.fix!)}
+                                      >
+                                        ${this._localize("yaml_editor.error_auto_fix")}
+                                      </button>
+                                    `
+                                  : nothing
+                              }${
+                                err.line
+                                  ? html`
+                                      <button
+                                        type="button"
+                                        class="invalid-banner-goto"
+                                        @click=${() => this._gotoErrorLine(err.line!)}
+                                      >
+                                        ${this._localize("yaml_editor.error_go_to_line", {
+                                          line: err.line,
+                                        })}
+                                      </button>
+                                    `
+                                  : nothing
+                              }</span
+                            >`
+                        )}
                         ${
                           this._liveErrors.length > MAX_BANNER_ERRORS
                             ? html`<span class="invalid-banner-more"
@@ -399,6 +438,16 @@ export class ESPHomeDeviceEditor extends LitElement {
             </div>
           </div>
         </div>
+        ${
+          this._autoFixConfirmOpen
+            ? html`<esphome-confirm-dialog
+                class="auto-fix-confirm"
+                heading=${this._localize("yaml_editor.auto_fix_confirm_heading")}
+                message=${this._localize("yaml_editor.auto_fix_confirm_message")}
+                confirm-label=${this._localize("yaml_editor.auto_fix_confirm_apply")}
+              ></esphome-confirm-dialog>`
+            : nothing
+        }
       </section>
     `;
   }
@@ -482,13 +531,105 @@ export class ESPHomeDeviceEditor extends LitElement {
     const next = e.detail.errors;
     // The banner is an `aria-live` region — only reassign when the list
     // actually changed so an unchanged lint pass doesn't re-announce it.
+    // Compare the fix too: its payload can change (or appear/disappear) while
+    // a localized message stays the same, and it drives the auto-fix button.
     if (
       next.length === this._liveErrors.length &&
-      next.every((msg, i) => msg === this._liveErrors[i])
+      next.every((err, i) => {
+        const prev = this._liveErrors[i];
+        return (
+          err.message === prev.message &&
+          err.line === prev.line &&
+          err.fix?.line === prev.fix?.line &&
+          err.fix?.indent === prev.fix?.indent &&
+          err.fix?.key === prev.fix?.key
+        );
+      })
     ) {
       return;
     }
     this._liveErrors = next;
+  }
+
+  /** Apply a banner error's one-click indentation repair in the editor. The
+   *  editor validates the proposed edit first and calls back through
+   *  ``_confirmAutoFix`` when the fix parses but other YAML errors remain. */
+  private _autoFix(fix: NonNullable<BannerError["fix"]>) {
+    const editor = this._yamlEditor;
+    if (!editor) {
+      // The button only renders under a mounted editor, so a missing ref is a
+      // wiring bug, not a normal path — surface it rather than a dead click.
+      console.error("[auto-fix] no editor ref");
+      notifyError(this._localize("yaml_editor.auto_fix_failed"));
+      return;
+    }
+    editor
+      .applyIndentFix(fix, () => this._confirmAutoFix())
+      .then((outcome) => {
+        if (outcome === "stale") {
+          // A stale click (the doc shifted since the banner) is a safe no-op,
+          // but say so rather than letting the button look dead.
+          notifyWarning(this._localize("yaml_editor.auto_fix_stale"));
+        } else if (outcome === "unavailable") {
+          // Defensive (no view/api); shouldn't happen, but don't stay silent.
+          console.error("[auto-fix] editor unavailable");
+          notifyError(this._localize("yaml_editor.auto_fix_failed"));
+        }
+      })
+      .catch((err: unknown) => {
+        // A validation round-trip failure (WS drop, server error), or the
+        // confirm dialog failing to mount, must not leave the click ignored.
+        console.error("[auto-fix] could not run:", err);
+        notifyError(this._localize("yaml_editor.auto_fix_failed"));
+      });
+  }
+
+  /** Mounts the confirm dialog only while a prompt is pending — its
+   *  form-associated buttons are expensive to instantiate otherwise. */
+  @state()
+  private _autoFixConfirmOpen = false;
+
+  /** Open the "errors remain" prompt and resolve with the user's choice. A
+   *  second call while a prompt is already up declines rather than opening a
+   *  competing dialog. */
+  private async _confirmAutoFix(): Promise<boolean> {
+    if (this._autoFixConfirmOpen) return false;
+    this._autoFixConfirmOpen = true;
+    await this.updateComplete;
+    const dialog = this._autoFixConfirmDialog;
+    if (!dialog) {
+      this._autoFixConfirmOpen = false;
+      // A missing dialog is a wiring/timing bug, not a user decision — throw so
+      // the caller surfaces it instead of silently treating it as a decline.
+      throw new Error("auto-fix confirm dialog failed to mount");
+    }
+    try {
+      return await new Promise<boolean>((resolve) => {
+        const settle = (apply: boolean) => {
+          dialog.removeEventListener("confirm", onConfirm);
+          dialog.removeEventListener("cancel", onCancel);
+          resolve(apply);
+        };
+        const onConfirm = () => settle(true);
+        const onCancel = () => settle(false);
+        dialog.addEventListener("confirm", onConfirm);
+        dialog.addEventListener("cancel", onCancel);
+        dialog.open();
+      });
+    } finally {
+      this._autoFixConfirmOpen = false;
+    }
+  }
+
+  /** Ask the page to highlight and scroll to a banner error's line. */
+  private _gotoErrorLine(line: number) {
+    this.dispatchEvent(
+      new CustomEvent("goto-line", {
+        detail: { line },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   private _setLayout(layout: DeviceLayoutMode) {
