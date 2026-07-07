@@ -84,3 +84,74 @@ describe("esphome-base-dialog confirmOnEnter", () => {
     expect(confirmOnEnter).not.toHaveBeenCalled();
   });
 });
+
+describe("esphome-base-dialog [autofocus]", () => {
+  // The stubbed wa-dialog never animates, so fire the hook the real one
+  // dispatches once fully shown.
+  function fireAfterShow(el: ESPHomeBaseDialog): void {
+    el.shadowRoot!.querySelector("wa-dialog")!.dispatchEvent(
+      new CustomEvent("wa-after-show")
+    );
+  }
+
+  it("focuses and selects the marked input after the dialog shows", async () => {
+    const el = await mount(new ESPHomeBaseDialog());
+    const input = document.createElement("input");
+    input.setAttribute("autofocus", "");
+    input.value = "prefilled";
+    el.appendChild(input);
+    el.open = true;
+    await el.updateComplete;
+    fireAfterShow(el);
+    expect(document.activeElement).toBe(input);
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe("prefilled".length);
+  });
+
+  it("does nothing without an [autofocus] child", async () => {
+    const el = await mount(new ESPHomeBaseDialog());
+    const input = document.createElement("input");
+    el.appendChild(input);
+    el.open = true;
+    await el.updateComplete;
+    fireAfterShow(el);
+    expect(document.activeElement).not.toBe(input);
+  });
+
+  it("ignores a stray after-show while closed", async () => {
+    const el = await mount(new ESPHomeBaseDialog());
+    const input = document.createElement("input");
+    input.setAttribute("autofocus", "");
+    el.appendChild(input);
+    await el.updateComplete;
+    fireAfterShow(el);
+    expect(document.activeElement).not.toBe(input);
+  });
+
+  it("ignores a nested dialog's after-show bubbling through the slot", async () => {
+    const el = await mount(new ESPHomeBaseDialog());
+    const input = document.createElement("input");
+    input.setAttribute("autofocus", "");
+    el.appendChild(input);
+    // Stands in for a stacked inner wa-dialog living in slotted content;
+    // its after-show bubbles up to the wrapper's own wa-dialog listener.
+    const nested = document.createElement("div");
+    el.appendChild(nested);
+    el.open = true;
+    await el.updateComplete;
+    nested.dispatchEvent(new CustomEvent("wa-after-show", { bubbles: true }));
+    expect(document.activeElement).not.toBe(input);
+  });
+
+  it("focuses a non-text input without attempting select()", async () => {
+    const el = await mount(new ESPHomeBaseDialog());
+    const input = document.createElement("input");
+    input.type = "number";
+    input.setAttribute("autofocus", "");
+    el.appendChild(input);
+    el.open = true;
+    await el.updateComplete;
+    fireAfterShow(el); // must not throw (select() is illegal on number)
+    expect(document.activeElement).toBe(input);
+  });
+});

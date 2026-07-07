@@ -177,6 +177,38 @@ export class ESPHomeBaseDialog extends LitElement {
     }
   }
 
+  // Focus a consumer-marked ``[autofocus]`` control once the dialog has
+  // fully shown. wa-dialog performs this lookup itself, but only against
+  // its own light DOM — which is just our forwarding slot — so slotted
+  // dialog content is never found and a show-time rAF focuses the modal
+  // <dialog> panel instead. That rAF runs after any focus we could set
+  // during the open update (verified in a live session: the panel ends
+  // up focused and early keystrokes go nowhere), so the one hook
+  // guaranteed to run after wa-dialog is completely done is
+  // ``wa-after-show``.
+  private _onWaAfterShow = (e: Event): void => {
+    // Same nested-wa-dialog leak as the hide handlers: a stacked inner
+    // dialog's ``wa-after-show`` bubbles up here and would re-focus our
+    // own ``[autofocus]`` control, stealing focus from the inner dialog.
+    if (e.target !== e.currentTarget) return;
+    if (!this.open) return;
+    const el = this.querySelector<HTMLElement>("[autofocus]");
+    if (!el) return;
+    el.focus();
+    // Select-all so typing replaces a prefilled value (rename opens with
+    // the current name; a fresh field selects nothing). ``select()``
+    // throws on input types without selection ranges (number, date, …),
+    // so gate on the text-like types.
+    if (el instanceof HTMLTextAreaElement) {
+      el.select();
+    } else if (
+      el instanceof HTMLInputElement &&
+      /^(?:text|search|url|tel|password)$/.test(el.type)
+    ) {
+      el.select();
+    }
+  };
+
   private _onWaHide = (e: Event): void => {
     // wa-dialog fires the cancelable ``wa-hide`` to request a
     // close (Escape / X / outside-click / reactive ?open flip);
@@ -227,6 +259,7 @@ export class ESPHomeBaseDialog extends LitElement {
         ?open=${this.open}
         ?light-dismiss=${!this.busy}
         @wa-hide=${this._onWaHide}
+        @wa-after-show=${this._onWaAfterShow}
         @wa-after-hide=${this._onWaAfterHide}
       >
         <header slot="label" part="label-row">
