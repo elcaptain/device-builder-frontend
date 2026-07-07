@@ -73,6 +73,13 @@ export class ESPHomePairBuildServerDialog extends LitElement {
   @state() _previewedPin = "";
   @state() _receiverLabel = "";
   @state() _offloaderLabel = "";
+  // One-time pairing key from a headless build server's console banner.
+  @state() _pairingKey = "";
+  // Set from the preview response: true when the receiver has an armed
+  // key-gated bootstrap window, so the confirm step shows + requires the
+  // key field. A normal dashboard receiver reports false and the field
+  // stays hidden.
+  @state() _pairingKeyRequired = false;
   @state() _error: string | null = null;
   @state() _open = false;
 
@@ -145,6 +152,8 @@ export class ESPHomePairBuildServerDialog extends LitElement {
       prefill?.receiverLabel?.trim() || friendlyHostname(this._hostname);
     this._receiverLabelTouched = false;
     this._offloaderLabel = friendlyHostname(window.location.hostname);
+    this._pairingKey = "";
+    this._pairingKeyRequired = false;
     this._error = null;
     this._sentKey = null;
     this._offloaderIdentity = null;
@@ -177,12 +186,17 @@ export class ESPHomePairBuildServerDialog extends LitElement {
 
   close = (): void => {
     this._open = false;
+    // Drop the typed one-time key so it doesn't linger in component state
+    // or the hidden shadow-DOM input after the dialog closes (render() is
+    // gated on _step, not _open, so the confirm step stays mounted).
+    this._pairingKey = "";
   };
 
   private _onAfterHide = (): void => {
     // wa-dialog finished hiding (after Esc / outside-click / X). Flip the
     // local open flag so the next render's ?open binding matches.
     this._open = false;
+    this._pairingKey = "";
   };
 
   protected willUpdate(changed: Map<string, unknown>): void {

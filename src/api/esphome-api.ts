@@ -108,6 +108,7 @@ function redactForLog(payload: unknown): unknown {
   const containsSecret =
     (command !== null && command.startsWith("auth")) ||
     command === "config/set_secret" ||
+    command === "remote_build/request_pair" ||
     "token" in obj ||
     "password" in obj ||
     (result !== null && ("token" in result || "password" in result));
@@ -120,10 +121,12 @@ function redactForLog(payload: unknown): unknown {
     const safeArgs: Record<string, unknown> = { ...args };
     if ("token" in safeArgs) safeArgs.token = "<redacted>";
     if ("password" in safeArgs) safeArgs.password = "<redacted>";
-    // config/set_secret carries the secret in ``value``.
+    // config/set_secret carries the secret in ``value``; the
+    // remote-build pair request carries the one-time key in ``pairing_key``.
     if (command === "config/set_secret" && "value" in safeArgs) {
       safeArgs.value = "<redacted>";
     }
+    if ("pairing_key" in safeArgs) safeArgs.pairing_key = "<redacted>";
     clone.args = safeArgs;
   }
   if (result !== null) {
@@ -2019,8 +2022,11 @@ export class ESPHomeAPI {
   async previewRemoteBuildPair(args: {
     hostname: string;
     port: number;
-  }): Promise<{ pin_sha256: string }> {
-    return this.sendCommand<{ pin_sha256: string }>("remote_build/preview_pair", args);
+  }): Promise<{ pin_sha256: string; requires_pairing_key?: boolean }> {
+    return this.sendCommand<{ pin_sha256: string; requires_pairing_key?: boolean }>(
+      "remote_build/preview_pair",
+      args
+    );
   }
 
   /**
@@ -2043,6 +2049,14 @@ export class ESPHomeAPI {
    * sent to the receiver in msg3 for *their* pairing-requests
    * inbox.
    *
+   * ``pairing_key`` is the one-time pairing key a headless
+   * ``--remote-build-only`` build server prints on its console;
+   * it rides in the encrypted msg3 and is only sent after the
+   * receiver's static key matched ``pin_sha256``. Omit it when
+   * pairing a normal dashboard receiver. A wrong key surfaces as
+   * ``NO_PAIRING_WINDOW`` (the receiver deliberately doesn't
+   * distinguish the two).
+   *
    * Errors:
    * - ``ErrorCode.PRECONDITION_FAILED`` — pin mismatch (TOCTOU
    *   between preview and confirm) or receiver-side REJECTED.
@@ -2061,6 +2075,7 @@ export class ESPHomeAPI {
     pin_sha256: string;
     receiver_label: string;
     offloader_label: string;
+    pairing_key?: string;
   }): Promise<PairingSummary> {
     return this.sendCommand<PairingSummary>("remote_build/request_pair", args);
   }

@@ -20,6 +20,7 @@ function makeHost(
     error?: string | null;
     busy?: boolean;
     sending?: boolean;
+    pairingKeyRequired?: boolean;
   } = {}
 ): ESPHomePairBuildServerDialog {
   return {
@@ -31,6 +32,8 @@ function makeHost(
     _port: "6055",
     _receiverLabel: "buildbox",
     _offloaderLabel: "ha-green",
+    _pairingKey: "",
+    _pairingKeyRequired: opts.pairingKeyRequired ?? false,
     _error: opts.error ?? null,
     _skippedInput: opts.skippedInput ?? false,
     _onConfirmBack: () => {},
@@ -85,5 +88,16 @@ describe("renderConfirmStep", () => {
   it("renders the error banner when an error is set", () => {
     const tree = renderConfirmStep(makeHost({ pin: "abc", error: "boom" }));
     expect(allValues(tree)).toContain("boom");
+  });
+
+  it("hides the pairing-key field when the receiver doesn't require it", () => {
+    const tree = renderConfirmStep(makeHost({ pin: "abc", pairingKeyRequired: false }));
+    expect(findTemplatesByAnchor(tree, 'id="pair-pairing-key"')).toHaveLength(0);
+  });
+
+  it("shows the pairing-key field when the receiver requires it", () => {
+    const tree = renderConfirmStep(makeHost({ pin: "abc", pairingKeyRequired: true }));
+    expect(findTemplatesByAnchor(tree, 'id="pair-pairing-key"')).toHaveLength(1);
+    expect(allValues(tree)).toContain("settings.pair_build_server_pairing_key_label");
   });
 });

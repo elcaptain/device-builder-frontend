@@ -125,7 +125,8 @@ export function renderConfirmStep(host: ESPHomePairBuildServerDialog): TemplateR
     !host._busy &&
     host._previewedPin !== "" &&
     host._receiverLabel.trim().length > 0 &&
-    host._offloaderLabel.trim().length > 0;
+    host._offloaderLabel.trim().length > 0 &&
+    (!host._pairingKeyRequired || host._pairingKey.trim().length > 0);
   return html`
     <div class="description">
       ${host._localize("settings.pair_build_server_confirm_desc")}
@@ -164,6 +165,40 @@ export function renderConfirmStep(host: ESPHomePairBuildServerDialog): TemplateR
     <div class="trust-warning" role="alert">
       ${host._localize("settings.pair_build_server_trust_warning")}
     </div>
+    <!-- Shown only when the preview reported the receiver needs the
+         bootstrap key (a headless build server in its pairing window), so
+         a normal dashboard pair never sees this field. -->
+    ${
+      host._pairingKeyRequired
+        ? html`
+            <div class="field">
+              <label for="pair-pairing-key">
+                ${host._localize("settings.pair_build_server_pairing_key_label")}
+              </label>
+              <input
+                id="pair-pairing-key"
+                type="text"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                ?disabled=${host._busy}
+                .value=${host._pairingKey}
+                placeholder=${host._localize(
+                  "settings.pair_build_server_pairing_key_placeholder"
+                )}
+                @input=${(e: Event) => {
+                  host._pairingKey = (e.target as HTMLInputElement).value;
+                  host._error = null;
+                }}
+              />
+              <span class="helper">
+                ${host._localize("settings.pair_build_server_pairing_key_helper")}
+              </span>
+            </div>
+          `
+        : nothing
+    }
     <div class="field">
       <label for="pair-receiver-label">
         ${host._localize("settings.pair_build_server_receiver_label_label")}

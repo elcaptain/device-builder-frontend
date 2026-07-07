@@ -72,6 +72,13 @@ export async function onPreviewSubmit(host: ESPHomePairBuildServerDialog): Promi
     const response = await host._api.previewRemoteBuildPair({ hostname, port });
     if (host._previewGeneration !== generation) return;
     host._previewedPin = response.pin_sha256;
+    // A fresh preview is a fresh receiver identity: drop any key typed for a
+    // previous target so it can never be sent to a different receiver (e.g.
+    // Back from a headless confirm, then pair a normal dashboard).
+    host._pairingKey = "";
+    // A headless build server in its bootstrap window reports it needs the
+    // console key, so the confirm step can require it up front.
+    host._pairingKeyRequired = response.requires_pairing_key === true;
     host._step = "confirm";
   } catch (err) {
     if (host._previewGeneration !== generation) return;
@@ -99,6 +106,13 @@ export async function onConfirmSubmit(host: ESPHomePairBuildServerDialog): Promi
     host._error = host._localize("settings.pair_build_server_label_required");
     return;
   }
+  const pairingKey = host._pairingKey.trim();
+  // Enter bypasses the button's canSubmit gate, so re-check the required key
+  // here too — otherwise a headless pair would send keyless and be refused.
+  if (host._pairingKeyRequired && !pairingKey) {
+    host._error = host._localize("settings.pair_build_server_pairing_key_required");
+    return;
+  }
   host._busy = true;
   // The mutating send: veto dismissal until it resolves (don't orphan it).
   host._sending = true;
@@ -110,8 +124,12 @@ export async function onConfirmSubmit(host: ESPHomePairBuildServerDialog): Promi
       pin_sha256: host._previewedPin,
       receiver_label: receiverLabel,
       offloader_label: offloaderLabel,
+      ...(pairingKey ? { pairing_key: pairingKey } : {}),
     });
     host._step = "sent";
+    // The key was consumed by the send; drop it so it doesn't linger in
+    // state while the dialog sits on the terminal "sent" step.
+    host._pairingKey = "";
     // Pin the auto-close watch key. summary.pin_sha256 is the stable
     // cryptographic identity the backend's _pairings dict and app-shell's
     // _buildOffloadPairings both key on (4a-o part 6 — pin-keyed state).
