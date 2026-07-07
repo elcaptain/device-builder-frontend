@@ -1,8 +1,29 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import type { ESPHomeAPI } from "../api/index.js";
-import type { SerialPort } from "../api/types/system.js";
+import type { SerialPort, SerialPortHint } from "../api/types/system.js";
 
 export const SERIAL_PORTS_POLL_INTERVAL_MS = 5000;
+
+const HINT_RANK: Record<SerialPortHint, number> = { esp: 0, bridge: 1 };
+
+const hintRank = (p: SerialPort) => (p.hint !== null ? HINT_RANK[p.hint] : 2);
+
+/** Numeric-aware so COM2 sorts before COM10 (same shape as
+ *  DEVICE_SORT_COLLATOR in device-sort.ts). */
+const PORT_COLLATOR = new Intl.Collator(undefined, {
+  sensitivity: "base",
+  numeric: true,
+});
+
+/**
+ * Likely ESP candidates first: Espressif native-USB ports, then known
+ * USB-UART bridges, then everything else; path order within a tier.
+ */
+export function sortSerialPorts(ports: SerialPort[]): SerialPort[] {
+  return [...ports].sort(
+    (a, b) => hintRank(a) - hintRank(b) || PORT_COLLATOR.compare(a.port, b.port)
+  );
+}
 
 /**
  * Reactive controller that polls ``config/serial_ports`` while a
@@ -88,7 +109,8 @@ export class SerialPortsPollController implements ReactiveController {
     }
   }
 
-  private _apply(ports: SerialPort[]) {
+  private _apply(unsorted: SerialPort[]) {
+    const ports = sortSerialPorts(unsorted);
     const paths = new Set(ports.map((p) => p.port));
     // A port absent from the previous fetch is new, and stays flagged
     // while present; pruning unplugged ports lets a replug re-flag.
@@ -102,7 +124,12 @@ export class SerialPortsPollController implements ReactiveController {
       this.error !== null ||
       ports.length !== this.ports.length ||
       ports.some(
-        (p, i) => p.port !== this.ports[i].port || p.desc !== this.ports[i].desc
+        (p, i) =>
+          p.port !== this.ports[i].port ||
+          p.desc !== this.ports[i].desc ||
+          p.vid !== this.ports[i].vid ||
+          p.pid !== this.ports[i].pid ||
+          p.hint !== this.ports[i].hint
       ) ||
       fresh.size !== this.newPorts.size ||
       [...fresh].some((path) => !this.newPorts.has(path));
