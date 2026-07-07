@@ -1,0 +1,99 @@
+import { consume } from "@lit/context";
+import { LitElement, css, html } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
+
+import type { LocalizeFunc } from "../../common/localize.js";
+import { localizeContext } from "../../context/index.js";
+import { espHomeStyles } from "../../styles/shared.js";
+import { isWebSerialSupported } from "../../util/web-serial.js";
+import type { WebMode } from "../web-mode.js";
+import "./esphome-web-esp-connect-card.js";
+import "./esphome-web-pico-connect-card.js";
+import "./esphome-web-unsupported-card.js";
+
+/**
+ * ESPHome Web landing page: the connect card for the active device family (or
+ * the unsupported-browser card) plus the introductory copy explaining what
+ * the site is. Backend-free — everything below runs over Web Serial.
+ */
+@customElement("esphome-web-dashboard")
+export class ESPHomeWebDashboard extends LitElement {
+  @property() mode: WebMode = "esp";
+
+  @consume({ context: localizeContext, subscribe: true })
+  @state()
+  private _localize: LocalizeFunc = (key) => key;
+
+  private _renderConnectCard() {
+    if (!isWebSerialSupported()) {
+      return html`<esphome-web-unsupported-card></esphome-web-unsupported-card>`;
+    }
+    return this.mode === "pico"
+      ? html`<esphome-web-pico-connect-card></esphome-web-pico-connect-card>`
+      : html`<esphome-web-esp-connect-card></esphome-web-esp-connect-card>`;
+  }
+
+  protected render() {
+    const isPico = this.mode === "pico";
+    return html`
+      <div class="container">
+        ${this._renderConnectCard()}
+        <div class="intro">
+          <p><b>${this._localize("web.intro.welcome")}</b></p>
+          <p>
+            ${
+              isPico
+                ? this._localize("web.intro.body_pico")
+                : this._localize("web.intro.body_esp")
+            }
+          </p>
+          <p>${this._localize("web.intro.privacy")}</p>
+          <p>${this._localize("web.intro.lite")}</p>
+          <p>
+            <a
+              href="https://esphome.io/guides/getting_started_hassio.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              >${this._localize("web.intro.get_esphome")}</a
+            >
+          </p>
+        </div>
+      </div>
+    `;
+  }
+
+  static styles = [
+    espHomeStyles,
+    css`
+      .container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--wa-space-xl);
+        width: 90%;
+        max-width: 30rem;
+        margin: var(--wa-space-2xl) auto;
+      }
+      .container > * {
+        width: 100%;
+      }
+      .intro {
+        color: var(--wa-color-text-normal);
+        line-height: var(--wa-line-height-normal);
+      }
+      .intro a {
+        color: var(--esphome-primary);
+        text-decoration: none;
+      }
+      .intro a:hover {
+        text-decoration: underline;
+      }
+    `,
+  ];
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "esphome-web-dashboard": ESPHomeWebDashboard;
+  }
+}

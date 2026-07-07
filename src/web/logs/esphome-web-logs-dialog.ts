@@ -1,0 +1,202 @@
+import { consume } from "@lit/context";
+import { mdiDeleteSweep, mdiDownload, mdiRestart } from "@mdi/js";
+import { LitElement, css, html } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
+import toast from "sonner-js";
+
+import type { LocalizeFunc } from "../../common/localize.js";
+import {
+  fillTerminalOnMobile,
+  termButtonStyles,
+  termTokens,
+} from "../../components/process-terminal/process-terminal.styles.js";
+import { renderTermButton } from "../../components/process-terminal/toolbar-button.js";
+import { localizeContext } from "../../context/index.js";
+import { downloadAnsiText } from "../../util/download-text.js";
+import { registerMdiIcons } from "../../util/register-icons.js";
+import { streamSerialLines } from "../../util/serial-log-stream.js";
+
+import "../../components/base-dialog.js";
+import "../../components/process-terminal/process-terminal.js";
+
+registerMdiIcons({
+  restart: mdiRestart,
+  download: mdiDownload,
+  "delete-sweep": mdiDeleteSweep,
+});
+
+// Hard cap on retained log lines, mirroring the dashboard logs dialog: a
+// garbage-flooding device can emit faster than the view renders.
+const MAX_LOG_LINES = 10000;
+
+// ESPHome logs over UART default to 115200 baud. The dashboard resolves a
+// per-device override from config; ESPHome Web has no device config, so the
+// default is all that applies.
+const LOG_BAUD_RATE = 115200;
+
+/**
+ * Serial log viewer for ESPHome Web.
+ *
+ * Reuses the dashboard's ``process-terminal`` display but drives it from a
+ * plain Web Serial reader instead of the backend logs WS — no ``apiContext``,
+ * no OTA source. It owns the port for the dialog's lifetime: opened when the
+ * dialog opens, closed on ``after-hide``.
+ */
+@customElement("esphome-web-logs-dialog")
+export class ESPHomeWebLogsDialog extends LitElement {
+  /** Authorized (closed) serial port to stream from. */
+  @property({ attribute: false }) port?: SerialPort;
+
+  /** Reactive open flag, driven by the parent device card. */
+  @property({ type: Boolean }) open = false;
+
+  /** Human label used in the dialog title and the download filename. */
+  @property() deviceLabel = "";
+
+  @consume({ context: localizeContext, subscribe: true })
+  @state()
+  private _localize: LocalizeFunc = (key) => key;
+
+  @state() private _lines: string[] = [];
+  @state() private _streaming = false;
+
+  private _cancel?: () => void;
+
+  protected updated(changed: Map<string, unknown>): void {
+    if (changed.has("open")) {
+      if (this.open) {
+        void this._start();
+      } else {
+        this._stop();
+      }
+    }
+  }
+
+  private async _start(): Promise<void> {
+    if (!this.port || this._cancel) return;
+    this._lines = [];
+    try {
+      await this.port.open({ baudRate: LOG_BAUD_RATE });
+    } catch (err) {
+      toast.error(
+        this._localize("web.logs.open_failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      );
+      this.dispatchEvent(new CustomEvent("after-hide", { bubbles: true }));
+      return;
+    }
+    this._streaming = true;
+    // Shared reader: same ESPHome log formatting / timestamps / garbage
+    // filtering as the dashboard's post-install serial logs. The cancel it
+    // returns also closes the port.
+    this._cancel = streamSerialLines(this.port, {
+      onLine: (line) => this._appendLine(line),
+    });
+  }
+
+  private _stop(): void {
+    this._streaming = false;
+    const cancel = this._cancel;
+    this._cancel = undefined;
+    cancel?.();
+  }
+
+  private _appendLine(line: string): void {
+    const merged = [...this._lines, line];
+    this._lines = merged.length > MAX_LOG_LINES ? merged.slice(-MAX_LOG_LINES) : merged;
+  }
+
+  // Pulse DTR/RTS to reboot the running app so the user can capture boot
+  // logs, matching the legacy ewt-console reset. Best-effort — some USB
+  // bridges don't wire the reset lines.
+  private async _resetDevice(): Promise<void> {
+    if (!this.port) return;
+    try {
+      await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
+    } catch {
+      toast.error(this._localize("web.logs.reset_failed"));
+    }
+  }
+
+  private _download(): void {
+    const stem = this.deviceLabel || "esphome-web";
+    downloadAnsiText(this._lines, `${stem}-logs.txt`);
+  }
+
+  private _clear(): void {
+    this._lines = [];
+  }
+
+  private _onAfterHide(): void {
+    this._stop();
+    this._lines = [];
+    this.dispatchEvent(new CustomEvent("after-hide", { bubbles: true }));
+  }
+
+  protected render() {
+    const label = this.deviceLabel
+      ? this._localize("web.logs.title_named", { name: this.deviceLabel })
+      : this._localize("web.logs.title");
+    return html`
+      <esphome-base-dialog
+        .label=${label}
+        ?open=${this.open}
+        @after-hide=${this._onAfterHide}
+      >
+        <esphome-process-terminal
+          variant="stream"
+          .lines=${this._lines}
+          .streaming=${this._streaming}
+          placeholder=${this._localize("web.logs.waiting")}
+        >
+          <div class="toolbar-slot" slot="toolbar-right">
+            ${renderTermButton({
+              icon: "restart",
+              label: this._localize("web.logs.reset_device"),
+              onClick: () => void this._resetDevice(),
+            })}
+            ${renderTermButton({
+              icon: "download",
+              title: this._localize("web.logs.download"),
+              onClick: () => this._download(),
+            })}
+            ${renderTermButton({
+              icon: "delete-sweep",
+              title: this._localize("web.logs.clear"),
+              onClick: () => this._clear(),
+            })}
+          </div>
+        </esphome-process-terminal>
+      </esphome-base-dialog>
+    `;
+  }
+
+  static styles = [
+    termTokens,
+    termButtonStyles,
+    fillTerminalOnMobile,
+    css`
+      esphome-base-dialog {
+        --width: 60rem;
+      }
+      esphome-process-terminal {
+        display: block;
+        height: min(70vh, 40rem);
+      }
+      .toolbar-slot {
+        display: flex;
+        gap: var(--wa-space-2xs);
+        align-items: center;
+      }
+    `,
+  ];
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "esphome-web-logs-dialog": ESPHomeWebLogsDialog;
+  }
+}

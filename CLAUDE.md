@@ -247,6 +247,21 @@ for the full flow. The load-bearing rules:
 | `src/context/contexts.ts` | Lit context definitions (provided by `app-shell`, consumed everywhere) |
 | `src/translations/en.json` | English source-of-truth copy |
 | `test/api/esphome-api.test.ts` | Typed-wrapper tests; canonical pattern for new API methods |
+| `src/web/` | Standalone **ESPHome Web** site (web.esphome.io) — see below |
+
+## ESPHome Web (standalone site)
+
+`src/web/` is a **second, backend-free build target** — the browser-only Web
+Serial tool published to web.esphome.io (`npm run dev:web` / `npm run
+build:web` → `esphome_web/`, deployed by
+`.github/workflows/deploy-web.yml`). It reuses this repo's design system,
+`src/util/web-serial.ts` (esptool-js flash engine), `process-terminal` /
+`base-dialog`, and localization, but has **no WebSocket, auth, or API** — its
+shell (`esphome-web-app`) provides only the `localize` + `darkMode` contexts.
+Elements are prefixed `esphome-web-*`; new copy goes in `en.json` under
+`web.*`. The lockstep deployment rules above concern the wheel dashboard ↔
+backend; ESPHome Web instead talks to hardware over USB and fetches adoption
+firmware from firmware.esphome.io.
 
 ## Things not to do
 

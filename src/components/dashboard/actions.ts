@@ -7,8 +7,8 @@ import { withBase } from "../../util/base-path.js";
 import { fetchBoard } from "../../util/board-body-cache.js";
 import { downloadBlob } from "../../util/download-text.js";
 import { getErrorMessage } from "../../util/error-message.js";
-import { ESPHomeLogParser, isLikelyGarbageLine } from "../../util/esphome-log-parser.js";
 import { notifyError, notifySuccess, type NotifyOptions } from "../../util/notify.js";
+import { streamSerialLines } from "../../util/serial-log-stream.js";
 import {
   connectToPort,
   detectChip,
@@ -385,122 +385,27 @@ export async function fetchApiKey(
 }
 
 /**
- * Format a wall-clock ``[HH:MM:SS]`` prefix to prepend to a serial
- * log line. ESPHome firmware emits ``[LEVEL][component:line]: msg``
- * over UART without a timestamp; the Python ``esphome logs`` CLI
- * stamps the receive time as the line arrives so the dashboard's
- * log pane has a time anchor. The Web Serial path bypasses that
- * CLI, so we mirror the same prefix here (#338).
- *
- * Format and time source match esphome/dashboard's
- * ``TimestampTransformer`` (``src/util/timestamp-transformer.ts``):
- * second resolution (no milliseconds), local wall clock, no space
- * between the timestamp and the level marker.
- */
-function formatSerialTimestamp(now: Date): string {
-  const hh = String(now.getHours()).padStart(2, "0");
-  const mm = String(now.getMinutes()).padStart(2, "0");
-  const ss = String(now.getSeconds()).padStart(2, "0");
-  return `[${hh}:${mm}:${ss}]`;
-}
-
-/**
  * Pipe a Web Serial port into the logs dialog's line buffer.
  *
- * Returns a cancel function the dialog stores and calls on
- * close / openPassive (to stop a previous session before starting
- * a new one). Without that hook the read loop survived dialog
- * closes and bled output from a previous serial port into the
- * next session — a Copilot find on PR #68.
+ * A thin adapter over the shared ``streamSerialLines`` reader (which owns the
+ * read loop, ESPHome log formatting, timestamps, and garbage filtering — see
+ * ``util/serial-log-stream.ts``); this only routes each finished line to the
+ * dialog, honouring the display-only Stop *pause* gate. The reader keeps
+ * draining while paused so resuming needn't reopen the port and pulse DTR/RTS,
+ * which reboots the device (#526).
  *
- * The returned cancel stops the read loop AND closes the port (releasing the
- * reader lock first — closing a locked port fails). A Stop *pause* never calls
- * cancel; it only flips ``dialog._serialPaused``, keeping the reader + port
- * open so resuming needn't reopen and pulse DTR/RTS, which reboots the device
- * (#526).
+ * Returns a cancel the dialog stores and calls on close / openPassive to stop
+ * a previous session (without it the loop bled a prior port's output into the
+ * next session — a Copilot find on PR #68). The cancel stops the loop AND
+ * closes the port; a Stop pause never calls it.
  */
 export function streamSerialToDialog(port: any, dialog: any): () => void {
-  /* Read directly from ``port.readable.getReader()`` and decode in
-     userland rather than going through ``port.readable.pipeTo()`` +
-     a ``TextDecoderStream``. The pipeTo plumbing has been observed
-     to silently swallow bytes on some bridge chips (notably CH9102F)
-     after a close/reopen within the same USB session — direct reads
-     do not. */
-  const reader = port.readable.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let cancelled = false;
-  // Raw UART logs skip the backend's per-line formatting, so a multi-line
-  // ESPHome record (color opened once, continuation lines indented) loses
-  // its color/header when split on \n. Re-apply them per line, exactly like
-  // the backend's esphome-logs CLI does via aioesphomeapi's LogParser.
-  const parser = new ESPHomeLogParser();
-  const readLoop = async () => {
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done || cancelled) break;
-        if (value && value.length) {
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-          for (const line of lines) {
-            /* Strip trailing CR (CRLF endings from the ROM
-               bootloader and many serial sources). ``ansi-log``
-               treats any chunk ending in ``\r`` as a progress-style
-               overwrite — it pops the previous visual line and
-               replaces it in place — so a stream of CRLF-terminated
-               boot lines would collapse to just the last one. */
-            const cleaned = line.endsWith("\r") ? line.slice(0, -1) : line;
-            // Drop mis-sampled UART garbage (e.g. an ESP8266's 74880-baud boot
-            // banner read at the app's baud) before it reaches the parser, so it
-            // neither pollutes the carried prefix/color nor floods the view.
-            if (isLikelyGarbageLine(cleaned)) {
-              continue;
-            }
-            /* Stamp every line — including blanks — at receive time
-               so the log pane shows the same ``[HH:MM:SS]`` anchor it
-               does for WS-fed sessions. esphome/dashboard's
-               ``TimestampTransformer`` prefixes every chunk
-               unconditionally (the line break is preserved before
-               stamping), so we match that behaviour here for parity
-               between the two web serial paths. */
-            const stamped = `${formatSerialTimestamp(new Date())}${parser.parseLine(cleaned)}`;
-            // Keep draining while paused (Stop) but don't display, so resume
-            // needs no port reopen / device reset (#526).
-            if (!dialog._serialPaused) {
-              dialog._enqueueLine(stamped);
-            }
-          }
-        }
+  return streamSerialLines(port, {
+    onLine: (line) => {
+      // Keep draining while paused (Stop) but don't display (#526).
+      if (!dialog._serialPaused) {
+        dialog._enqueueLine(line);
       }
-    } catch {
-      /* Port closed or reader cancelled — both are normal exits. */
-    } finally {
-      try {
-        reader.releaseLock();
-      } catch {
-        /* Lock already released — ignore. */
-      }
-    }
-  };
-  readLoop();
-  return () => {
-    if (cancelled) return;
-    cancelled = true;
-    // Stop the loop, then close the port once the reader lock is released
-    // (closing a still-locked port fails, leaving it open and blocking the
-    // next open()). A Stop pause keeps the port open by not calling cancel at
-    // all — it only flips the display-only `_serialPaused` gate (#526).
-    reader
-      .cancel()
-      .catch(() => {
-        /* Already disposed — nothing to do. */
-      })
-      .finally(() => {
-        port.close().catch(() => {
-          /* Port already closed (user pulled the cable, etc). */
-        });
-      });
-  };
+    },
+  });
 }

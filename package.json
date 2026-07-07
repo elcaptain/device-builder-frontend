@@ -11,7 +11,9 @@
   "scripts": {
     "preinstall": "node build-scripts/only-npm.cjs",
     "dev": "node build-scripts/dev-server.cjs",
+    "dev:web": "node build-scripts/dev-web-server.cjs",
     "build": "node build-scripts/build.cjs",
+    "build:web": "node build-scripts/build-web.cjs",
     "gen:languages": "node build-scripts/gen-language-manifest.cjs",
     "lint": "node build-scripts/gen-language-manifest.cjs && tsc --noEmit",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -34,6 +36,7 @@
     "@tanstack/lit-table": "^8.21.3",
     "codemirror": "^6.0.2",
     "esptool-js": "^0.6.0",
+    "improv-wifi-serial-sdk": "^2.5.1",
     "intl-messageformat": "^11.2.9",
     "lit": "3.3.3",
     "lit-html": "3.3.3",

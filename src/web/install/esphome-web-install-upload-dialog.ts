@@ -1,0 +1,128 @@
+import { consume } from "@lit/context";
+import { LitElement, css, html, nothing } from "lit";
+import { customElement, property, query, state } from "lit/decorators.js";
+
+import type { LocalizeFunc } from "../../common/localize.js";
+import "../../components/base-dialog.js";
+import { localizeContext } from "../../context/index.js";
+import { espHomeStyles } from "../../styles/shared.js";
+import { InstallFlowController } from "./install-flow-controller.js";
+import { renderInstallProgress } from "./install-progress.js";
+
+import "@home-assistant/webawesome/dist/components/button/button.js";
+
+/**
+ * Install an existing ESPHome project by uploading its factory ``.bin`` and
+ * flashing it over Web Serial. Two phases in one dialog: pick the file, then
+ * watch the flash progress. Erases first (the uploaded image is a full
+ * factory build at offset 0).
+ */
+@customElement("esphome-web-install-upload-dialog")
+export class ESPHomeWebInstallUploadDialog extends LitElement {
+  @property({ attribute: false }) port!: SerialPort;
+  @property({ type: Boolean }) open = false;
+
+  @consume({ context: localizeContext, subscribe: true })
+  @state()
+  private _localize: LocalizeFunc = (key) => key;
+
+  @state() private _hasFile = false;
+
+  @query("input[type=file]") private _input!: HTMLInputElement;
+
+  private _flow = new InstallFlowController(this);
+
+  private _onFileChange(): void {
+    this._hasFile = (this._input.files?.length ?? 0) > 0;
+  }
+
+  private async _install(): Promise<void> {
+    const file = this._input.files?.[0];
+    if (!file) return;
+    const data = new Uint8Array(await file.arrayBuffer());
+    await this._flow.start(this.port, {
+      erase: true,
+      filesCallback: async () => [{ data, address: 0 }],
+    });
+  }
+
+  private _onAfterHide(): void {
+    this._flow.reset();
+    this._hasFile = false;
+    this.dispatchEvent(new CustomEvent("after-hide", { bubbles: true }));
+  }
+
+  private _renderSetup() {
+    return html`
+      <p>${this._localize("web.install.upload_intro")}</p>
+      <input type="file" accept=".bin" @change=${this._onFileChange} />
+      <p>${this._localize("web.install.upload_howto_title")}</p>
+      <ol>
+        <li>${this._localize("web.install.upload_howto_1")}</li>
+        <li>${this._localize("web.install.upload_howto_2")}</li>
+        <li>${this._localize("web.install.upload_howto_3")}</li>
+      </ol>
+    `;
+  }
+
+  protected render() {
+    const inProgress = this._flow.step !== "idle";
+    return html`
+      <esphome-base-dialog
+        .label=${this._localize("web.install.upload_title")}
+        ?open=${this.open}
+        ?busy=${this._flow.busy}
+        @after-hide=${this._onAfterHide}
+      >
+        ${
+          inProgress
+            ? renderInstallProgress(this._flow, this._localize)
+            : this._renderSetup()
+        }
+        <div class="actions">
+          ${
+            this._flow.done
+              ? nothing
+              : html`<wa-button
+                  variant="brand"
+                  ?disabled=${this._flow.busy || (!inProgress && !this._hasFile)}
+                  @click=${this._install}
+                >
+                  ${this._localize("web.install.install")}
+                </wa-button>`
+          }
+        </div>
+      </esphome-base-dialog>
+    `;
+  }
+
+  static styles = [
+    espHomeStyles,
+    css`
+      input[type="file"] {
+        display: block;
+        width: 100%;
+        padding: var(--wa-space-s);
+        box-sizing: border-box;
+        background-color: var(--wa-color-surface-lowered);
+        border-radius: var(--wa-border-radius-m);
+      }
+      ol {
+        padding-left: 1.5em;
+        color: var(--wa-color-text-quiet);
+      }
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--wa-space-s);
+        margin-top: var(--wa-space-m);
+      }
+    `,
+  ];
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    "esphome-web-install-upload-dialog": ESPHomeWebInstallUploadDialog;
+  }
+}
