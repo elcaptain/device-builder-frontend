@@ -194,6 +194,50 @@ function valuelessKeyOf(text: string): string | null {
   return lineHasValue(text) ? null : lineKeyToken(text);
 }
 
+/** The raw key of a `-key:` pair (a list dash stuck to its key), else null. */
+function botchedDashKey(text: string): string | null {
+  if (parseListItemMarker(text)) return null;
+  const key = text.match(PAIR_RE)?.[1];
+  return key !== undefined && key.length > 1 && key[0] === "-" && key[1] !== "-"
+    ? key
+    : null;
+}
+
+/** A `- ` list marker typed without its space (`-platform:`), which the
+ *  scanner reads as a `-platform` mapping key. */
+interface MissingDashSpace {
+  line: number;
+  /** The stuck-dash key exactly as `lineKeyToken` reads it (`-platform`),
+   *  so the apply-site staleness check compares the same token. */
+  key: string;
+  fromIndent: number;
+}
+
+/**
+ * Find the botched `- ` marker behind an indent-family error: the blamed
+ * line itself (a `-key:` mixed into a real list) or the line above it
+ * (whose deeper "properties" the scanner chokes on). Null when neither
+ * is a dash stuck to its key.
+ */
+function missingDashSpace(
+  readLine: ReadLine,
+  blamedLine: number
+): MissingDashSpace | null {
+  const ownText = readLine(blamedLine);
+  if (ownText !== undefined) {
+    const own = botchedDashKey(ownText);
+    if (own !== null) {
+      return { line: blamedLine, key: own, fromIndent: indentOf(ownText) };
+    }
+  }
+  const prev = contentLineAbove(readLine, blamedLine);
+  if (prev === null) return null;
+  const above = botchedDashKey(prev.text);
+  return above !== null
+    ? { line: prev.line, key: above, fromIndent: indentOf(prev.text) }
+    : null;
+}
+
 /**
  * A pinpointed indentation repair for the line the scanner blamed (or, for
  * `reason: "props-below"`, the marker above it). `delta` is signed: positive
@@ -486,26 +530,61 @@ export function describeNestedListValue(
   return null;
 }
 
+/** A named cause behind a validation error, with a one-click repair when
+ *  the shape supports one. */
+export interface ValueTypeCause {
+  text: string;
+  fix?: YamlAutoFix;
+}
+
+/**
+ * The dash-space repair payload for a stuck-dash *key* at *fromIndent* on
+ * *line* — one constructor so the message args, the dash-keeping `key`
+ * the apply-site staleness check compares, and the fix shape can't drift
+ * between the parse-error and validation-error surfaces.
+ */
+function dashSpaceCause(
+  line: number,
+  key: string,
+  fromIndent: number,
+  localize: LocalizeFunc
+): ValueTypeCause {
+  return {
+    text: localize("yaml_editor.error_dash_space_fix", { line, key: key.slice(1) }),
+    fix: { line, indent: 0, key, fromIndent, kind: "dash-space" },
+  };
+}
+
 /**
  * Add the misindent / half-typed-key cause to a wrong-value-type
  * validation message ("expected a dictionary.") anchored at *line*: a
- * value-less `- key:` whose items landed one level deeper, or a bare word
- * with no ':' (a lone "le" under "logger:" parses as its string value).
- * Null when the anchored line is neither shape.
+ * value-less `- key:` whose items landed one level deeper, a bare word
+ * with no ':' (a lone "le" under "logger:" parses as its string value),
+ * or a dash stuck to its key (`-platform:` parses as a mapping key, so
+ * the section fails schema validation instead of the YAML parse).
+ * Null when the anchored line is none of these shapes.
  */
 export function describeValueTypeCause(
   readLine: ReadLine,
   line: number,
   localize: LocalizeFunc
-): string | null {
+): ValueTypeCause | null {
   const nested = describeNestedListValue(readLine, line, localize);
-  if (nested) return nested;
-  const token = readLine(line)?.trim();
+  if (nested) return { text: nested };
+  const text = readLine(line);
+  if (text === undefined) return null;
+  const dashKey = botchedDashKey(text);
+  if (dashKey !== null) {
+    return dashSpaceCause(line, dashKey, indentOf(text), localize);
+  }
+  const token = text.trim();
   if (token && !token.includes(":") && !token.startsWith("#") && !token.startsWith("-")) {
-    return localize("yaml_editor.error_missing_colon_hint", {
-      line,
-      key: token.length > 24 ? `${token.slice(0, 24)}…` : token,
-    });
+    return {
+      text: localize("yaml_editor.error_missing_colon_hint", {
+        line,
+        key: token.length > 24 ? `${token.slice(0, 24)}…` : token,
+      }),
+    };
   }
   return null;
 }
@@ -516,10 +595,12 @@ export function lineAccessorFor(content: string): ReadLine {
   return (line1) => (line1 >= 1 && line1 <= lines.length ? lines[line1 - 1] : undefined);
 }
 
-/** A one-click indentation repair: add `indent` spaces at the start of
- *  `line` (or remove them, when negative). */
+/** A one-click one-line repair: re-indent `line` by the signed `indent`
+ *  delta, or (kind "dash-space") insert the missing space after its list
+ *  dash. */
 export interface YamlAutoFix {
   line: number;
+  /** Signed leading-space delta; 0 (unused) for kind "dash-space". */
   indent: number;
   /** The target line's own key, so the apply site can confirm the line still
    *  targets the same item after edits shift line numbers. */
@@ -527,6 +608,8 @@ export interface YamlAutoFix {
   /** The target line's indent when the fix was computed; the apply site
    *  refuses when the line no longer starts there. */
   fromIndent: number;
+  /** Absent means re-indent; "dash-space" inserts a space after the dash. */
+  kind?: "dash-space";
 }
 
 /** A humanized YAML error: display text, best line to jump to, optional auto-fix. */
@@ -613,6 +696,16 @@ export function describeYamlError(
     lower.includes("could not find expected ':'") ||
     lower.includes("expected <block end>")
   ) {
+    // A dash stuck to its key (`-platform:`) produces these same errors but
+    // needs a space, not an indent change — check it before the indent walk.
+    const dash = readLine ? missingDashSpace(readLine, line) : null;
+    if (dash) {
+      return {
+        ...dashSpaceCause(dash.line, dash.key, dash.fromIndent, localize),
+        jumpLine: dash.line,
+        squiggleLine: dash.line,
+      };
+    }
     const fix = readLine ? analyzeIndentMismatch(readLine, line) : null;
     if (fix) {
       // "- key" for a list marker, plain "key" for a property line, so the
