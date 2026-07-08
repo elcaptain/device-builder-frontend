@@ -310,10 +310,14 @@ function misplacedOpenerFix(
     const indent = indentOf(text);
     if (opener === null) {
       if (indent >= propIndent) continue;
-      if (indent === 0) break;
       const key = valuelessKeyOf(text);
       if (key === null) break;
       opener = { line: n, indent, key };
+      // A top-level opener can't have been dedented out of anything — only
+      // the over-deep-first-child reading applies; skip the sibling search
+      // (a line at the blamed indent above it belongs to the previous
+      // section).
+      if (indent === 0) break;
       continue;
     }
     // Above the opener: a sibling at exactly the blamed line's indent
@@ -432,8 +436,23 @@ export function analyzeIndentMismatch(
     if (!marker) {
       const indent = indentOf(text);
       if (indent < propIndent) {
-        // A top-level line means we left every block without a marker.
-        if (indent === 0) return null;
+        // A top-level line means we left every block without a marker. A
+        // blamed key nudged just off column 0 that opens no deeper block is
+        // a section head — dedent it back to the margin.
+        if (indent === 0) {
+          if (propIndent >= YAML_INDENT_STEP) return null;
+          const errKey = lineKeyToken(errText);
+          if (!errKey) return null;
+          const next = contentLineBelow(readLine, errorLine);
+          return next === null || indentOf(next.text) <= propIndent
+            ? {
+                markerLine: errorLine,
+                markerKey: errKey,
+                delta: -propIndent,
+                reason: "align",
+              }
+            : null;
+        }
         if (shallowerIndent === null) shallowerIndent = indent;
       }
       continue;
