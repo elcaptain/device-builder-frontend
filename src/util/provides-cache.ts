@@ -1,6 +1,12 @@
 import type { ESPHomeAPI } from "../api/index.js";
 import { KeyedPromiseCache } from "./keyed-promise-cache.js";
 
+/** Page size for the fetch-all `getComponents({provides})` sites. Sized so a
+ *  single page covers every known interface today (same-domain sub-entity
+ *  providers put `sensor` near 200); a larger catalog would truncate
+ *  silently until the callers page on `resp.total` (#1152). */
+export const PROVIDER_FETCH_LIMIT = 500;
+
 /** Ids of the components that provide an interface, board-scoped and cached
  *  for the process lifetime. The backend catalog is immutable for that
  *  lifetime (see `component-name-cache`), so the same `provides` query never
@@ -21,9 +27,7 @@ export function providerIds(
         provides: interfaceName,
         platform: platform ?? undefined,
         board_id: boardId ?? undefined,
-        // One page holds every provider; an interface has at most a handful,
-        // so this never truncates (mirrors config-entry-form's provider fetch).
-        limit: 200,
+        limit: PROVIDER_FETCH_LIMIT,
       })
       .then((resp): ReadonlySet<string> => new Set(resp.components.map((c) => c.id)))
   );
