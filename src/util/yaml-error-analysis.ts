@@ -10,7 +10,7 @@
  * signed one-line repair — live only here.
  */
 import type { LocalizeFunc } from "../common/localize.js";
-import { indentOf, parseListItemMarker } from "./yaml-line-walker.js";
+import { indentOf, parseListItemMarker, stripComment } from "./yaml-line-walker.js";
 
 /** Match `line N, column M` (1-indexed) globally in a YAML parse error message. */
 const YAML_LINE_COL_RE = /line\s+(\d+)\s*,\s*column\s+(\d+)/gi;
@@ -19,6 +19,20 @@ const YAML_LINE_RE = /line\s+(\d+)/gi;
 
 /** A quoted path (POSIX `/` or Windows `\`) — keep the basename, drop the dir. */
 const QUOTED_PATH_RE = /"([^"]*[/\\])([^"/\\]+)"/g;
+
+/** `key:` pair line (no marker), capturing (key, value?). Whitespace or EOL
+ *  must follow the ':' — `key:value` is a plain scalar, not a pair. Broader
+ *  than the walker's RE_PAIR_LINE — any non-`:` key token, so quoted or
+ *  dotted keys still match. */
+const PAIR_RE = /^\s*([^\s:#][^:]*?)\s*:(?:\s+(.*))?$/;
+
+/** Analysis walks never scan further than this many lines. */
+const WALK_BOUND = 50;
+
+/** Canonical child-indent step. A literal two: this module stays free of
+ *  esphome-yaml-lang's CodeMirror import graph, where ESPHOME_YAML_INDENT
+ *  is the same two spaces. */
+const YAML_INDENT_STEP = 2;
 
 /**
  * Strip absolute directory paths out of a backend error message.
@@ -81,6 +95,38 @@ export function parseYamlErrorContext(
 /** A line accessor over the current document; `undefined` past the ends. */
 export type ReadLine = (line1: number) => string | undefined;
 
+/** Blank or comment-only — every walk skips these. */
+function isBlankOrComment(text: string): boolean {
+  return !text.trim() || text.trimStart().startsWith("#");
+}
+
+/** Nearest content line from *line* in *step* direction, bounded. */
+function adjacentContentLine(
+  readLine: ReadLine,
+  line: number,
+  step: 1 | -1
+): { line: number; text: string } | null {
+  for (let i = 1; i <= WALK_BOUND; i++) {
+    const n = line + step * i;
+    if (n < 1) return null;
+    const text = readLine(n);
+    if (text === undefined) return null;
+    if (isBlankOrComment(text)) continue;
+    return { line: n, text };
+  }
+  return null;
+}
+
+/** Nearest non-blank, non-comment line above *line*. */
+function contentLineAbove(readLine: ReadLine, line: number) {
+  return adjacentContentLine(readLine, line, -1);
+}
+
+/** Nearest non-blank, non-comment line below *line*. */
+function contentLineBelow(readLine: ReadLine, line: number) {
+  return adjacentContentLine(readLine, line, 1);
+}
+
 /**
  * Indent of a list item's first property line minus *contentCol* (where its
  * key starts), or `null` when the item has no property line — the next
@@ -92,15 +138,10 @@ export function firstPropertyDelta(
   line: number,
   contentCol: number
 ): number | null {
-  // Bound the walk so a huge run of blanks can't turn a lint pass into a scan.
-  for (let n = line + 1; n <= line + 50; n++) {
-    const text = readLine(n);
-    if (text === undefined) return null;
-    if (!text.trim() || text.trimStart().startsWith("#")) continue;
-    const indent = indentOf(text);
-    return indent < contentCol ? null : indent - contentCol;
-  }
-  return null;
+  const next = contentLineBelow(readLine, line);
+  if (next === null) return null;
+  const indent = indentOf(next.text);
+  return indent < contentCol ? null : indent - contentCol;
 }
 
 /** Don't guess a sibling alignment beyond this many spaces — a large
@@ -120,10 +161,10 @@ function siblingMarkerDelta(
   line: number,
   markerIndent: number
 ): number | null {
-  for (let n = line - 1; n >= 1 && n >= line - 50; n--) {
+  for (let n = line - 1; n >= 1 && n >= line - WALK_BOUND; n--) {
     const text = readLine(n);
     if (text === undefined) return null;
-    if (!text.trim() || text.trimStart().startsWith("#")) continue;
+    if (isBlankOrComment(text)) continue;
     const indent = indentOf(text);
     if (parseListItemMarker(text)) {
       const delta = indent - markerIndent;
@@ -135,11 +176,22 @@ function siblingMarkerDelta(
 }
 
 /** First key token of a line — a list item's key, a plain `key:`, or null. */
-function lineKeyToken(text: string): string | null {
+export function lineKeyToken(text: string): string | null {
   const marker = parseListItemMarker(text);
   if (marker) return marker.key;
-  const hit = text.match(/^\s*([^\s:#][^:]*?)\s*:(?:\s|$)/);
+  const hit = text.match(PAIR_RE);
   return hit ? hit[1] : null;
+}
+
+/** Whether the line is a `key: value` pair with a non-empty value. */
+function lineHasValue(text: string): boolean {
+  return Boolean(stripComment(text).match(PAIR_RE)?.[2]);
+}
+
+/** The line's key when it is a value-less `key:` opener, else null.
+ *  Callers pre-filter `- ` marker lines. */
+function valuelessKeyOf(text: string): string | null {
+  return lineHasValue(text) ? null : lineKeyToken(text);
 }
 
 /**
@@ -157,6 +209,101 @@ export interface IndentMismatch {
 }
 
 /**
+ * Continuation-scalar repair: the blamed line sits deeper than the valued
+ * `key: value` directly above it (*prev*), so the scanner reads it as that
+ * value's plain-scalar continuation and chokes on the ':'. Re-indent the
+ * pair back under the value-less `key:` it fell out of, or dedent the
+ * blamed line when there is no such block. Null when the mismatch is too
+ * large to call.
+ */
+function continuationScalarFix(
+  readLine: ReadLine,
+  errorLine: number,
+  errText: string,
+  propIndent: number,
+  prev: { line: number; text: string }
+): IndentMismatch | null {
+  const prevIndent = indentOf(prev.text);
+  const prevKey = lineKeyToken(prev.text);
+  const delta = propIndent - prevIndent;
+  if (prevKey === null || delta > MAX_SIBLING_ALIGN) return null;
+  const parent = contentLineAbove(readLine, prev.line);
+  if (
+    parent &&
+    !parseListItemMarker(parent.text) &&
+    indentOf(parent.text) === prevIndent &&
+    valuelessKeyOf(parent.text) !== null
+  ) {
+    return { markerLine: prev.line, markerKey: prevKey, delta, reason: "align" };
+  }
+  const blamedKey = lineKeyToken(errText);
+  return blamedKey
+    ? { markerLine: errorLine, markerKey: blamedKey, delta: -delta, reason: "align" }
+    : null;
+}
+
+/**
+ * Repairs for a blamed line that closes a value-less opener's too-deep
+ * block: re-indent the opener when a sibling above it sits at the blamed
+ * line's indent (the opener was dedented — `mode:` dropped out of `pin:`,
+ * blamed on `number:`), else dedent the block's first child when the blamed
+ * line already sits at the opener's canonical child indent (the child went
+ * too deep). Null when neither reading holds.
+ */
+function misplacedOpenerFix(
+  readLine: ReadLine,
+  errorLine: number,
+  propIndent: number
+): IndentMismatch | null {
+  // The opener candidate: the nearest line above the blamed one that sits
+  // shallower, provided it is a value-less `key:` still inside the same
+  // marker-less stretch.
+  let opener: { line: number; indent: number; key: string } | null = null;
+  for (let n = errorLine - 1; n >= 1 && n >= errorLine - WALK_BOUND; n--) {
+    const text = readLine(n);
+    if (text === undefined || isBlankOrComment(text)) continue;
+    if (parseListItemMarker(text)) break;
+    const indent = indentOf(text);
+    if (opener === null) {
+      if (indent >= propIndent) continue;
+      if (indent === 0) break;
+      const key = valuelessKeyOf(text);
+      if (key === null) break;
+      opener = { line: n, indent, key };
+      continue;
+    }
+    // Above the opener: a sibling at exactly the blamed line's indent
+    // proves the opener was dedented out of that level.
+    if (indent === propIndent && propIndent - opener.indent <= MAX_SIBLING_ALIGN) {
+      return {
+        markerLine: opener.line,
+        markerKey: opener.key,
+        delta: propIndent - opener.indent,
+        reason: "align",
+      };
+    }
+    // Leaving the opener's block ends the sibling search.
+    if (indent < opener.indent) break;
+  }
+  // The competing reading: the opener sits where it belongs (the blamed
+  // line is at its canonical child indent) and the block's first child is
+  // what went too deep.
+  if (opener === null || propIndent !== opener.indent + YAML_INDENT_STEP) return null;
+  const child = contentLineBelow(readLine, opener.line);
+  const childKey = child === null ? null : lineKeyToken(child.text);
+  if (child === null || childKey === null) return null;
+  const childIndent = indentOf(child.text);
+  return childIndent > propIndent && childIndent - propIndent <= MAX_SIBLING_ALIGN
+    ? {
+        markerLine: child.line,
+        markerKey: childKey,
+        delta: propIndent - childIndent,
+        reason: "align",
+      }
+    : null;
+}
+
+/**
  * Pinpoint the exact indentation fix behind a YAML indentation error.
  *
  * Shapes covered, in priority order:
@@ -165,10 +312,19 @@ export interface IndentMismatch {
  *   `expected <block end>, but found '-'`): indent the marker to match.
  * - Blamed marker misaligned with the marker directly above it (one space
  *   off in either direction): re-indent the blamed marker to line up.
+ * - Blamed line deeper than the valued `key: value` directly above it (the
+ *   scanner reads it as a plain-scalar continuation): re-indent the pair
+ *   back under the value-less `key:` it fell out of, or dedent the blamed
+ *   line when there is no such block.
+ * - Blamed line closing a value-less key's too-deep block: re-indent the
+ *   key when a sibling above it sits at the blamed line's indent, else
+ *   dedent the block's first child when the blamed line already sits at
+ *   the key's canonical child indent.
  * - Blamed property line: the classic over-indent (`- platform: dht` then
  *   `    model:` — the scanner blames the property, the marker is what
- *   moves), or a property out of line with siblings already sitting at the
- *   marker's content column (re-indent the blamed line instead).
+ *   moves), a property at the markers' own indent (re-indent it to the
+ *   content column), or a property out of line with siblings already
+ *   sitting at the marker's content column (re-indent the blamed line).
  */
 export function analyzeIndentMismatch(
   readLine: ReadLine,
@@ -200,16 +356,32 @@ export function analyzeIndentMismatch(
     return null;
   }
   const propIndent = errIndent;
+  const prev = contentLineAbove(readLine, errorLine);
+  const prevIndent = prev === null ? -1 : indentOf(prev.text);
+  // The line directly above decides the reading: a shallower valued pair
+  // makes the blamed line its plain-scalar continuation; a deeper line means
+  // the blamed line closes a block, the signature of a misplaced value-less
+  // opener (or its over-deep first child) above.
+  if (
+    prev &&
+    !parseListItemMarker(prev.text) &&
+    prevIndent < propIndent &&
+    lineHasValue(prev.text)
+  ) {
+    return continuationScalarFix(readLine, errorLine, errText, propIndent, prev);
+  }
+  if (prevIndent > propIndent) {
+    const openerFix = misplacedOpenerFix(readLine, errorLine, propIndent);
+    if (openerFix) return openerFix;
+  }
   // Nearest shallower non-marker line passed on the way up — when it sits
   // exactly at the marker's content column, the surrounding structure is
   // consistent and the blamed line is the one to move.
   let shallowerIndent: number | null = null;
   // Bound the walk so a huge doc can't turn one lint pass into a scan.
-  for (let n = errorLine - 1; n >= 1 && n >= errorLine - 50; n--) {
+  for (let n = errorLine - 1; n >= 1 && n >= errorLine - WALK_BOUND; n--) {
     const text = readLine(n);
-    if (text === undefined || !text.trim() || text.trimStart().startsWith("#")) {
-      continue;
-    }
+    if (text === undefined || isBlankOrComment(text)) continue;
     const marker = parseListItemMarker(text);
     if (!marker) {
       const indent = indentOf(text);
@@ -222,9 +394,18 @@ export function analyzeIndentMismatch(
     }
     const errKey = lineKeyToken(errText);
     if (propIndent > marker.contentCol) {
-      // Siblings already aligned at the content column → the blamed line is
-      // the odd one out; otherwise assume the marker is what needs to move.
-      if (shallowerIndent === marker.contentCol && errKey) {
+      // Siblings already aligned at the content column — above or below the
+      // blamed line — make the blamed line the odd one out; otherwise assume
+      // the marker is what needs to move.
+      const alignedAbove = shallowerIndent === marker.contentCol;
+      const next =
+        !alignedAbove && errKey && propIndent - marker.contentCol <= MAX_SIBLING_ALIGN
+          ? contentLineBelow(readLine, errorLine)
+          : null;
+      if (
+        errKey &&
+        (alignedAbove || (next !== null && indentOf(next.text) === marker.contentCol))
+      ) {
         return {
           markerLine: errorLine,
           markerKey: errKey,
@@ -239,7 +420,10 @@ export function analyzeIndentMismatch(
         reason: "props-below",
       };
     }
-    if (propIndent < marker.contentCol && propIndent > indentOf(text) && errKey) {
+    // A property at the markers' own indent, or between it and the content
+    // column, can't be part of the sequence — re-indent it to the content
+    // column where the item's properties sit.
+    if (propIndent < marker.contentCol && propIndent >= indentOf(text) && errKey) {
       return {
         markerLine: errorLine,
         markerKey: errKey,
@@ -319,6 +503,9 @@ export interface YamlAutoFix {
   /** The target line's own key, so the apply site can confirm the line still
    *  targets the same item after edits shift line numbers. */
   key: string;
+  /** The target line's indent when the fix was computed; the apply site
+   *  refuses when the line no longer starts there. */
+  fromIndent: number;
 }
 
 /** A humanized YAML error: display text, best line to jump to, optional auto-fix. */
@@ -427,7 +614,12 @@ export function describeYamlError(
           spaces: Math.abs(fix.delta),
         }),
         jumpLine: fix.markerLine,
-        fix: { line: fix.markerLine, indent: fix.delta, key: fix.markerKey },
+        fix: {
+          line: fix.markerLine,
+          indent: fix.delta,
+          key: fix.markerKey,
+          fromIndent: indentOf(targetText),
+        },
       };
     }
     return hint("yaml_editor.error_indent_hint");
