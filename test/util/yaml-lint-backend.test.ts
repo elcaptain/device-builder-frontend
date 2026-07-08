@@ -149,6 +149,53 @@ describe("parseYamlErrorPosition", () => {
   });
 });
 
+describe("describeNestedListValue", () => {
+  const localize = (key: string, values?: Record<string, string | number>): string =>
+    values ? `${key}:${JSON.stringify(values)}` : key;
+
+  it("names the nested-list misindent behind 'expected a dictionary.'", async () => {
+    const { describeNestedListValue } =
+      await import("../../src/util/yaml-lint-backend.js");
+    const doc = [
+      "    effects:", // 1
+      "    - addressable_twinkle:", // 2
+      "      - flicker:", // 3
+      "      - pulse:", // 4
+    ];
+    const read = (n: number): string | undefined => doc[n - 1];
+    expect(describeNestedListValue(read, 2, localize)).toBe(
+      'yaml_editor.error_nested_list_hint:{"key":"addressable_twinkle"}'
+    );
+  });
+
+  it("stays silent for a key with a real value or aligned siblings", async () => {
+    const { describeNestedListValue } =
+      await import("../../src/util/yaml-lint-backend.js");
+    const aligned = (n: number): string | undefined =>
+      ["    effects:", "      - addressable_twinkle:", "      - flicker:"][n - 1];
+    expect(describeNestedListValue(aligned, 2, localize)).toBeNull();
+    const valued = (n: number): string | undefined =>
+      ["    - platform: gpio", "      - nested:"][n - 1];
+    expect(describeNestedListValue(valued, 1, localize)).toBeNull();
+  });
+});
+
+describe("describeValueTypeCause", () => {
+  const localize = (key: string, values?: Record<string, string | number>): string =>
+    values ? `${key}:${JSON.stringify(values)}` : key;
+
+  it("names a bare half-typed word that became the key's string value", async () => {
+    const { describeValueTypeCause } =
+      await import("../../src/util/yaml-lint-backend.js");
+    const doc = (n: number): string | undefined => ["logger:", "  le"][n - 1];
+    expect(describeValueTypeCause(doc, 2, localize)).toBe(
+      'yaml_editor.error_missing_colon_hint:{"line":2,"key":"le"}'
+    );
+    const keyed = (n: number): string | undefined => ["logger:", "  level: DEBUG"][n - 1];
+    expect(describeValueTypeCause(keyed, 2, localize)).toBeNull();
+  });
+});
+
 describe("analyzeIndentMismatch", () => {
   // The reproduction: dash at column 0, properties indented 4 spaces.
   const lines = [
@@ -165,6 +212,7 @@ describe("analyzeIndentMismatch", () => {
       markerLine: 2,
       markerKey: "platform",
       delta: 2,
+      reason: "props-below",
     });
   });
 
@@ -180,6 +228,145 @@ describe("analyzeIndentMismatch", () => {
     const plain = (n: number): string | undefined =>
       ["esphome:", "  name: x", "  bogus: y"][n - 1];
     expect(analyzeIndentMismatch(plain, 3)).toBeNull();
+  });
+
+  // The mirror shape: the marker itself dedented out of its list, which the
+  // scanner blames directly ("expected <block end>, but found '-'").
+  it("pinpoints an under-indented marker from the properties below it", async () => {
+    const { analyzeIndentMismatch } = await import("../../src/util/yaml-lint-backend.js");
+    const dedented = (n: number): string | undefined =>
+      [
+        "time:", // 1
+        "  - platform: homeassistant", // 2
+        "    id: ha_time", // 3
+        "", // 4
+        "- platform: sntp", // 5
+        "    id: sntp_time", // 6
+        "    servers: kkk", // 7
+      ][n - 1];
+    expect(analyzeIndentMismatch(dedented, 5)).toEqual({
+      markerLine: 5,
+      markerKey: "platform",
+      delta: 2,
+      reason: "props-below",
+    });
+  });
+
+  it("returns null for a blamed marker followed by a shallower sibling", async () => {
+    const { analyzeIndentMismatch } = await import("../../src/util/yaml-lint-backend.js");
+    const bare = (n: number): string | undefined =>
+      ["time:", "- platform: sntp", "sensor:"][n - 1];
+    expect(analyzeIndentMismatch(bare, 2)).toBeNull();
+  });
+
+  it("returns null for a blamed marker whose properties already line up", async () => {
+    const { analyzeIndentMismatch } = await import("../../src/util/yaml-lint-backend.js");
+    const aligned = (n: number): string | undefined =>
+      ["time:", "- platform: sntp", "  id: sntp_time"][n - 1];
+    expect(analyzeIndentMismatch(aligned, 2)).toBeNull();
+  });
+
+  // Sibling alignment: a marker one space off from the marker above it, in
+  // either direction ("expected <block end>, but found '<block sequence
+  // start>'" blames the odd marker directly).
+  it("dedents a blamed marker sitting deeper than the marker above it", async () => {
+    const { analyzeIndentMismatch } = await import("../../src/util/yaml-lint-backend.js");
+    const doc = (n: number): string | undefined =>
+      [
+        "    effects:", // 1
+        "      - addressable_twinkle:", // 2
+        "      - flicker:", // 3
+        "       - pulse:", // 4
+      ][n - 1];
+    expect(analyzeIndentMismatch(doc, 4)).toEqual({
+      markerLine: 4,
+      markerKey: "pulse",
+      delta: -1,
+      reason: "align",
+    });
+  });
+
+  it("indents a blamed marker sitting shallower than the marker above it", async () => {
+    const { analyzeIndentMismatch } = await import("../../src/util/yaml-lint-backend.js");
+    const doc = (n: number): string | undefined =>
+      [
+        "    effects:", // 1
+        "      - addressable_twinkle:", // 2
+        "     - flicker:", // 3
+      ][n - 1];
+    expect(analyzeIndentMismatch(doc, 3)).toEqual({
+      markerLine: 3,
+      markerKey: "flicker",
+      delta: 1,
+      reason: "align",
+    });
+  });
+
+  it("skips the previous item's properties to find the sibling marker", async () => {
+    const { analyzeIndentMismatch } = await import("../../src/util/yaml-lint-backend.js");
+    const doc = (n: number): string | undefined =>
+      [
+        "time:", // 1
+        "  - platform: homeassistant", // 2
+        "    id: homeassistant_time", // 3
+        "", // 4
+        "   - platform: sntp", // 5
+        "    id: sntp_time", // 6
+      ][n - 1];
+    expect(analyzeIndentMismatch(doc, 5)).toEqual({
+      markerLine: 5,
+      markerKey: "platform",
+      delta: -1,
+      reason: "align",
+    });
+  });
+
+  it("won't guess a sibling alignment beyond a few spaces", async () => {
+    const { analyzeIndentMismatch } = await import("../../src/util/yaml-lint-backend.js");
+    const doc = (n: number): string | undefined =>
+      [
+        "  - platform: x", // 1
+        "    effects:", // 2
+        "      - twinkle:", // 3
+        " - platform: y", // 4
+      ][n - 1];
+    expect(analyzeIndentMismatch(doc, 4)).toBeNull();
+  });
+
+  // Property alignment: the blamed property is the odd one out when its
+  // siblings already sit at the marker's content column.
+  it("indents a blamed property indented less than its siblings", async () => {
+    const { analyzeIndentMismatch } = await import("../../src/util/yaml-lint-backend.js");
+    const doc = (n: number): string | undefined =>
+      [
+        "output:", // 1
+        "   - platform: ledc", // 2
+        "     pin: 18", // 3
+        "    id: buzzer_output", // 4
+      ][n - 1];
+    expect(analyzeIndentMismatch(doc, 4)).toEqual({
+      markerLine: 4,
+      markerKey: "id",
+      delta: 1,
+      reason: "align",
+    });
+  });
+
+  it("dedents a blamed property indented deeper than an aligned sibling", async () => {
+    const { analyzeIndentMismatch } = await import("../../src/util/yaml-lint-backend.js");
+    const doc = (n: number): string | undefined =>
+      [
+        "output:", // 1
+        "   - platform: ledc", // 2
+        "     pin: 18", // 3
+        "      id: buzzer_output", // 4
+      ][n - 1];
+    expect(analyzeIndentMismatch(doc, 4)).toEqual({
+      markerLine: 4,
+      markerKey: "id",
+      delta: -1,
+      reason: "align",
+    });
   });
 });
 
@@ -218,6 +405,88 @@ describe("describeYamlError", () => {
     expect(
       describeYamlError("mapping values are not allowed here", pos(3), localize, read)
     ).toEqual({ text: 'yaml_editor.error_indent_hint:{"line":3}', jumpLine: 3 });
+  });
+
+  // Real PyYAML shape for a bare `kkk` inside a list item: the context mark
+  // (first position) names the word's own line; the problem mark (last)
+  // blames wherever scanning gave up, lines later.
+  it("names the bare key missing its ':' instead of the indent hint", async () => {
+    const { describeYamlError } = await import("../../src/util/yaml-lint-backend.js");
+    const doc = [
+      "time:", // 1
+      "  - platform: homeassistant", // 2
+      "    id: ha_time", // 3
+      "    kkk", // 4
+      "", // 5
+      "  - platform: sntp", // 6
+    ];
+    const read = (n: number): string | undefined => doc[n - 1];
+    const msg =
+      'while scanning a simple key\n  in "x.yaml", line 4, column 5\n' +
+      "could not find expected ':'\n  in \"x.yaml\", line 6, column 3";
+    expect(describeYamlError(msg, { line: 6, col: 3 }, localize, read)).toEqual({
+      text: 'yaml_editor.error_missing_colon_hint:{"line":4,"key":"kkk"}',
+      jumpLine: 4,
+      squiggleLine: 4,
+    });
+  });
+
+  it("keeps the indent hint for a missing ':' whose context line has one", async () => {
+    const { describeYamlError } = await import("../../src/util/yaml-lint-backend.js");
+    const aligned = ["sensor:", "  - platform: dht", "    model: DHT11"];
+    const read = (n: number): string | undefined => aligned[n - 1];
+    const msg =
+      'while scanning a simple key\n  in "x.yaml", line 2, column 3\n' +
+      "could not find expected ':'\n  in \"x.yaml\", line 3, column 1";
+    expect(describeYamlError(msg, { line: 3, col: 1 }, localize, read).text).toBe(
+      'yaml_editor.error_indent_hint:{"line":3}'
+    );
+  });
+
+  it("names the sibling-alignment fix with a signed dedent", async () => {
+    const { describeYamlError } = await import("../../src/util/yaml-lint-backend.js");
+    const doc = [
+      "    effects:", // 1
+      "      - addressable_twinkle:", // 2
+      "      - flicker:", // 3
+      "       - pulse:", // 4
+    ];
+    const read = (n: number): string | undefined => doc[n - 1];
+    expect(
+      describeYamlError(
+        "expected <block end>, but found '<block sequence start>'",
+        { line: 4, col: 8 },
+        localize,
+        read
+      )
+    ).toEqual({
+      text: 'yaml_editor.error_misaligned_dedent_fix:{"line":4,"key":"- pulse","spaces":1}',
+      jumpLine: 4,
+      fix: { line: 4, indent: -1, key: "pulse" },
+    });
+  });
+
+  it("names the misaligned-property fix on the property's own line", async () => {
+    const { describeYamlError } = await import("../../src/util/yaml-lint-backend.js");
+    const doc = [
+      "output:", // 1
+      "   - platform: ledc", // 2
+      "     pin: 18", // 3
+      "    id: buzzer_output", // 4
+    ];
+    const read = (n: number): string | undefined => doc[n - 1];
+    expect(
+      describeYamlError(
+        "mapping values are not allowed here",
+        { line: 4, col: 5 },
+        localize,
+        read
+      )
+    ).toEqual({
+      text: 'yaml_editor.error_misaligned_indent_fix:{"line":4,"key":"id","spaces":1}',
+      jumpLine: 4,
+      fix: { line: 4, indent: 1, key: "id" },
+    });
   });
 
   it("maps the indentation family to the indent hint", async () => {
