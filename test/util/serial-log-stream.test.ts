@@ -74,7 +74,7 @@ describe("streamSerialLines", () => {
     expect(lines[0]).toContain("good line here");
   });
 
-  it("cancel closes the port", async () => {
+  it("cancel closes the port after the read loop releases the lock", async () => {
     let ctrl!: ReadableStreamDefaultController<Uint8Array>;
     const port = makeOpenPort((c) => {
       ctrl = c;
@@ -82,10 +82,8 @@ describe("streamSerialLines", () => {
     const cancel = streamSerialLines(port as unknown as SerialPort, { onLine: () => {} });
     await flush();
     cancel();
-    // Let the reader.cancel().finally(port.close) chain settle.
-    await flush();
-    await flush();
-    expect(port.close).toHaveBeenCalledOnce();
+    // cancel → await loopDone (releaseLock) → port.close(): several ticks.
+    await vi.waitFor(() => expect(port.close).toHaveBeenCalledOnce());
     void ctrl;
   });
 });

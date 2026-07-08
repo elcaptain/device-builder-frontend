@@ -30,9 +30,16 @@ export async function openImprovDialog(
   try {
     await port.open({ baudRate: IMPROV_BAUD_RATE });
   } catch (err) {
-    // ``InvalidStateError`` means the port is already open (a prior action
-    // still holds it) — fine to proceed. Anything else is a real failure.
-    if (!(err instanceof DOMException && err.name === "InvalidStateError")) {
+    // ``InvalidStateError`` means the port is already open. That's fine ONLY if
+    // nothing else holds its reader/writer — the Improv SDK takes its own
+    // reader + writer, so a locked stream (another consumer mid-op) would make
+    // it fail cryptically. Surface a clear toast and bail in that case.
+    if (err instanceof DOMException && err.name === "InvalidStateError") {
+      if (port.readable?.locked || port.writable?.locked) {
+        toast.error(localize("web.improv.port_busy"));
+        return false;
+      }
+    } else {
       toast.error(
         localize("web.improv.open_failed", {
           error: err instanceof Error ? err.message : String(err),

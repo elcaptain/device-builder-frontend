@@ -6,6 +6,7 @@ import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { isWebSerialSupported } from "../../util/web-serial.js";
+import { parseDashboardHint } from "../dashboard-hint.js";
 import type { WebMode } from "../web-mode.js";
 import "./esphome-web-esp-connect-card.js";
 import "./esphome-web-pico-connect-card.js";
@@ -24,6 +25,17 @@ export class ESPHomeWebDashboard extends LitElement {
   @state()
   private _localize: LocalizeFunc = (key) => key;
 
+  // Legacy ``?dashboard_logs/install/wizard`` deep-link hint (ESP-only).
+  private _hint = parseDashboardHint();
+
+  private _renderHint() {
+    // Only ESP has the Logs / Install / Prepare actions the hint points at.
+    if (!this._hint || this.mode !== "esp" || !isWebSerialSupported()) return null;
+    return html`<div class="hint" role="note">
+      ${this._localize(`web.dashboard_hint.${this._hint}`)}
+    </div>`;
+  }
+
   private _renderConnectCard() {
     if (!isWebSerialSupported()) {
       return html`<esphome-web-unsupported-card></esphome-web-unsupported-card>`;
@@ -37,7 +49,7 @@ export class ESPHomeWebDashboard extends LitElement {
     const isPico = this.mode === "pico";
     return html`
       <div class="container">
-        ${this._renderConnectCard()}
+        ${this._renderHint()} ${this._renderConnectCard()}
         <div class="intro">
           <p><b>${this._localize("web.intro.welcome")}</b></p>
           <p>
@@ -76,6 +88,15 @@ export class ESPHomeWebDashboard extends LitElement {
       }
       .container > * {
         width: 100%;
+      }
+      .hint {
+        box-sizing: border-box;
+        padding: var(--wa-space-s) var(--wa-space-m);
+        border-radius: var(--wa-border-radius-m);
+        background: var(--esphome-tint);
+        border: 1px solid var(--esphome-tint-border);
+        color: var(--wa-color-text-normal);
+        font-size: var(--wa-font-size-s);
       }
       .intro {
         color: var(--wa-color-text-normal);

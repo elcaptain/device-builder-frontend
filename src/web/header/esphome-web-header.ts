@@ -8,7 +8,7 @@ import { localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { isWebSerialSupported } from "../../util/web-serial.js";
-import type { WebMode } from "../web-mode.js";
+import { modeUrl, type WebMode } from "../web-mode.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 
@@ -23,6 +23,9 @@ registerMdiIcons({ "swap-horizontal": mdiSwapHorizontal });
 @customElement("esphome-web-header")
 export class ESPHomeWebHeader extends LitElement {
   @property() mode: WebMode = "esp";
+
+  /** Hide the ESP ⇄ Pico switch (flash-receiver mode has no device family). */
+  @property({ type: Boolean }) minimal = false;
 
   @consume({ context: localizeContext, subscribe: true })
   @state()
@@ -41,7 +44,9 @@ export class ESPHomeWebHeader extends LitElement {
 
     return html`
       <div class="app-header">
-        <a class="header-logo" href="/">
+        <!-- Keep the current mode in the URL so clicking the logo doesn't drop
+             the user out of Pico mode. -->
+        <a class="header-logo" href=${modeUrl(this.mode)}>
           <img src="/static/logo/esphome.svg" alt="ESPHome" />
         </a>
         <div class="header-text">
@@ -50,9 +55,14 @@ export class ESPHomeWebHeader extends LitElement {
         </div>
         <div class="header-spacer"></div>
         ${
-          isWebSerialSupported()
+          !this.minimal && isWebSerialSupported()
             ? html`
-                <button class="switch-btn" @click=${this._onToggle} title=${targetLabel}>
+                <button
+                  class="switch-btn"
+                  @click=${this._onToggle}
+                  title=${targetLabel}
+                  aria-label=${targetLabel}
+                >
                   <img class="target-logo" src="/static/logo/${targetLogo}.png" alt="" />
                   <span class="target-label">${targetLabel}</span>
                   <wa-icon library="mdi" name="swap-horizontal"></wa-icon>

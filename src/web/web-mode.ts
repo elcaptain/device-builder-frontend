@@ -19,14 +19,17 @@ export function readMode(search: string = window.location.search): WebMode {
  */
 export function modeUrl(mode: WebMode, url: URL = new URL(window.location.href)): string {
   const next = new URL(url.toString());
+  // Drop any existing pico param, then re-append it bare for pico mode. Other
+  // params keep their exact ``key=value`` (or empty ``key=``) semantics —
+  // building the string by hand avoids the URLSearchParams ``pico=`` form
+  // without touching unrelated params.
+  next.searchParams.delete(PICO_PARAM);
+  let search = next.search;
   if (mode === "pico") {
-    next.searchParams.set(PICO_PARAM, "");
-  } else {
-    next.searchParams.delete(PICO_PARAM);
+    // Legacy site used a bare ``?pico`` (no ``=``).
+    search = search ? `${search}&${PICO_PARAM}` : `?${PICO_PARAM}`;
   }
-  // URLSearchParams renders an empty value as ``pico=``; the legacy site used a
-  // bare ``?pico``. Normalize so the two match and the URL stays tidy.
-  return next.pathname + next.search.replace(/=(?=&|$)/g, "") + next.hash;
+  return next.pathname + search + next.hash;
 }
 
 /** Push a mode change into the address bar without a navigation/reload. */

@@ -164,6 +164,8 @@
     "logs_method_title": "How to get the logs for your device?",
     "logs_method_wireless": "On the network",
     "logs_method_wireless_desc": "Requires the device to be online",
+    "logs_method_web_serial": "Plug into this computer",
+    "logs_method_web_serial_desc": "Opens ESPHome Web, where you can connect over USB and view serial logs (this page can't use USB over an insecure connection).",
     "logs_method_network_address_submit": "View logs over network",
     "logs_web_serial_unsupported": "Web Serial is not supported in this browser",
     "logs_serial_disabled": "Serial logging is disabled for this device (logger baud_rate is 0).",
@@ -1528,7 +1530,33 @@
       "failed": "Failed to connect: {error}"
     },
     "improv": {
-      "open_failed": "Could not open the serial port for Wi-Fi setup: {error}"
+      "open_failed": "Could not open the serial port for Wi-Fi setup: {error}",
+      "port_busy": "The device is busy with another operation. Close it and try again."
+    },
+    "flash": {
+      "title": "Install firmware",
+      "status": "USB flasher",
+      "hint_opener": "Plug the board into this computer over USB, then press Connect & install.",
+      "hint_direct": "Pick a factory .bin below, plug in the board, then press Connect & install.",
+      "firmware_ready": "Firmware received. Press Connect & install.",
+      "firmware_ready_named": "Firmware received: {name}. Press Connect & install.",
+      "connecting": "Connecting to device…",
+      "erasing": "Erasing device…",
+      "writing": "Installing…",
+      "done": "Installed and rebooting. Live logs below; press Stop logs when finished.",
+      "done_opener": "Installed and rebooting. Live logs below; close this tab when finished.",
+      "malformed": "Received a malformed firmware payload.",
+      "invalid_image": "This does not look like ESP32/ESP8266 firmware.",
+      "no_port": "No serial port selected.",
+      "choose_file": "Choose a factory .bin file first.",
+      "connect_install": "Connect & install",
+      "stop_logs": "Stop logs",
+      "close_tab": "Close this tab",
+      "done_button": "Done",
+      "log_placeholder": "Waiting…",
+      "manual": "No firmware received? Flash a factory .bin manually:",
+      "logs_unavailable": "[serial logs unavailable: {error}]",
+      "no_reenumerate": "the device did not re-enumerate in time"
     },
     "esp": {
       "title": "ESP Device",
@@ -1567,6 +1595,11 @@
       "clear": "Clear",
       "open_failed": "Could not open the serial port: {error}",
       "reset_failed": "Could not reset the device."
+    },
+    "dashboard_hint": {
+      "logs": "Connect your device below, then click Logs to view its output.",
+      "install": "Connect your device below, then click Install to flash your downloaded project.",
+      "wizard": "Connect your device below, then Prepare it for first use to add it to your ESPHome Device Builder."
     },
     "intro": {
       "welcome": "Welcome to ESPHome Web!",

@@ -263,6 +263,18 @@ Elements are prefixed `esphome-web-*`; new copy goes in `en.json` under
 backend; ESPHome Web instead talks to hardware over USB and fetches adoption
 firmware from firmware.esphome.io.
 
+**Flash-receiver mode** (`src/web/flash-receiver/`): web.esphome.io doubles as
+the secure-context flash target the dashboard hands firmware to over
+`postMessage` when it can't flash itself (HA add-on over plain http — Web
+Serial needs https/localhost). `usb-flasher.ts` (the dashboard sender) opens
+`https://web.esphome.io/#nonce=…&origin=…`; the shell detects that hash +
+`window.opener` and renders `esphome-web-flash-receiver` instead of the
+dashboard. The channel is authenticated by the one-way `nonce` +
+`event.source === opener` (no origin allowlist — the opener is arbitrary
+http). If you touch the wire format, keep it in sync with `usb-flasher.ts` and
+the backend's `flasher/src/protocol.ts`, and don't set a
+`Cross-Origin-Opener-Policy` header (it would sever `window.opener`).
+
 ## Things not to do
 
 - **Don't add backwards-compatibility shims for older backends**

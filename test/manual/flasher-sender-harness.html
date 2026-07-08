@@ -1,0 +1,117 @@
+<!doctype html>
+<!--
+  Manual test harness for the ESPHome Web postMessage flash receiver
+  (src/web/flash-receiver/). Plays the dashboard's sender role — mirrors
+  src/util/usb-flasher.ts — so the receiver can be tested end to end against a
+  real ESP without standing up the backend. Not an automated test (vitest only
+  runs test/**/*.test.ts); flashing needs real hardware.
+
+  Usage:
+    1. npm run dev:web                       # receiver → http://localhost:5174
+    2. python3 -m http.server 8000           # from this test/manual/ dir
+    3. open http://localhost:8000/flasher-sender-harness.html
+    4. pick a factory .bin, click Flash → complete it in the popup
+       (Connect & install → pick the serial port). The log mirrors the
+       ready / state / progress frames the real dashboard would show.
+
+  The protocol handshake itself is covered without hardware by
+  test/web/flash-handshake.test.ts.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ESPHome Web flasher — sender harness</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+      h1 { font-size: 1.2rem; }
+      label, input, button { display: block; margin: 0.75rem 0; }
+      input[type="file"] { }
+      button { padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
+      #log { background: #111; color: #ddd; padding: 0.75rem; border-radius: 6px;
+             white-space: pre-wrap; font-family: ui-monospace, monospace; min-height: 8rem; }
+      .row { display: flex; gap: 0.5rem; align-items: center; }
+      code { background: #eee; padding: 1px 4px; border-radius: 3px; }
+    </style>
+  </head>
+  <body>
+    <h1>ESPHome Web flasher — sender harness</h1>
+    <p>
+      Simulates the dashboard hand-off (mirrors <code>usb-flasher.ts</code>). Serve this
+      over http, pick a factory <code>.bin</code>, and click Flash. It opens the receiver,
+      waits for <code>ready</code>, then posts the firmware. Complete the flash in the popup
+      (<em>Connect &amp; install</em> → pick the serial port).
+    </p>
+
+    <label>
+      Receiver URL (your local ESPHome Web):
+      <input id="url" size="40" value="http://localhost:5174/" />
+    </label>
+    <label>
+      Factory .bin to flash:
+      <input id="file" type="file" accept=".bin" />
+    </label>
+    <button id="flash" disabled>Flash on device →</button>
+
+    <div id="log">Ready.</div>
+
+    <script>
+      // Wire protocol — must match src/util/usb-flasher.ts / src/web/flash-receiver/protocol.ts
+      const MSG_READY = "esphome-web-flash:ready";
+      const MSG_FIRMWARE = "esphome-web-flash:firmware";
+      const MSG_STATE = "esphome-web-flash:state";
+      const MSG_PROGRESS = "esphome-web-flash:progress";
+      const PROTOCOL_VERSION = 1;
+
+      const $ = (id) => document.getElementById(id);
+      const logEl = $("log");
+      const log = (m) => { logEl.textContent += "\n" + m; logEl.scrollTop = logEl.scrollHeight; };
+
+      let fileBytes = null;
+      $("file").addEventListener("change", async (e) => {
+        const f = e.target.files[0];
+        fileBytes = f ? await f.arrayBuffer() : null;
+        $("flash").disabled = !fileBytes;
+        if (f) log(`Loaded ${f.name} (${fileBytes.byteLength} bytes)`);
+      });
+
+      $("flash").addEventListener("click", () => {
+        if (!fileBytes) return;
+        const base = $("url").value.trim().replace(/#.*$/, "");
+        const origin = new URL(base).origin;
+        const nonce = crypto.getRandomValues(new Uint8Array(16))
+          .reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+
+        // Open the receiver with the nonce + our origin, exactly like the dashboard.
+        const win = window.open(
+          `${base}#nonce=${encodeURIComponent(nonce)}&origin=${encodeURIComponent(location.origin)}`,
+          "_blank"
+        );
+        if (!win) { log("Pop-up blocked — allow pop-ups for this page."); return; }
+        log(`Opened ${base} (nonce ${nonce.slice(0, 8)}…). Waiting for ready…`);
+
+        let bytes = fileBytes;
+        let handedOff = false;
+        const onMessage = (ev) => {
+          if (ev.origin !== origin || ev.source !== win) return;
+          const d = ev.data || {};
+          if (d.type === MSG_READY && !handedOff && bytes) {
+            handedOff = true;
+            log(`Receiver ready (v${d.version}). Sending firmware…`);
+            win.postMessage(
+              { type: MSG_FIRMWARE, version: PROTOCOL_VERSION, nonce,
+                name: "harness.factory.bin", deviceName: "Test device",
+                erase: true, parts: [{ address: 0, data: bytes }] },
+              origin, [bytes]
+            );
+            bytes = null; // transferred
+          } else if (d.type === MSG_PROGRESS) {
+            log(`  progress: ${d.pct}%`);
+          } else if (d.type === MSG_STATE) {
+            log(`  state: ${d.state}${d.detail ? " — " + d.detail : ""}`);
+          }
+        };
+        window.addEventListener("message", onMessage);
+      });
+    </script>
+  </body>
+</html>

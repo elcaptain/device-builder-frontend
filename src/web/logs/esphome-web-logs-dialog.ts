@@ -35,12 +35,37 @@ const MAX_LOG_LINES = 10000;
 const LOG_BAUD_RATE = 115200;
 
 /**
+ * Open a port for the logs view before showing the dialog. Returns ``true`` if
+ * the port is ready to stream. Opening here (in the caller's click gesture)
+ * rather than inside the dialog keeps the failure path out of the dialog's
+ * show/hide lifecycle. An already-open port (``InvalidStateError`` — a prior
+ * action or reset race left it open) is fine; the dialog streams it as-is.
+ */
+export async function openPortForLogs(
+  port: SerialPort,
+  localize: LocalizeFunc
+): Promise<boolean> {
+  try {
+    await port.open({ baudRate: LOG_BAUD_RATE });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "InvalidStateError") return true;
+    toast.error(
+      localize("web.logs.open_failed", {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+    return false;
+  }
+  return true;
+}
+
+/**
  * Serial log viewer for ESPHome Web.
  *
  * Reuses the dashboard's ``process-terminal`` display but drives it from a
  * plain Web Serial reader instead of the backend logs WS — no ``apiContext``,
- * no OTA source. It owns the port for the dialog's lifetime: opened when the
- * dialog opens, closed on ``after-hide``.
+ * no OTA source. The parent opens the port (via ``openPortForLogs``) before
+ * showing the dialog; the dialog streams it and closes it on ``after-hide``.
  */
 @customElement("esphome-web-logs-dialog")
 export class ESPHomeWebLogsDialog extends LitElement {
@@ -61,50 +86,77 @@ export class ESPHomeWebLogsDialog extends LitElement {
   @state() private _streaming = false;
 
   private _cancel?: () => void;
+  // Batched line buffer flushed on the next animation frame, matching the
+  // dashboard logs dialog (logs-dialog.ts): a flooding device would otherwise
+  // trigger a Lit render per line. Flushed early on teardown / clear / download.
+  private _pendingLines: string[] = [];
+  private _flushScheduled = 0;
 
   protected updated(changed: Map<string, unknown>): void {
     if (changed.has("open")) {
       if (this.open) {
-        void this._start();
+        this._start();
       } else {
         this._stop();
       }
     }
   }
 
-  private async _start(): Promise<void> {
-    if (!this.port || this._cancel) return;
-    this._lines = [];
-    try {
-      await this.port.open({ baudRate: LOG_BAUD_RATE });
-    } catch (err) {
-      toast.error(
-        this._localize("web.logs.open_failed", {
-          error: err instanceof Error ? err.message : String(err),
-        })
-      );
-      this.dispatchEvent(new CustomEvent("after-hide", { bubbles: true }));
-      return;
-    }
+  // The parent opens the port (openPortForLogs) before showing the dialog, so
+  // here we just stream it. Defensive guard: a closed port has no readable.
+  private _start(): void {
+    if (!this.port?.readable || this._cancel) return;
+    this._resetLines();
     this._streaming = true;
     // Shared reader: same ESPHome log formatting / timestamps / garbage
     // filtering as the dashboard's post-install serial logs. The cancel it
     // returns also closes the port.
     this._cancel = streamSerialLines(this.port, {
-      onLine: (line) => this._appendLine(line),
+      onLine: (line) => this._enqueueLine(line),
     });
   }
 
   private _stop(): void {
     this._streaming = false;
+    this._resetPending();
     const cancel = this._cancel;
     this._cancel = undefined;
     cancel?.();
   }
 
-  private _appendLine(line: string): void {
-    const merged = [...this._lines, line];
+  // Buffer a streamed line; flush on the next animation frame so a log flood
+  // triggers one render per frame, not per line.
+  private _enqueueLine(line: string): void {
+    this._pendingLines.push(line);
+    // rAF doesn't fire while the tab is hidden, so bound the pending buffer too.
+    if (this._pendingLines.length > 2 * MAX_LOG_LINES) {
+      this._pendingLines = this._pendingLines.slice(-MAX_LOG_LINES);
+    }
+    if (this._flushScheduled) return;
+    this._flushScheduled = requestAnimationFrame(() => {
+      this._flushScheduled = 0;
+      this._flushPending();
+    });
+  }
+
+  private _flushPending(): void {
+    if (this._pendingLines.length === 0) return;
+    const merged = [...this._lines, ...this._pendingLines];
     this._lines = merged.length > MAX_LOG_LINES ? merged.slice(-MAX_LOG_LINES) : merged;
+    this._pendingLines = [];
+  }
+
+  private _resetPending(): void {
+    this._pendingLines = [];
+    if (this._flushScheduled) {
+      cancelAnimationFrame(this._flushScheduled);
+      this._flushScheduled = 0;
+    }
+  }
+
+  private _resetLines(): void {
+    this._resetPending();
+    this._lines = [];
   }
 
   // Pulse DTR/RTS to reboot the running app so the user can capture boot
@@ -122,12 +174,13 @@ export class ESPHomeWebLogsDialog extends LitElement {
   }
 
   private _download(): void {
+    this._flushPending();
     const stem = this.deviceLabel || "esphome-web";
     downloadAnsiText(this._lines, `${stem}-logs.txt`);
   }
 
   private _clear(): void {
-    this._lines = [];
+    this._resetLines();
   }
 
   private _onAfterHide(): void {

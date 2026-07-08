@@ -83,23 +83,24 @@ export function streamSerialLines(port: SerialPort, hooks: SerialLineHooks): () 
     }
   };
 
-  void readLoop();
+  const loopDone = readLoop();
 
   return () => {
     if (cancelled) return;
     cancelled = true;
-    // Stop the loop, then close the port once the reader lock is released
-    // (closing a still-locked port fails, leaving it open and blocking the
-    // next open()).
-    reader
+    // Cancel the reader, then wait for the read loop to finish (its finally
+    // block calls releaseLock) BEFORE closing the port. Closing a still-locked
+    // port throws and leaves it open, blocking the next open(); awaiting
+    // loopDone guarantees the lock is released first.
+    void reader
       .cancel()
       .catch(() => {
         /* Already disposed — nothing to do. */
       })
-      .finally(() => {
-        port.close().catch(() => {
-          /* Port already closed (user pulled the cable, etc). */
-        });
+      .then(() => loopDone)
+      .then(() => port.close())
+      .catch(() => {
+        /* Port already closed (user pulled the cable, etc). */
       });
   };
 }

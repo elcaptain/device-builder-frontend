@@ -17,7 +17,7 @@ import { registerMdiIcons } from "../../util/register-icons.js";
 import { openImprovDialog } from "../improv/open-improv-dialog.js";
 import "../install/esphome-web-install-adoptable-dialog.js";
 import "../install/esphome-web-install-upload-dialog.js";
-import "../logs/esphome-web-logs-dialog.js";
+import { openPortForLogs } from "../logs/esphome-web-logs-dialog.js";
 import { cardActionsRowStyles } from "./card-actions-row.js";
 import "./esphome-web-card.js";
 
@@ -48,7 +48,10 @@ export class ESPHomeWebEspDeviceCard extends LitElement {
   @state() private _uploadOpen = false;
   @state() private _adoptableOpen = false;
 
-  private _showLogs(): void {
+  private async _showLogs(): Promise<void> {
+    // Open the port before showing the dialog so a connect failure surfaces a
+    // toast instead of an empty terminal (the dialog streams an open port).
+    if (!(await openPortForLogs(this.port, this._localize))) return;
     this._logsOpen = true;
   }
 

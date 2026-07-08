@@ -36,3 +36,20 @@ export const FLASHER_URL = "https://web.esphome.io/";
 export const FLASHER_ORIGIN = new URL(FLASHER_URL).origin;
 // The bare host (no scheme), for user-facing copy; same single source as above.
 export const FLASHER_HOST = new URL(FLASHER_URL).host;
+
+/**
+ * Deep-link guides ESPHome Web reads (``?dashboard_<hint>``) to steer the user
+ * to the matching action after they connect. ``wizard`` = prepare a device for
+ * first use, ``install`` = flash a downloaded project, ``logs`` = view logs.
+ * Kept in sync with ESPHome Web's ``src/web/dashboard-hint.ts``.
+ */
+export type EsphomeWebHint = "logs" | "install" | "wizard";
+
+/**
+ * Build a link to the standalone ESPHome Web tool (same site as the flasher),
+ * optionally with a ``?dashboard_<hint>`` guide so it highlights the right
+ * action for the flow that sent the user there.
+ */
+export function esphomeWebUrl(hint?: EsphomeWebHint): string {
+  return hint ? `${FLASHER_URL}?dashboard_${hint}` : FLASHER_URL;
+}

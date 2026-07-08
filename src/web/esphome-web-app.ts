@@ -7,6 +7,8 @@ import { defaultLocalize, loadLocalize, type LocalizeFunc } from "../common/loca
 import { darkModeContext, localizeContext } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
 import "./dashboard/esphome-web-dashboard.js";
+import "./flash-receiver/esphome-web-flash-receiver.js";
+import { parseFlasherParams } from "./flash-receiver/flash-handshake.js";
 import "./header/esphome-web-header.js";
 import { readMode, writeMode, type WebMode } from "./web-mode.js";
 
@@ -29,6 +31,12 @@ export class ESPHomeWebApp extends LitElement {
   private _darkMode = false;
 
   @state() private _mode: WebMode = readMode();
+
+  // Flasher hand-off mode: opened by the dashboard as a postMessage flash
+  // target (``#nonce=…`` + a ``window.opener``). Computed once at construction
+  // — the hash/opener don't change over the page's life.
+  private _flasherMode =
+    window.opener != null && parseFlasherParams(window.location.hash) != null;
 
   private _darkModeQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -87,10 +95,15 @@ export class ESPHomeWebApp extends LitElement {
     return html`
       <esphome-web-header
         .mode=${this._mode}
+        ?minimal=${this._flasherMode}
         @toggle-mode=${this._onToggleMode}
       ></esphome-web-header>
       <main>
-        <esphome-web-dashboard .mode=${this._mode}></esphome-web-dashboard>
+        ${
+          this._flasherMode
+            ? html`<esphome-web-flash-receiver></esphome-web-flash-receiver>`
+            : html`<esphome-web-dashboard .mode=${this._mode}></esphome-web-dashboard>`
+        }
       </main>
       <footer class="app-footer">
         <span>${this._localize("web.footer.tagline")}</span>

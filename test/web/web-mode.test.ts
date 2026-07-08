@@ -46,6 +46,14 @@ describe("modeUrl", () => {
   it("keeps the hash fragment", () => {
     expect(modeUrl("pico", new URL("https://web.esphome.io/#x"))).toBe("/?pico#x");
   });
+
+  it("leaves other empty-valued params untouched (only pico is bare)", () => {
+    // Regression: the old regex stripped '=' from every empty param.
+    expect(modeUrl("pico", new URL("https://web.esphome.io/?foo=&bar=1"))).toBe(
+      "/?foo=&bar=1&pico"
+    );
+    expect(modeUrl("esp", new URL("https://web.esphome.io/?foo=&pico"))).toBe("/?foo=");
+  });
 });
 
 describe("writeMode", () => {

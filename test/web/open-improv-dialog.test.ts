@@ -74,7 +74,7 @@ describe("openImprovDialog", () => {
     expect(dialogEl()).toBeTruthy();
   });
 
-  it("proceeds when the port is already open (InvalidStateError)", async () => {
+  it("proceeds when the port is already open with unlocked streams", async () => {
     const port = makePort(async () => {
       throw new DOMException("already open", "InvalidStateError");
     });
@@ -84,6 +84,18 @@ describe("openImprovDialog", () => {
     expect(dialogEl()).toBeTruthy();
     dialogEl()!.dispatchEvent(new CustomEvent("closed", { detail: {} }));
     await promise;
+  });
+
+  it("bails with a toast when the already-open port's streams are locked", async () => {
+    const port = makePort(async () => {
+      throw new DOMException("already open", "InvalidStateError");
+    });
+    port.readable = { locked: true };
+    const result = await openImprovDialog(port as unknown as SerialPort, localize);
+
+    expect(result).toBe(false);
+    expect(toast.error).toHaveBeenCalledOnce();
+    expect(dialogEl()).toBeNull();
   });
 
   it("toasts and returns false without mounting when open fails", async () => {

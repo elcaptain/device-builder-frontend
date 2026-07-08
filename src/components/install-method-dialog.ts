@@ -16,6 +16,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import type { ESPHomeAPI } from "../api/index.js";
 import { DeviceState } from "../api/types/devices.js";
+import { esphomeWebUrl } from "../common/docs.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import { apiContext, localizeContext } from "../context/index.js";
 import { primaryDialogHeaderStyles } from "../styles/dialog-header.js";
@@ -202,12 +203,18 @@ export class ESPHomeInstallMethodDialog extends LitElement {
     // actionable solely via in-app Web Serial, so show it only when that's
     // available; otherwise logs go through server-serial / OTA.
     const showUsbRow = isEsptool && (isLogs ? hasWebSerial : !dropDisabledUsb);
+    // Logs on an insecure origin: the in-app USB row is hidden (Web Serial is
+    // blocked here and the external flasher only flashes), so offer a link to
+    // ESPHome Web — a secure-context origin where the user can connect over USB
+    // and read serial logs. ESP-only, like the USB row.
+    const showLogsWebRow = isLogs && isEsptool && availability === "insecure-context";
     const serverSerialKeys = this._serverSerialCopyKeys(env);
 
     return html`
       <div class="list">
         ${this._renderOtaOption(isOnline)}
         ${showUsbRow ? this._renderUsbOption(availability) : nothing}
+        ${showLogsWebRow ? this._renderLogsWebOption() : nothing}
         ${
           showServerSerialRow
             ? html`<div class="option" @click=${this._onServerSerial}>
@@ -305,6 +312,29 @@ export class ESPHomeInstallMethodDialog extends LitElement {
             >${this._localize("dashboard.install_method_usb_local")}</span
           >
           <span class="desc">${desc}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Logs-mode row for an insecure origin: open ESPHome Web (a secure-context
+   * origin) with the ``?dashboard_logs`` hint so it steers the user to Logs
+   * after they connect over USB. web.esphome.io is https, so Web Serial works
+   * there even when this origin (HA add-on over http) blocks it.
+   */
+  private _renderLogsWebOption() {
+    return html`
+      <div
+        class="option"
+        @click=${() => window.open(esphomeWebUrl("logs"), "_blank", "noopener")}
+      >
+        <wa-icon library="mdi" name="usb"></wa-icon>
+        <div class="info">
+          <span class="title">${this._localize("dashboard.logs_method_web_serial")}</span>
+          <span class="desc"
+            >${this._localize("dashboard.logs_method_web_serial_desc")}</span
+          >
         </div>
       </div>
     `;
