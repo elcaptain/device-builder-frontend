@@ -18,8 +18,7 @@ import {
   type BannerError,
   type MappedValidationError,
 } from "../../src/util/yaml-lint-backend.js";
-
-const flush = () => new Promise((r) => setTimeout(r, 0));
+import { flush } from "../_dom.js";
 
 // Echo the key + line so a humanized hit is distinguishable from raw text.
 const localize = (key: string, values?: Record<string, string | number>): string =>
@@ -77,7 +76,7 @@ describe("backend linter humanizes + banners a locatable parse error", () => {
         {
           message: "yaml_editor.error_indent_fix:2",
           line: 2,
-          fix: { line: 2, indent: 2, key: "platform" },
+          fix: { line: 2, indent: 2, key: "platform", fromIndent: 0 },
           kind: "parse",
         },
       ]);
@@ -120,7 +119,7 @@ describe("backend linter humanizes + banners a locatable parse error", () => {
       expect(actions.map((a) => a.name)).toEqual(["yaml_editor.error_auto_fix"]);
 
       actions[0].apply(view, 0, 0);
-      expect(fixes).toEqual([{ line: 2, indent: 2, key: "platform" }]);
+      expect(fixes).toEqual([{ line: 2, indent: 2, key: "platform", fromIndent: 0 }]);
     } finally {
       view.destroy();
     }
@@ -195,6 +194,54 @@ describe("backend linter humanizes + banners a locatable parse error", () => {
       expect(banner[0].line).toBe(4);
       expect(banner[0].message).toContain("expected a dictionary.");
       expect(banner[0].message).toContain("yaml_editor.error_nested_list_hint");
+    } finally {
+      view.destroy();
+    }
+  });
+
+  // The stuck dash's valid-YAML variant: `-platform:` parses as a mapping
+  // key, so the error arrives from schema validation — the cause hint and
+  // the dash-space repair must ride the validation banner entry.
+  it("banners a stuck-dash validation error with the dash-space fix", async () => {
+    const doc = ["ota:", "  -platform: esphome", ""].join("\n");
+    const validateYaml = vi.fn(async () => ({
+      yaml_errors: [],
+      validation_errors: [
+        {
+          message: "'ota' requires a 'platform' key but it was not specified.",
+          range: {
+            document: "x.yaml",
+            start_line: 1,
+            start_col: 2,
+            end_line: 1,
+            end_col: doc.split("\n")[1].length,
+          },
+        },
+      ],
+    })) as unknown as ESPHomeAPI["validateYaml"];
+
+    let banner: BannerError[] = [];
+    const view = mountView(
+      validateYaml,
+      (errors) => {
+        banner = errors;
+      },
+      undefined,
+      doc
+    );
+    try {
+      forceLinting(view);
+      await flush();
+      expect(banner).toHaveLength(1);
+      expect(banner[0].kind).toBe("validation");
+      expect(banner[0].message).toContain("yaml_editor.error_dash_space_fix");
+      expect(banner[0].fix).toEqual({
+        line: 2,
+        indent: 0,
+        key: "-platform",
+        fromIndent: 2,
+        kind: "dash-space",
+      });
     } finally {
       view.destroy();
     }
