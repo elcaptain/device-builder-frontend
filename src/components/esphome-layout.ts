@@ -378,7 +378,7 @@ export class ESPHomeLayout extends LitElement {
               : nothing
           }
           <button class="header-logo" @click=${this._goHome}>
-            <img src=${withBase("/assets/logo/esphome.svg")} alt="ESPHome" />
+            <img src=${withBase("/assets/logo/esphome-mono-white.svg")} alt="ESPHome" />
           </button>
         </div>
         <div class="header-text">
