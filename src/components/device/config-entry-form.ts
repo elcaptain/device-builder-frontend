@@ -200,13 +200,15 @@ export class ESPHomeConfigEntryForm extends LitElement {
   @property({ type: Boolean, attribute: "force-advanced-control" })
   forceAdvancedControl = false;
 
-  /** Keep an all-advanced form gated behind the "Advanced settings" control
-   *  instead of auto-opening it. The device section editor sets this so an
+  /** Gate advanced fields behind the "Advanced settings" control, surfacing
+   *  only the ones present in the YAML. The device section editor sets this so
+   *  a component shows its filled fields (basic or advanced) inline while every
+   *  empty advanced field stays hidden until the toggle is turned on — and so an
    *  all-advanced component (captive_portal) hides its fields with the toggle
-   *  off; automation action/trigger/condition nodes leave it off so their
-   *  all-advanced params still show inline. */
-  @property({ type: Boolean, attribute: "gate-all-advanced" })
-  gateAllAdvanced = false;
+   *  off instead of auto-opening. Automation action/trigger/condition nodes and
+   *  the script editor leave it off, keeping their inline / force-open paint. */
+  @property({ type: Boolean, attribute: "gate-advanced" })
+  gateAdvanced = false;
 
   /** Added to the advanced-section "(N)" count for that external content. */
   @property({ type: Number, attribute: "advanced-extra-count" })
@@ -419,25 +421,50 @@ export class ESPHomeConfigEntryForm extends LitElement {
     // behind a control, so render it all with no control — unless the owner gates
     // external content (script Parameters) through it, which must stay reachable.
     const allAdvanced = advanced.length > 0 && basic.length === 0;
-    // Pre-filled advanced fields stay visible without a click, matching the
-    // legacy material-value behaviour — open the section when any is set.
-    const forceOpen = this._advancedForceOpen();
     // all-advanced auto-opens (an all-advanced action shows its fields with no
     // control) EXCEPT when the owner gates external content (script Parameters)
     // through the control, or the device section editor opts out via
-    // gateAllAdvanced so an all-advanced component (captive_portal) still hides
-    // its fields behind the control instead of painting them open.
+    // gateAdvanced so an all-advanced component (captive_portal) still hides its
+    // fields behind the control instead of painting them open.
     const autoOpenAllAdvanced =
-      allAdvanced && !this.forceAdvancedControl && !this.gateAllAdvanced;
-    const open = this.showAdvanced || forceOpen || autoOpenAllAdvanced;
+      allAdvanced && !this.forceAdvancedControl && !this.gateAdvanced;
+    // Section editor (gateAdvanced): YAML-present advanced units paint inline
+    // among the basic fields, and only the empty ones are gated behind the
+    // control — so one filled advanced field can't drag the rest on screen. A
+    // unit "is in the YAML" when it (or any group/cluster member) carries a
+    // material value, the same rule ``filterRenderable`` uses to keep pre-filled
+    // advanced leaves visible. Every other host keeps the whole advanced group
+    // gated (inline: none), so the split runs only under gateAdvanced.
+    let inlineAdvanced: (ConfigEntry | ConfigEntry[])[] = [];
+    let gatedAdvanced = advanced;
+    if (this.gateAdvanced) {
+      const unitPrefilled = (item: ConfigEntry | ConfigEntry[]): boolean => {
+        if (Array.isArray(item))
+          return item.some((e) => hasMaterialValue(e, this.values));
+        if (plan.memberKeys.has(item.key)) {
+          const cluster = plan.clusterByFirstKey.get(item.key);
+          return !!cluster?.members.some((m) => hasMaterialValue(m, this.values));
+        }
+        return hasMaterialValue(item, this.values);
+      };
+      gatedAdvanced = [];
+      for (const item of advanced) {
+        (unitPrefilled(item) ? inlineAdvanced : gatedAdvanced).push(item);
+      }
+    }
+    // gateAdvanced never force-opens on a pre-filled field (those already paint
+    // inline) and never locks the switch — it's a real toggle over the empty
+    // advanced fields, off by default.
+    const locked = this._effectiveForceOpen();
+    const open = this.showAdvanced || locked || autoOpenAllAdvanced;
     const showControl =
       this.forceAdvancedControl || (hasAdvanced && !autoOpenAllAdvanced);
-    const count = advanced.length + this.advancedExtraCount;
+    const count = gatedAdvanced.length + this.advancedExtraCount;
     return html`${this._renderConstraintBanners(ctx, plan.memberKeys)}${basic.map(
       renderItem
-    )}${showControl ? this._renderAdvancedControl(open, count, forceOpen) : nothing}${
-      open ? advanced.map(renderItem) : nothing
-    }`;
+    )}${inlineAdvanced.map(renderItem)}${
+      showControl ? this._renderAdvancedControl(open, count, locked) : nothing
+    }${open ? gatedAdvanced.map(renderItem) : nothing}`;
   }
 
   /** Per-item renderer shared by both paint paths. An empty key means "this
@@ -447,11 +474,10 @@ export class ESPHomeConfigEntryForm extends LitElement {
     plan: ReturnType<typeof buildFormRenderPlan>,
     ctx: RenderCtx
   ) {
-    const clusterByFirstKey = new Map(plan.clusters.map((c) => [c.members[0].key, c]));
     return (item: ConfigEntry | ConfigEntry[]) => {
       if (Array.isArray(item)) return renderExclusiveGroupField(item, ctx);
       if (plan.memberKeys.has(item.key)) {
-        const cluster = clusterByFirstKey.get(item.key);
+        const cluster = plan.clusterByFirstKey.get(item.key);
         if (!cluster) return nothing;
         return isRadioCluster(cluster)
           ? renderConstraintRadioField(cluster, ctx)
@@ -467,6 +493,13 @@ export class ESPHomeConfigEntryForm extends LitElement {
    *  collapsed while a value is set, matching the legacy material-value rule. */
   private _advancedForceOpen(): boolean {
     return this.entries.some((e) => e.advanced && hasMaterialValue(e, this.values));
+  }
+
+  /** The force-open kernel: a pre-filled advanced field opens the section, but
+   *  never under ``gateAdvanced`` (there such fields paint inline). Consumed by
+   *  the render split and the ``updated()`` host mirror so they can't disagree. */
+  private _effectiveForceOpen(): boolean {
+    return !this.gateAdvanced && this._advancedForceOpen();
   }
 
   /** Classify a render unit as advanced. A group (exclusive dropdown or
@@ -576,8 +609,11 @@ export class ESPHomeConfigEntryForm extends LitElement {
     // Force-open (a pre-filled advanced field) is a form-internal decision;
     // mirror it onto the host so externally-gated siblings (the script editor's
     // Parameters block) track the visibly-open section. The host flipping
-    // showAdvanced true stops the condition, so this self-limits.
-    if (this.advancedSection && !this.showAdvanced && this._advancedForceOpen()) {
+    // showAdvanced true stops the condition, so this self-limits. Skipped under
+    // gateAdvanced (folded into _effectiveForceOpen): there a pre-filled advanced
+    // field paints inline, so nothing needs the section forced open — and flipping
+    // showAdvanced would reveal every empty advanced field, the bug this guards.
+    if (this.advancedSection && !this.showAdvanced && this._effectiveForceOpen()) {
       this._emitAdvancedToggle(true);
     }
   }
