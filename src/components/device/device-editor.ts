@@ -1,6 +1,5 @@
 import { consume } from "@lit/context";
 import {
-  mdiCheckCircleOutline,
   mdiChevronDown,
   mdiContentSave,
   mdiDockLeft,
@@ -49,11 +48,11 @@ import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
 import "../confirm-dialog.js";
 import "../yaml-diff.js";
 import "../yaml-editor.js";
+import "./device-actions-menu.js";
 import "./device-board-info.js";
 import "./editor-invalid-banner.js";
 
 registerMdiIcons({
-  "check-circle-outline": mdiCheckCircleOutline,
   "chevron-down": mdiChevronDown,
   "content-save": mdiContentSave,
   eye: mdiEye,
@@ -300,31 +299,16 @@ export class ESPHomeDeviceEditor extends LitElement {
         </header>
         <div class="card-body">
           <div class="editor-floating-actions">
+            <!-- Leftmost so it stays clear of Save in the lower-right corner:
+                 a mis-tap on Save must not land on the overflow menu.
+                 Carries Validate too (Install validates anyway, so the
+                 explicit button rarely earned its slot on the bar). -->
+            <esphome-device-actions-menu
+              ?busy=${this.busy}
+              ?validate-disabled=${this.hasUnsavedEdits}
+              @validate=${this._onValidate}
+            ></esphome-device-actions-menu>
             ${this._renderPrimaryAction()}
-            <!-- Span wrapper carries the title because a disabled
-                 button isn't focusable and most browsers won't
-                 surface its tooltip on hover. The disabled state
-                 is still announced via the button's own disabled
-                 attribute; the span just makes the why-disabled
-                 hint reachable for mouse users. -->
-            <span
-              class="validate-button-wrap"
-              title=${
-                this.hasUnsavedEdits
-                  ? this._localize("device.validate_disabled_pending")
-                  : this._localize("device.validate_yaml")
-              }
-            >
-              <button
-                type="button"
-                class="validate-button"
-                ?disabled=${this.hasUnsavedEdits}
-                @click=${this._onValidate}
-              >
-                <wa-icon library="mdi" name="check-circle-outline"></wa-icon>
-                ${this._localize("device.validate")}
-              </button>
-            </span>
             <button
               type="button"
               class="save-button"
