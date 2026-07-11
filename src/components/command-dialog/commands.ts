@@ -1,6 +1,7 @@
 import { APIError } from "../../api/api-error.js";
 import { type FirmwareJob, JobStatus, JobType } from "../../api/types/firmware-jobs.js";
 import { ErrorCode } from "../../api/types/protocol.js";
+import { effectiveJobType } from "../../util/firmware-job-display.js";
 import { isTerminalJobStatus } from "../../util/firmware-job-status.js";
 import { isValidationFailureLine } from "../../util/validation-log.js";
 import { classifyNoCompatiblePeerReason } from "../../util/version-mismatch.js";
@@ -28,7 +29,7 @@ export function deriveFollowCommandType(
     if (dependent?.job_type === JobType.RENAME) return "rename";
     if (dependent?.job_type === JobType.UPLOAD) return "install";
   }
-  return JOB_TYPE_TO_COMMAND[job.job_type] ?? "install";
+  return JOB_TYPE_TO_COMMAND[effectiveJobType(job)] ?? "install";
 }
 
 // An install chain is followed via its COMPILE head, but the flash target
@@ -198,14 +199,20 @@ export function followJob(host: ESPHomeCommandDialog, jobId: string): void {
       host._enqueueLine(line);
       if (isValidationFailureLine(line)) host._failedDuringValidate = true;
     },
-    onResult: (data) => {
+    onResult: (result) => {
       host._streamId = "";
       host._flushPendingLines();
-      const result = data as unknown as Pick<
-        FirmwareJob,
-        "status" | "exit_code" | "is_deferred_install"
-      >;
       const success = result.status === JobStatus.COMPLETED;
+
+      // Queued is the outcome regardless of which job carried it; check
+      // before chaining into a dependent flash — a converted chain's
+      // upload is already cancelled.
+      if (result.queued_update_armed) {
+        host._state = "success";
+        host._statusMessage = host._localize("dashboard.queued_successfully");
+        host._jobId = "";
+        return;
+      }
 
       // On a successful install/rename COMPILE, follow the dependent flash —
       // the install's UPLOAD or the rename's flash-and-swap tail — so success
@@ -230,14 +237,6 @@ export function followJob(host: ESPHomeCommandDialog, jobId: string): void {
           // so the remote-builder sub-line doesn't linger on the compile's
           // receiver.
           primeAndFollow(host, flash);
-          return;
-        }
-        // A deferred install compiles now and flashes when the device wakes,
-        // so no dependent flash exists — queued is the success state.
-        if (result.is_deferred_install) {
-          host._state = "success";
-          host._statusMessage = host._localize("dashboard.queued_successfully");
-          host._jobId = "";
           return;
         }
         // No flash step — the device was never flashed, so don't report success.
