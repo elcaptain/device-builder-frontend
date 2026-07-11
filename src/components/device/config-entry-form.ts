@@ -38,7 +38,7 @@ import {
   catalogEntryToProvider,
   type ComponentProvider,
 } from "../../util/config-entry-yaml-scan.js";
-import { type ValidationError } from "../../util/config-validation.js";
+import { isEntryVisible, type ValidationError } from "../../util/config-validation.js";
 import { resolveDeviceName } from "../../util/device-name.js";
 import { getErrorMessage } from "../../util/error-message.js";
 import { fetchAllComponents } from "../../util/fetch-all-components.js";
@@ -199,6 +199,14 @@ export class ESPHomeConfigEntryForm extends LitElement {
    *  (the script editor's Parameters block) behind the same control. */
   @property({ type: Boolean, attribute: "force-advanced-control" })
   forceAdvancedControl = false;
+
+  /** Keep an all-advanced form gated behind the "Advanced settings" control
+   *  instead of auto-opening it. The device section editor sets this so an
+   *  all-advanced component (captive_portal) hides its fields with the toggle
+   *  off; automation action/trigger/condition nodes leave it off so their
+   *  all-advanced params still show inline. */
+  @property({ type: Boolean, attribute: "gate-all-advanced" })
+  gateAllAdvanced = false;
 
   /** Added to the advanced-section "(N)" count for that external content. */
   @property({ type: Number, attribute: "advanced-extra-count" })
@@ -377,8 +385,32 @@ export class ESPHomeConfigEntryForm extends LitElement {
     );
     const renderItem = this._makeItemRenderer(plan, ctx);
     const isAdvanced = this._advancedUnitClassifier(plan);
-    const basic = plan.ordered.filter((item) => !isAdvanced(item));
-    const advanced = plan.ordered.filter((item) => isAdvanced(item));
+    // Split only units that actually paint: a plain entry filtered out of
+    // ``plan.visible`` (advanced+hidden like captive_portal's setup_priority, or
+    // a depends_on that isn't met) renders nothing, so it must not inflate the
+    // "(N)" count or tip the all-advanced check. An exclusive group is one
+    // dropdown. A constraint cluster is one box painted at its *first* member's
+    // slot, and only when a member is renderable — ``renderConstraintClusterField``
+    // returns nothing when every member is gated off, so mirror that predicate
+    // here or a fully-gated cluster still counts.
+    const targetPlatform = ctx.board?.esphome.platform ?? null;
+    const clusterRenders = (cluster: (typeof plan.clusters)[number]): boolean =>
+      cluster.members.some(
+        (m) =>
+          getIn(this.values, [m.key]) !== undefined ||
+          isEntryVisible(m, this.values, this.presentComponents, targetPlatform)
+      );
+    const renderedClusterKeys = new Set(
+      plan.clusters.filter(clusterRenders).map((c) => c.members[0].key)
+    );
+    const willRender = (item: ConfigEntry | ConfigEntry[]): boolean => {
+      if (Array.isArray(item)) return true;
+      if (plan.memberKeys.has(item.key)) return renderedClusterKeys.has(item.key);
+      return plan.visible.has(item);
+    };
+    const rendered = plan.ordered.filter(willRender);
+    const basic = rendered.filter((item) => !isAdvanced(item));
+    const advanced = rendered.filter((item) => isAdvanced(item));
     // Control visibility is recursive: a nested advanced field reveals in place
     // (it can't move to the bottom section), so the control must surface even
     // when no top-level unit is advanced, or that field stays unreachable.
@@ -392,11 +424,14 @@ export class ESPHomeConfigEntryForm extends LitElement {
     const forceOpen = this._advancedForceOpen();
     // all-advanced auto-opens (an all-advanced action shows its fields with no
     // control) EXCEPT when the owner gates external content (script Parameters)
-    // through the control: there the user must drive it, or the host's
-    // showAdvanced never flips and the external block stays unreachable.
-    const open =
-      this.showAdvanced || forceOpen || (allAdvanced && !this.forceAdvancedControl);
-    const showControl = this.forceAdvancedControl || (hasAdvanced && !allAdvanced);
+    // through the control, or the device section editor opts out via
+    // gateAllAdvanced so an all-advanced component (captive_portal) still hides
+    // its fields behind the control instead of painting them open.
+    const autoOpenAllAdvanced =
+      allAdvanced && !this.forceAdvancedControl && !this.gateAllAdvanced;
+    const open = this.showAdvanced || forceOpen || autoOpenAllAdvanced;
+    const showControl =
+      this.forceAdvancedControl || (hasAdvanced && !autoOpenAllAdvanced);
     const count = advanced.length + this.advancedExtraCount;
     return html`${this._renderConstraintBanners(ctx, plan.memberKeys)}${basic.map(
       renderItem
