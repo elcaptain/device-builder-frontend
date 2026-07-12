@@ -88,11 +88,22 @@ export function renderCard(
   // API regression yielding a whitespace category id) so we don't render
   // a blank pill.
   const categoryLabel = shouldShowCategoryChip(host._category)
-    ? categoryChipLabel(component.category)
+    ? categoryChipLabel(
+        (featured ? component.underlying_category : component.category) ?? ""
+      )
     : "";
   // Surfaced only when this card shares a name with another in the same
   // category; the category chip can't tell same-domain platforms apart.
   const platform = showPlatform ? platformLabel(component.id) : "";
+  // Native title tooltips don't render inside the dialog's top layer
+  // (Chromium suppresses them over showModal dialogs), so the
+  // recommendation explainer rides a wa-tooltip anchored to the chip.
+  // Empty until the board body has hydrated — the chip renders without
+  // a tooltip then, rather than naming a placeholder board.
+  const recommendedTooltip =
+    featured && host.board
+      ? localize("device.recommended_chip_tooltip", { board: host.board.name })
+      : "";
   return html`
     <article
       class="component-card ${expanded ? "component-card--expanded" : ""} ${
@@ -120,6 +131,23 @@ export function renderCard(
         }
         <div class="component-card-header-text">
           <h3 class="component-title">${component.name}</h3>
+          ${
+            featured
+              ? html`<span
+                    id=${`recommended-chip-${component.id}`}
+                    class="component-category-chip component-category-chip--recommended"
+                    tabindex=${recommendedTooltip ? "0" : "-1"}
+                    >${categoryChipLabel("featured")}</span
+                  >
+                  ${
+                    recommendedTooltip
+                      ? html`<wa-tooltip for=${`recommended-chip-${component.id}`}
+                          >${recommendedTooltip}</wa-tooltip
+                        >`
+                      : nothing
+                  }`
+              : nothing
+          }
           ${
             categoryLabel
               ? html`<span class="component-category-chip">${categoryLabel}</span>`

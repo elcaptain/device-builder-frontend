@@ -1,12 +1,102 @@
 // @vitest-environment happy-dom
+import { render } from "lit";
 import { describe, expect, it } from "vitest";
-import { shouldHandleCardClick } from "../../../src/components/device/component-catalog/renderers.js";
+import {
+  ComponentCategory,
+  type ComponentCatalogEntry,
+} from "../../../src/api/types/components.js";
+import type { ESPHomeComponentCatalog } from "../../../src/components/device/component-catalog.js";
+import {
+  renderCard,
+  shouldHandleCardClick,
+} from "../../../src/components/device/component-catalog/renderers.js";
 
 function clickFrom(target: Element): MouseEvent {
   const ev = new MouseEvent("click", { bubbles: true });
   Object.defineProperty(ev, "target", { value: target });
   return ev;
 }
+
+function makeHost(): ESPHomeComponentCatalog {
+  return {
+    _imageFailed: new Set<string>(),
+    _category: "all",
+    board: { name: "Guition Smart Screen" },
+    _onAdd: () => {},
+    _onToggleExpand: () => {},
+    _onImageError: () => {},
+  } as unknown as ESPHomeComponentCatalog;
+}
+
+function makeEntry(overrides: Partial<ComponentCatalogEntry>): ComponentCatalogEntry {
+  return {
+    id: "spi",
+    name: "SPI Bus",
+    description: "",
+    category: ComponentCategory.BUS,
+    docs_url: "",
+    image_url: "",
+    ...overrides,
+  } as ComponentCatalogEntry;
+}
+
+const localize = (key: string, values?: Record<string, string | number>) => {
+  if (key === "device.component_category_featured") return "Recommended";
+  if (key === "device.recommended_chip_tooltip")
+    return `Pre-configured for the ${values?.board}`;
+  return key;
+};
+
+describe("renderCard", () => {
+  it("marks a featured card with the Recommended chip plus its real category", () => {
+    const container = document.createElement("div");
+    const entry = makeEntry({
+      id: "featured.board.lcd_spi",
+      category: ComponentCategory.FEATURED,
+      underlying_category: ComponentCategory.BUS,
+    });
+    render(renderCard(makeHost(), entry, false, true, localize), container);
+    const chip = container.querySelector(".component-category-chip--recommended");
+    expect(chip?.textContent?.trim()).toBe("Recommended");
+    // Focusable so keyboard users can raise the tooltip (focus trigger).
+    expect(chip?.getAttribute("tabindex")).toBe("0");
+    // Native title tooltips don't render inside the dialog's top layer,
+    // so the explanation rides a wa-tooltip targeting the chip's id.
+    const tooltip = container.querySelector("wa-tooltip");
+    expect(tooltip?.getAttribute("for")).toBe(chip?.id);
+    expect(tooltip?.textContent?.trim()).toBe(
+      "Pre-configured for the Guition Smart Screen"
+    );
+    const chips = [...container.querySelectorAll(".component-category-chip")].map((c) =>
+      c.textContent?.trim()
+    );
+    expect(chips).toEqual(["Recommended", "Bus"]);
+    expect(container.querySelector(".component-card--featured")).not.toBeNull();
+  });
+
+  it("omits the tooltip until the board body has hydrated", () => {
+    const container = document.createElement("div");
+    const host = makeHost();
+    (host as unknown as { board: null }).board = null;
+    const entry = makeEntry({
+      id: "featured.board.lcd_spi",
+      category: ComponentCategory.FEATURED,
+    });
+    render(renderCard(host, entry, false, true, localize), container);
+    const chip = container.querySelector(".component-category-chip--recommended");
+    expect(chip).not.toBeNull();
+    expect(container.querySelector("wa-tooltip")).toBeNull();
+    // No tooltip to raise — the chip must not be a dead tab stop.
+    expect(chip?.getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("keeps the muted category chip on a regular card", () => {
+    const container = document.createElement("div");
+    render(renderCard(makeHost(), makeEntry({}), false, false, localize), container);
+    expect(container.querySelector(".component-category-chip--recommended")).toBeNull();
+    expect(container.querySelector(".component-category-chip")?.textContent).toBe("Bus");
+  });
+});
 
 describe("shouldHandleCardClick", () => {
   it("adds when the click landed on a non-interactive part of the card", () => {
