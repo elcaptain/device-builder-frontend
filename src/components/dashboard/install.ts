@@ -1,6 +1,6 @@
 import type { ConfiguredDevice } from "../../api/types/devices.js";
 import type { ESPHomePageDashboard } from "../../pages/dashboard.js";
-import { firmwareJobDisplayName } from "../../util/firmware-job-display.js";
+import { followActiveJob } from "../../util/firmware-job-display.js";
 import { launchLogs } from "../../util/logs-launch.js";
 import { applyInstallMethod } from "../apply-install-method.js";
 import type { CommandType } from "../command-dialog.js";
@@ -10,6 +10,7 @@ export function openInstallMethod(
   host: ESPHomePageDashboard,
   device: ConfiguredDevice
 ): void {
+  if (showJobProgress(host, device)) return;
   host._installMethodDevice = device;
   host._installMethodMode = "install";
   host._installMethodOpen = true;
@@ -27,6 +28,10 @@ export function onInstallMethodSelect(
     void openLogsWithMethod(host, device, method, port);
     return;
   }
+  // A job may have started while the picker sat open; enqueuing now
+  // would supersede it. Covers the firmwareDialog methods too, which
+  // never reach openCommand's guard.
+  if (showJobProgress(host, device)) return;
   applyInstallMethod(method, port, {
     device,
     firmwareDialog: host._firmwareDialog,
@@ -41,18 +46,21 @@ export function openCommand(
   port?: string,
   options?: { bootloader?: boolean }
 ): void {
+  if (type === "install" && showJobProgress(host, device)) return;
   host._commandDialog.openForDevice(device, type, { port, ...options });
 }
 
+/** Re-attach the command dialog to the device's running job; true when one existed. */
 export function showJobProgress(
   host: ESPHomePageDashboard,
   device: ConfiguredDevice
-): void {
-  const job = host._activeJobs.get(device.configuration);
-  if (!job) return;
-  host._commandDialog.followJob(
-    job,
-    firmwareJobDisplayName(job, host._devices, host._localize)
+): boolean {
+  return followActiveJob(
+    host._activeJobs,
+    device.configuration,
+    host._commandDialog,
+    host._devices,
+    host._localize
   );
 }
 
