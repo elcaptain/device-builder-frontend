@@ -51,9 +51,9 @@ import { AutoApplyController } from "./auto-apply-controller.js";
 import type { ESPHomeAutomationActionList } from "./automation-action-list.js";
 import { automationEditorStyles } from "./automation-editor.styles.js";
 import {
-  type AutomationFocus,
-  automationRelativePath,
-  resolveAutomationFocus,
+  actionsFocus,
+  createFocusResolver,
+  entryFieldFocus,
   type YamlPathSegment,
 } from "./automation-focus.js";
 import { CatalogLoadController } from "./catalog-load-controller.js";
@@ -189,19 +189,7 @@ export class ESPHomeAutomationEditor extends LitElement {
    *  read-only Target field can preview ${...} like the text fields do. */
   private _parseSubstitutions = memoizeOne(parseSubstitutions);
 
-  /** Cursor path → tree focus. Memoized on (value, location, path) so it
-   *  self-heals once the async hydrate lands the tree. */
-  private _resolveFocus = memoizeOne(
-    (
-      value: AutomationTree | null,
-      location: AutomationLocation | null,
-      path?: YamlPathSegment[]
-    ): AutomationFocus | null => {
-      if (!value || !path?.length) return null;
-      const rel = automationRelativePath(path, location);
-      return rel ? resolveAutomationFocus(value, rel) : null;
-    }
-  );
+  private _resolveFocus = createFocusResolver();
 
   static styles = [espHomeStyles, inputStyles, automationEditorStyles];
 
@@ -443,7 +431,7 @@ export class ESPHomeAutomationEditor extends LitElement {
               yaml: this.yaml,
               disabled,
               showAdvanced: this._showAdvanced,
-              focusFieldPath: focus && focus.node.length === 0 ? focus.field : undefined,
+              focusFieldPath: entryFieldFocus(focus),
               onValueChange: this._onTriggerParamsValueChange,
               onAdvancedToggle: this._onAdvancedToggle,
             })}`
@@ -458,7 +446,7 @@ export class ESPHomeAutomationEditor extends LitElement {
         yaml: this.yaml,
         disabled,
         localize: this._localize,
-        focusTarget: focus && focus.node.length > 0 ? focus : null,
+        focusTarget: actionsFocus(focus),
         onOpenPicker: () => this._actionList?.openPicker(),
         onActionsChange: this._onActionsChange,
       })}

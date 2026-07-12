@@ -11,6 +11,8 @@
  * ``wait_until``'s gate-less shorthand) and fails soft: an unresolved
  * tail degrades to the deepest resolved node.
  */
+import memoizeOne from "memoize-one";
+
 import type {
   ActionNode,
   AutomationLocation,
@@ -51,10 +53,16 @@ export function automationRelativePath(
 ): YamlPathSegment[] | null {
   const anchor = location && handlerAnchor(location);
   if (!anchor) return null;
-  const at = path.indexOf(anchor.key);
+  let at = path.indexOf(anchor.keys[0]);
+  while (at >= 0 && !anchor.keys.every((k, i) => path[at + i] === k)) {
+    at = path.indexOf(anchor.keys[0], at + 1);
+  }
   if (at < 0) return null;
-  const rest = path.slice(at + 1);
+  const rest = path.slice(at + anchor.keys.length);
   if (anchor.index === undefined) return rest;
+  if (anchor.index === "any") {
+    return typeof rest[0] === "number" ? rest.slice(1) : null;
+  }
   return rest[0] === anchor.index ? rest.slice(1) : null;
 }
 
@@ -87,6 +95,26 @@ export function childFocus(focus: AutomationFocus): AutomationFocus {
   return { node: focus.node.slice(1), field: focus.field };
 }
 
+/** The editor-level routing rule: a non-empty ``node`` path belongs to
+ *  the actions list. */
+export function actionsFocus(focus: AutomationFocus | null): AutomationFocus | null {
+  return focus && focus.node.length > 0 ? focus : null;
+}
+
+/** The counterpart: an empty ``node`` path targets the editor's
+ *  entry-params form. */
+export function entryFieldFocus(focus: AutomationFocus | null): string[] | undefined {
+  return focus && focus.node.length === 0 ? focus.field : undefined;
+}
+
+/** Entry-field focus routed to a callable-params block (``parameters``
+ *  / ``variables``): the targeted name, ``""`` for the block itself,
+ *  ``null`` when the focus points elsewhere. */
+export function paramFocus(focus: AutomationFocus | null, key: string): string | null {
+  const field = entryFieldFocus(focus);
+  return field?.[0] === key ? (field[1] ?? "") : null;
+}
+
 /** Value key for dedupe — the parent re-slices a fresh object per render. */
 export function focusKey(focus: AutomationFocus | null | undefined): string | undefined {
   return focus ? JSON.stringify([focus.node, focus.field]) : undefined;
@@ -99,21 +127,49 @@ export function focusTargetHasChanged(a: unknown, b: unknown): boolean {
   return focusKey(a as AutomationFocus | null) !== focusKey(b as AutomationFocus | null);
 }
 
-/** The list key anchoring a location's handler body in the YAML, plus
- *  the entry index for list-shaped handlers. */
+function resolveFocus(
+  value: AutomationTree | null,
+  location: AutomationLocation | null,
+  path?: YamlPathSegment[]
+): AutomationFocus | null {
+  if (!value || !path?.length) return null;
+  const rel = automationRelativePath(path, location);
+  return rel ? resolveAutomationFocus(value, rel) : null;
+}
+
+/** Memoized cursor-path → focus resolver, one per editor instance —
+ *  keyed on (value, location, path) so it self-heals once the async
+ *  hydrate lands the tree. */
+export function createFocusResolver(): typeof resolveFocus {
+  return memoizeOne(resolveFocus);
+}
+
+/**
+ * The key sequence anchoring a location's handler body in the YAML,
+ * plus the entry-index policy for list-shaped handlers.
+ *
+ * ``"any"`` consumes whatever entry index the cursor path carries:
+ * script / api-action locations identify their entry by id, not
+ * index, and the caret that produced the path is the same one that
+ * resolved the location, so they agree by construction.
+ */
 function handlerAnchor(
   location: AutomationLocation
-): { key: string; index?: number } | null {
+): { keys: string[]; index?: number | "any" } | null {
   switch (location.kind) {
     case "device_on":
     case "component_on":
-      return { key: location.trigger, index: location.index };
+      return { keys: [location.trigger], index: location.index };
     case "component_action":
-      return { key: location.field };
+      return { keys: [location.field] };
     case "interval":
-      return { key: "interval", index: location.index };
+      return { keys: ["interval"], index: location.index };
+    case "script":
+      return { keys: ["script"], index: "any" };
+    case "api_action":
+      return { keys: ["api", "actions"], index: "any" };
     default:
-      // script / api_action / light_effect mount different editors.
+      // light_effect mounts a different editor.
       return null;
   }
 }
