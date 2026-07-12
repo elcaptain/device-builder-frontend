@@ -41,6 +41,7 @@ import { withBase } from "../util/base-path.js";
 import { fetchBoard } from "../util/board-body-cache.js";
 import { showPendingChanges, showUpdateAvailable } from "../util/device-sync.js";
 import { deviceLayoutToPref, prefToDeviceLayout } from "../util/editor-layout.js";
+import { firmwareJobDisplayName } from "../util/firmware-job-display.js";
 import { consumeJustCreated } from "../util/just-created.js";
 import { navigate, setLeaveGuard } from "../util/navigation.js";
 import { postInstallShowLogsHandler } from "../util/post-install-logs.js";
@@ -947,8 +948,11 @@ export class ESPHomePageDevice extends LitElement {
   };
 
   // Persist the editor buffer before building — install/compile build the
-  // on-disk file, so an unsaved edit would flash the previous version.
+  // on-disk file, so an unsaved edit would flash the previous version. A
+  // click while a job already runs re-attaches to it instead: no save (the
+  // edit stays in the buffer), no second job.
   private _installAfterSave = async (run: () => void): Promise<void> => {
+    if (this._showActiveJobProgress()) return;
     let saved: boolean;
     try {
       saved = await this._saveYaml();
@@ -963,6 +967,19 @@ export class ESPHomePageDevice extends LitElement {
   };
   private _saveThenInstall = () => this._installAfterSave(this._installCtrl.onInstall);
   private _saveThenUpdate = () => this._installAfterSave(this._installCtrl.onUpdate);
+
+  /** Re-attach the command dialog to this device's running job, if any —
+   *  the Update/Install buttons stay clickable mid-job and open the
+   *  in-progress stream instead of saving and starting another job. */
+  private _showActiveJobProgress(): boolean {
+    const job = this._activeJobs.get(this.id);
+    if (!job) return false;
+    this._commandDialog.followJob(
+      job,
+      firmwareJobDisplayName(job, this._devices, this._localize)
+    );
+    return true;
+  }
 
   /** Catch ``clean-build`` from the install dialog's post-failure
    *  hint and route it through this page's command-dialog —

@@ -29,7 +29,7 @@ import { labelsContext, localizeContext } from "../context/index.js";
 import { espHomeStyles } from "../styles/shared.js";
 import { labelChipStyles } from "../util/label-chip-template.js";
 import { registerMdiIcons } from "../util/register-icons.js";
-import { updateButtonTitle } from "../util/update-tooltip.js";
+import { updateActionTitle } from "../util/update-tooltip.js";
 import { renderVisitWebUiLink } from "../util/visit-web-ui-link.js";
 import { navigateCards, onHostContextMenu } from "./device-card/keyboard-nav.js";
 import {
@@ -269,11 +269,13 @@ export class ESPHomeDeviceCard extends LitElement {
     if (this.showUpdate) {
       return html`<button
         class="action-btn action-btn--accent action-btn--tile"
-        ?disabled=${this.busy}
-        @click=${() => this._emit("update-device")}
-        aria-label=${this._localize("dashboard.update")}
-        title=${updateButtonTitle(
+        @click=${() => this._emit(this.busy ? "show-progress" : "update-device")}
+        aria-label=${this._localize(
+          this.busy ? "dashboard.table_action_view_progress" : "dashboard.update"
+        )}
+        title=${updateActionTitle(
           this._localize,
+          this.busy,
           this.installedVersion,
           this.availableVersion,
           "dashboard.update"
@@ -283,12 +285,14 @@ export class ESPHomeDeviceCard extends LitElement {
       </button>`;
     }
     if (this.showModified) {
+      const label = this._localize(
+        this.busy ? "dashboard.table_action_view_progress" : "dashboard.install"
+      );
       return html`<button
         class="action-btn action-btn--accent action-btn--tile"
-        ?disabled=${this.busy}
-        @click=${() => this._emit("install-device")}
-        aria-label=${this._localize("dashboard.install")}
-        title=${this._localize("dashboard.install")}
+        @click=${() => this._emit(this.busy ? "show-progress" : "install-device")}
+        aria-label=${label}
+        title=${label}
       >
         <wa-icon library="mdi" name="upload"></wa-icon>
       </button>`;
