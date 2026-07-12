@@ -26,6 +26,7 @@ import { dropdownMenuStyles } from "../../styles/dropdown-menu.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { EscapeController } from "../../util/escape-controller.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import { busyActionLabel } from "../../util/update-tooltip.js";
 import { renderVisitWebUiLink } from "../../util/visit-web-ui-link.js";
 import { buildWebUiUrl } from "../../util/web-ui-url.js";
 
@@ -204,11 +205,11 @@ export class ESPHomeTableRowMenu extends LitElement {
           ${this._localize("dashboard.action_validate")}
         </div>
         <div
-          class="menu-item menu-item--install ${this.busy ? "menu-item--disabled" : ""}"
-          @click=${this.busy ? undefined : () => this._emit("install-device")}
+          class="menu-item menu-item--install"
+          @click=${() => this._emit(this.busy ? "show-progress" : "install-device")}
         >
           <wa-icon library="mdi" name="upload"></wa-icon>
-          ${this._localize("dashboard.action_install")}
+          ${busyActionLabel(this._localize, this.busy, "dashboard.action_install")}
         </div>
         ${
           this.device?.runtime_state.queued_update
