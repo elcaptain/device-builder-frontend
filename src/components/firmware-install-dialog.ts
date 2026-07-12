@@ -22,6 +22,7 @@ import {
   apiContext,
   buildOffloadPairingsContext,
   darkModeContext,
+  desktopVersionContext,
   firmwareJobsContext,
   localizeContext,
 } from "../context/index.js";
@@ -110,6 +111,10 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
   @consume({ context: buildOffloadPairingsContext, subscribe: true })
   @state()
   _pairings: Map<string, PairingSummary> | null = null;
+
+  @consume({ context: desktopVersionContext, subscribe: true })
+  @state()
+  _desktopVersion = "";
 
   @state() _open = false;
   @state() _step: InstallStep = "installing";

@@ -26,6 +26,7 @@ import {
   buildOffloadJobsContext,
   buildOffloadPairingsContext,
   darkModeContext,
+  desktopVersionContext,
   devicesContext,
   firmwareJobsContext,
   localizeContext,
@@ -127,6 +128,10 @@ export class ESPHomeCommandDialog extends LitElement {
   @consume({ context: buildOffloadPairingsContext, subscribe: true })
   @state()
   _pairings: Map<string, PairingSummary> | null = null;
+
+  @consume({ context: desktopVersionContext, subscribe: true })
+  @state()
+  _desktopVersion = "";
 
   @consume({ context: versionContext, subscribe: true })
   @state()
