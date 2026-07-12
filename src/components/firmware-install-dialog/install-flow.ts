@@ -350,6 +350,8 @@ export async function startArtifactDownload(
   const device = host._device;
   if (!device) return;
 
+  if (!(await artifactsSettled(host, device.configuration))) return;
+
   let binaries = await fetchBinaries(host, device.configuration);
   if (!binaries) return;
   if (binaries.length === 0) {
@@ -372,12 +374,15 @@ export async function startArtifactDownload(
 
 // Fetch one binary and hand it to the browser. Shared by the auto-select
 // paths and the picker; leaves _binaries intact for "download another format".
+// Re-settles at select time: the picker (or download-ready's "another
+// format") can sit open while a new build starts rewriting the file.
 export async function downloadSelectedBinary(
   host: ESPHomeFirmwareInstallDialog,
   file: string
 ): Promise<void> {
   const device = host._device;
   if (!device) return;
+  if (!(await artifactsSettled(host, device.configuration))) return;
   host._statusMessage = host._localize("firmware.status_downloading");
   // Distinct from the compile steps: the byte fetch isn't cancelable, so the
   // footer must not offer Stop (see renderFooter).
@@ -513,6 +518,67 @@ export function handOffToFlasher(host: ESPHomeFirmwareInstallDialog): void {
   // after a lost/never-ready tab recompiles, which is incremental and cheap.
   host._usbFirmware = null;
   host._usbFlashTeardown = teardown;
+}
+
+/**
+ * Wait out any running job for *configuration* before touching its
+ * artifacts — a running build both rewrites the files a download would
+ * read and would be superseded (cancelled + restarted) by a fresh
+ * compile (#1200).
+ *
+ * True to proceed; false when the wait didn't complete (dialog dismissed,
+ * or the follow stream errored and the dialog already shows the failure).
+ */
+async function artifactsSettled(
+  host: ESPHomeFirmwareInstallDialog,
+  configuration: string
+): Promise<boolean> {
+  const running = host._activeJobs.get(configuration);
+  if (!running) return true;
+  host._statusMessage = host._localize("firmware.status_waiting_build");
+  if (!(await waitForRunningJob(host, running.job_id))) return false;
+  host._statusMessage = host._localize("firmware.status_downloading");
+  return true;
+}
+
+/**
+ * Stream an already-running job into the dialog and wait for it to reach
+ * a terminal state.
+ *
+ * Deliberately never sets ``host._jobId``: the dialog doesn't own this
+ * job, so dismissing the download must not cancel it — teardown only
+ * stops the follow stream. Resolves true on ANY terminal outcome (a
+ * failed or cancelled build just means the download compiles fresh
+ * afterwards); false when the dialog was dismissed mid-wait, or on a
+ * follow-stream error — a dead stream says nothing about the job, so
+ * proceeding could still read torn artifacts or supersede it. The error
+ * case fails the dialog; a retry re-reads the active-jobs map.
+ */
+function waitForRunningJob(
+  host: ESPHomeFirmwareInstallDialog,
+  jobId: string
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    host._compileReject = () => resolve(false);
+    host._streamId = host._api.firmwareFollowJob(jobId, {
+      onOutput: (line) => {
+        if (host._step === "queued") host._step = "compiling";
+        host._timer.noteLine(line);
+        host._logLines = [...host._logLines, line];
+      },
+      onResult: () => {
+        host._streamId = "";
+        host._compileReject = null;
+        resolve(true);
+      },
+      onError: () => {
+        host._streamId = "";
+        host._compileReject = null;
+        host._fail(host._localize("firmware.download_failed"));
+        resolve(false);
+      },
+    });
+  });
 }
 
 export function compileAndWait(
