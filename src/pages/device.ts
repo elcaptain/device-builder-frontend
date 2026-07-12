@@ -47,7 +47,10 @@ import { navigate, setLeaveGuard } from "../util/navigation.js";
 import { postInstallShowLogsHandler } from "../util/post-install-logs.js";
 import { registerMdiIcons } from "../util/register-icons.js";
 import { UnsavedGuard } from "../util/unsaved-guard.js";
-import { resolveSectionForUrlLine } from "../util/url-line-resolver.js";
+import {
+  resolveSectionForUrlLine,
+  resolveUrlLineFocus,
+} from "../util/url-line-resolver.js";
 import { buildWebUiUrl } from "../util/web-ui-url.js";
 import {
   getLastValidatedResult,
@@ -170,7 +173,14 @@ export class ESPHomePageDevice extends LitElement {
   private _selectedSection: string | null = this._readUrlParam("section", null);
 
   @state()
-  private _selectedFromLine?: number = this._readUrlLine();
+  private _selectedFromLine?: number;
+
+  /** One-shot ``?line=`` deep-link intent, consumed (cleared) by
+   *  ``_maybeResolveLineFromUrl`` once the YAML is loaded. Kept apart
+   *  from ``_selectedFromLine`` — that field is durable section-instance
+   *  state the URL round-trips, so parking the intent there would
+   *  re-derive focus on every later ``_loadYaml`` (board swap). */
+  private _pendingUrlLine?: number = this._readUrlLine();
 
   /** Instance-relative field path the YAML cursor is on, for the form to
    *  scroll into view; empty on a section header / non-field line. */
@@ -676,8 +686,7 @@ export class ESPHomePageDevice extends LitElement {
   }
 
   /**
-   * Resolve a ``?line=N`` URL parameter to a concrete section
-   * once the YAML has loaded.
+   * Consume the one-shot ``?line=`` intent once the YAML has loaded.
    *
    * Direct-link arrivals from the dashboard's YAML hit list
    * carry only ``?line=N`` (not ``?section=``); the navigator's
@@ -686,16 +695,22 @@ export class ESPHomePageDevice extends LitElement {
    * the just-loaded YAML to find the section that contains line
    * N and pin both ``_selectedSection`` and ``_scrollToHighlight``
    * — the navigator's existing emit-on-update logic then fires
-   * the scroll-into-view dispatch in CodeMirror.
+   * the scroll-into-view dispatch in CodeMirror. The focus paths
+   * deep-target the line's field in the structured editor, and
+   * ``_selectedFromLine`` is pinned to the section's own start so
+   * the arrival is state-identical to a live caret move onto the
+   * line (instance disambiguation, same-section move checks).
    */
   private _maybeResolveLineFromUrl() {
-    const resolved = resolveSectionForUrlLine(
-      this._yaml,
-      this._selectedFromLine,
-      this._selectedSection
-    );
+    if (this._pendingUrlLine === undefined || !this._yaml) return;
+    const line = this._pendingUrlLine;
+    this._pendingUrlLine = undefined;
+    const resolved = resolveUrlLineFocus(this._yaml, line, this._selectedSection);
     if (!resolved) return;
     this._selectedSection = resolved.sectionKey;
+    this._selectedFromLine = resolved.sectionFromLine;
+    this._focusFieldPath = resolved.fieldPath;
+    this._focusYamlPath = resolved.yamlPath;
     // ``_highlightRange`` is what the editor reads to drive
     // scroll-into-view; the user-click path sets it via
     // ``_onYamlHighlight`` from the navigator's ``yaml-highlight``
@@ -926,7 +941,7 @@ export class ESPHomePageDevice extends LitElement {
       this._cacheLayout("both");
     }
     this._setHighlight({ fromLine: line, toLine: line }, true, true);
-    const resolved = resolveSectionForUrlLine(this._yaml, line, null);
+    const resolved = resolveSectionForUrlLine(this._yaml, line);
     if (resolved) {
       this._selectedSection = resolved.sectionKey;
     }
