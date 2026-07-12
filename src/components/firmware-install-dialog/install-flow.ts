@@ -538,6 +538,7 @@ export function compileAndWait(
             host._step = "compiling";
             host._statusMessage = host._localize("firmware.status_compiling");
           }
+          host._timer.noteLine(line);
           host._logLines = [...host._logLines, line];
           if (isValidationFailureLine(line)) host._failedDuringValidate = true;
         },

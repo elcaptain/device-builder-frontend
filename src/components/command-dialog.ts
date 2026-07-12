@@ -9,6 +9,7 @@ import {
   mdiServerNetwork,
   mdiStop,
   mdiTextBoxOutline,
+  mdiTimerOutline,
   mdiTimerSand,
 } from "@mdi/js";
 import { LitElement, html } from "lit";
@@ -47,11 +48,15 @@ import {
   stopCommand,
   toggleShowSecrets,
 } from "./command-dialog/commands.js";
+import { RunTimerController } from "../util/run-timer-controller.js";
 import {
+  renderCompileTimer,
+  renderOffloadHintSlot,
   renderQueuedOverlay,
   renderRemoteBuilderSubLine,
   renderResetSuggestion,
   renderToolbar,
+  showRunTimer,
 } from "./command-dialog/renderers.js";
 import { commandDialogStyles } from "./command-dialog/styles.js";
 import type { ESPHomeProcessTerminal } from "./process-terminal/process-terminal.js";
@@ -77,6 +82,7 @@ registerMdiIcons({
   "playlist-check": mdiPlaylistCheck,
   "server-network": mdiServerNetwork,
   "timer-sand": mdiTimerSand,
+  "timer-outline": mdiTimerOutline,
 });
 
 export type CommandType =
@@ -184,8 +190,25 @@ export class ESPHomeCommandDialog extends LitElement {
   _port = "OTA";
   // Install flashes the bootloader image instead of the app (OTA-only).
   _bootloader = false;
-  // Active job id (cancel target). Empty for validate.
+  // Active job id (cancel target). Empty for validate. Cleared when the stream
+  // ends, so it can't back the timer's total-run lookup past a completed job.
   _jobId = "";
+  // The job the timer reports on — the followed (compile) job. Unlike _jobId it
+  // survives the stream ending, so the detail popover can still read the job's
+  // started_at/completed_at for the total run time after an install's flash.
+  _timerJobId = "";
+
+  // Build run/compile clocks + the timer's detail popover.
+  _timer = new RunTimerController(this, {
+    job: () => (this._timerJobId ? this._jobs.get(this._timerJobId) : undefined),
+    jobId: () => this._timerJobId,
+    runEnded: () => this._state === "success" || this._state === "error",
+    // Tick while the run is live so both the total and the compile detail
+    // advance; stop once it freezes at completion.
+    tick: () =>
+      this._open && this._timer.totalRunElapsedMs !== null && !this._timer.isRunFrozen,
+    popoverWrapSelector: ".compile-timer-wrap",
+  });
 
   @query("esphome-process-terminal") _terminal?: ESPHomeProcessTerminal;
 
@@ -237,8 +260,10 @@ export class ESPHomeCommandDialog extends LitElement {
     this._resetPendingLines();
     this._statusMessage = "";
     this._jobId = "";
+    this._timerJobId = "";
     this._jobStatus = null;
     this._primedSource = null;
+    this._timer.reset();
     this._failedDuringValidate = false;
     // Always start with secrets redacted on a fresh open — opt-in per session.
     this._showSecrets = false;
@@ -276,12 +301,16 @@ export class ESPHomeCommandDialog extends LitElement {
     this._showSecrets = false;
     this._showLogsAfterInstall = true;
     this._jobId = job.job_id;
+    this._timerJobId = job.job_id;
     this._jobStatus = job.status;
     this._primedSource = {
       source: job.source,
       source_label: job.source_label,
       source_esphome_version: job.source_esphome_version,
     };
+    // Reattaching to a still-running (or finished) build: restore the true
+    // compile clock so the replayed buffer doesn't restart the timer from now.
+    this._timer.attach(job);
     // Cancel any prior follow before starting a new one — without this,
     // every reopen layered fresh streams while previous ones still pumped
     // onOutput into _lines (lines duplicated per leaked subscription).
@@ -293,7 +322,21 @@ export class ESPHomeCommandDialog extends LitElement {
 
   public close = () => {
     void detachStream(this);
+    this._timer.closeDetail();
     this._open = false;
+  };
+
+  // Close the terminal and open Settings → Send builds so the user can pair a
+  // faster machine. The build keeps running in the background queue.
+  _tryOpenBuildOffloadSettings = () => {
+    this.close();
+    this.dispatchEvent(
+      new CustomEvent("open-settings", {
+        detail: { section: "build_offload" },
+        bubbles: true,
+        composed: true,
+      })
+    );
   };
 
   // Reopen without clearing line buffer / status. Used by logs-dialog's
@@ -387,6 +430,7 @@ export class ESPHomeCommandDialog extends LitElement {
 
   // Buffer a streamed line; flushed on the next animation frame.
   _enqueueLine(line: string): void {
+    this._timer.noteLine(line);
     this._pendingLines.push(line);
     if (this._flushScheduled) return;
     this._flushScheduled = requestAnimationFrame(() => {
@@ -433,6 +477,7 @@ export class ESPHomeCommandDialog extends LitElement {
 
   private _onDialogHide = () => {
     this._open = false;
+    this._timer.closeDetail();
     void detachStream(this);
   };
 
@@ -447,12 +492,13 @@ export class ESPHomeCommandDialog extends LitElement {
         <esphome-process-terminal
           .lines=${this._lines}
           ?light=${!this._darkMode}
-          ?streaming=${this._state === "running"}
+          ?streaming=${this._state === "running" && !showRunTimer(this)}
           .state=${this._state}
           .statusMessage=${this._statusMessage}
         >
           ${renderRemoteBuilderSubLine(this)} ${renderQueuedOverlay(this)}
-          ${renderResetSuggestion(this)}
+          ${renderResetSuggestion(this)} ${renderOffloadHintSlot(this)}
+          ${renderCompileTimer(this)}
           <div class="toolbar-slot" slot="toolbar-right">${renderToolbar(this)}</div>
         </esphome-process-terminal>
       </esphome-base-dialog>

@@ -13,13 +13,22 @@ import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import type { ESPHomeAPI } from "../api/index.js";
 import type { ConfiguredDevice } from "../api/types/devices.js";
+import type { FirmwareJob } from "../api/types/firmware-jobs.js";
 import { type FirmwareBinary, JobSource } from "../api/types/firmware-jobs.js";
+import type { PairingSummary } from "../api/types/remote-build.js";
 import type { LocalizeFunc } from "../common/localize.js";
-import { apiContext, darkModeContext, localizeContext } from "../context/index.js";
+import {
+  apiContext,
+  buildOffloadPairingsContext,
+  darkModeContext,
+  firmwareJobsContext,
+  localizeContext,
+} from "../context/index.js";
 import { fullscreenMobileDialog } from "../styles/dialog-mobile.js";
 import { espHomeStyles } from "../styles/shared.js";
 import { initialDarkMode } from "../util/dark-mode.js";
 import { registerMdiIcons } from "../util/register-icons.js";
+import { RunTimerController } from "../util/run-timer-controller.js";
 import type { DetectedChip } from "../util/web-serial.js";
 import {
   downloadSelectedBinary,
@@ -36,6 +45,7 @@ import {
   cardStatusDetail,
   cardStatusMessage,
   renderFooter,
+  renderOffloadHintSlot,
   renderResetSuggestion,
   renderStatusExtra,
 } from "./firmware-install-dialog/renderers.js";
@@ -81,6 +91,17 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
     initialDarkMode();
   @consume({ context: apiContext }) _api!: ESPHomeAPI;
 
+  // Live job snapshot — the compile job's progress gauge is the second
+  // compile-start signal beside the log scanner (covers raw ninja builds).
+  @consume({ context: firmwareJobsContext, subscribe: true })
+  @state()
+  _jobs: Map<string, FirmwareJob> = new Map();
+
+  // Suppress the "set up a build server" hint once a build server is paired.
+  @consume({ context: buildOffloadPairingsContext, subscribe: true })
+  @state()
+  _pairings: Map<string, PairingSummary> | null = null;
+
   @state() _open = false;
   @state() _step: InstallStep = "installing";
   @state() _title = "";
@@ -124,6 +145,16 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
   _device: ConfiguredDevice | null = null;
   _jobId = "";
   _streamId = "";
+
+  // Build compile clocks — drives the compiling-step elapsed readout + the
+  // offload hint. The step-based runEnded backstop freezes the span when the
+  // flow leaves compiling without a summary banner.
+  _timer = new RunTimerController(this, {
+    job: () => (this._jobId ? this._jobs.get(this._jobId) : undefined),
+    jobId: () => this._jobId,
+    runEnded: () => this._step !== "compiling" && this._step !== "queued",
+    tick: () => this._open && this._timer.isCompiling,
+  });
 
   // The compiled factory image for the "web-flash" installer, held between the
   // download-ready step and the user clicking "Open USB flasher". Detached
@@ -234,6 +265,7 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
     this._failedDuringValidate = false;
     this._jobSource = JobSource.LOCAL;
     this._jobSourceLabel = "";
+    this._timer.reset();
     this._usbFirmware = null;
     this._usbFirmwareName = "";
     // _detachStream already cleared _jobId / _streamId / _compileReject.
@@ -243,8 +275,9 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
   // Tear down active follow_job: client-side (drop local handler) and
   // backend-side (stop pushing lines). Settles a pending _compileAndWait so
   // the parent flow doesn't hang. Cancels the underlying job so the backend
-  // stops working for a dismissed dialog.
-  _detachStream() {
+  // stops working for a dismissed dialog, unless ``cancelJob: false`` —
+  // then the job is released to finish in the background queue.
+  _detachStream({ cancelJob = true }: { cancelJob?: boolean } = {}) {
     // Tear down an in-flight USB-flasher hand-off (message listener + timers)
     // too, so closing or reusing the dialog can't leak it or let a stale
     // flasher tab mutate the next install's state. Pure teardown, no _fail.
@@ -262,7 +295,7 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
       reject(new Error("Install dialog dismissed"));
     }
     if (this._jobId) {
-      this._api.firmwareCancel(this._jobId).catch(() => {});
+      if (cancelJob) this._api.firmwareCancel(this._jobId).catch(() => {});
       this._jobId = "";
     }
   }
@@ -275,6 +308,21 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
       this.toggleAttribute("expanded", this._logsExpanded);
     }
   }
+
+  // Close the dialog and open Settings → Send builds. The install flow ends
+  // (the flash needs this dialog), but the compile itself is released to
+  // finish in the background queue, so its artifacts warm the next install.
+  _tryOpenBuildOffloadSettings = () => {
+    this._detachStream({ cancelJob: false });
+    this._close();
+    this.dispatchEvent(
+      new CustomEvent("open-settings", {
+        detail: { section: "build_offload" },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  };
 
   // Drop into red error state. detail is optional — render skips it entirely
   // when empty so a single-string call doesn't paint the same text twice.
@@ -396,7 +444,8 @@ export class ESPHomeFirmwareInstallDialog extends LitElement {
           .statusDetail=${cardStatusDetail(this)}
           .progress=${this._step === "flashing" ? this._flashPercent : null}
         >
-          ${renderResetSuggestion(this)} ${renderStatusExtra(this)}
+          ${renderResetSuggestion(this)} ${renderOffloadHintSlot(this)}
+          ${renderStatusExtra(this)}
           <div slot="toolbar-right">${renderFooter(this)}</div>
         </esphome-process-terminal>
       </esphome-base-dialog>
