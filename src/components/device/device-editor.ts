@@ -20,6 +20,7 @@ import {
   NO_INSTANCE_ERRORS,
   type InstanceBackendErrors,
 } from "../../util/backend-field-errors.js";
+import { effectiveDeviceLayout } from "../../util/editor-layout.js";
 import { notifyError, notifyWarning } from "../../util/notify.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { SaveShortcutController } from "../../util/save-shortcut-controller.js";
@@ -33,6 +34,11 @@ import {
 } from "../../util/split-ratio.js";
 import type { BannerError, YamlDiagnosticsDetail } from "../../util/yaml-lint-backend.js";
 import type { ESPHomeConfirmDialog } from "../confirm-dialog.js";
+import {
+  TOUR_REVEAL_EVENT,
+  tourAnchor,
+  type TourRevealEventDetail,
+} from "../guided-tour/tour-anchor.js";
 import type { ESPHomeYamlEditor, HighlightRange } from "../yaml-editor.js";
 import { renderEditorToolbar } from "./device-editor-toolbar.js";
 import { deviceEditorStyles } from "./device-editor.styles.js";
@@ -41,6 +47,7 @@ import type {
   BannerGotoLineDetail,
 } from "./editor-invalid-banner.js";
 import { renderInstallAction } from "./install-action.js";
+import { layoutRevealingAnchor } from "./tour-reveal-layout.js";
 
 import "@home-assistant/webawesome/dist/components/button/button.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
@@ -120,12 +127,20 @@ export class ESPHomeDeviceEditor extends LitElement {
     super.connectedCallback();
     this._isMobile = this._mql.matches;
     this._mql.addEventListener("change", this._onMqlChange);
+    window.addEventListener(TOUR_REVEAL_EVENT, this._onTourReveal);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     this._mql.removeEventListener("change", this._onMqlChange);
+    window.removeEventListener(TOUR_REVEAL_EVENT, this._onTourReveal);
   }
+
+  private _onTourReveal = (event: Event): void => {
+    const { id } = (event as CustomEvent<TourRevealEventDetail>).detail;
+    const next = layoutRevealingAnchor(id, this.layout, this._isMobile);
+    if (next) this._setLayout(next);
+  };
 
   @property({ attribute: false })
   highlightRange: HighlightRange | null = null;
@@ -254,8 +269,7 @@ export class ESPHomeDeviceEditor extends LitElement {
     // last chose. We deliberately do NOT force "right" when there's
     // no board — a missing board catalog entry shouldn't make the
     // navigator + section editor disappear.
-    const effectiveLayout =
-      this._isMobile && this.layout === "both" ? "right" : this.layout;
+    const effectiveLayout = effectiveDeviceLayout(this.layout, this._isMobile);
     const layoutClass =
       effectiveLayout === "both"
         ? "editor-layout--both"
@@ -342,7 +356,7 @@ export class ESPHomeDeviceEditor extends LitElement {
                 : ""
             }
           >
-            <div class="editor-pane editor-pane--left">
+            <div class="editor-pane editor-pane--left" ${tourAnchor("central")}>
               <esphome-device-board-info
                 .board=${this.board}
                 .yaml=${this.yaml}
@@ -376,7 +390,7 @@ export class ESPHomeDeviceEditor extends LitElement {
                   ></div>`
                 : nothing
             }
-            <div class="editor-pane editor-pane--right">
+            <div class="editor-pane editor-pane--right" ${tourAnchor("yaml")}>
               <div class="editor-pane-body">
                 ${
                   this._showDiff

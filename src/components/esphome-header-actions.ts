@@ -5,6 +5,7 @@ import {
   mdiCog,
   mdiCogRefresh,
   mdiCommentQuestionOutline,
+  mdiCompassOutline,
   mdiDotsVertical,
   mdiEyeOffOutline,
   mdiEyeOutline,
@@ -45,6 +46,7 @@ registerMdiIcons({
   cog: mdiCog,
   "cog-refresh": mdiCogRefresh,
   "comment-question-outline": mdiCommentQuestionOutline,
+  "compass-outline": mdiCompassOutline,
   "dots-vertical": mdiDotsVertical,
   "eye-off-outline": mdiEyeOffOutline,
   "eye-outline": mdiEyeOutline,
@@ -333,6 +335,18 @@ export class ESPHomeHeaderActions extends OverflowMenuElement {
                   <span class="menu-item-label">${this._localize("layout.search")}</span>
                   <kbd class="menu-item-shortcut">${searchShortcut}</kbd>
                 </div>
+                <div
+                  class="menu-item"
+                  role="menuitem"
+                  tabindex="0"
+                  @click=${this._openGuidedTour}
+                  @keydown=${this._onItemKeydown}
+                >
+                  <wa-icon library="mdi" name="compass-outline"></wa-icon>
+                  <span class="menu-item-label"
+                    >${this._localize("layout.guided_tour")}</span
+                  >
+                </div>
                 <div class="menu-divider" role="separator"></div>
                 <div
                   class="menu-item"
@@ -421,6 +435,16 @@ export class ESPHomeHeaderActions extends OverflowMenuElement {
   private _openSearch() {
     this._close();
     window.dispatchEvent(new Event(OPEN_COMMAND_PALETTE_EVENT));
+  }
+
+  private _openGuidedTour() {
+    this._close();
+    this.dispatchEvent(
+      new CustomEvent("open-guided-tour", {
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   private _offloaderAlertsCount(): number {

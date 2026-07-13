@@ -1004,6 +1004,7 @@
       "continue": "Continue",
       "finish": "Finish",
       "dismiss": "Maybe later",
+      "recommended": "RECOMMENDED",
       "saving": "Saving…",
       "ack_failed": "Saved your choices, but the wizard couldn't be marked as completed — it may reappear next time.",
       "use_case": {
@@ -1011,16 +1012,73 @@
         "intro": "This helps tailor the dashboard to what you need.",
         "devices_title": "Build and manage devices",
         "devices_desc": "Create, configure, and flash ESPHome devices from this dashboard.",
-        "remote_title": "Only for remote compute",
-        "remote_desc": "Use this install purely as a remote build server for other dashboards. Device creation stays hidden."
+        "remote_title": "Remote compute only",
+        "remote_desc": "Use this installation only as a remote build server for other dashboards. Device creation stays hidden."
       },
       "experience": {
-        "title": "Pick your experience",
+        "title": "Choose your experience level",
         "intro": "You can change this any time in Settings.",
         "beginner_title": "New to ESPHome",
-        "beginner_desc": "Keep it simple and guided, the lightest interface.",
+        "beginner_desc": "Start with a simple, guided interface.",
         "expert_title": "Expert",
-        "expert_desc": "Unlock the editor diff, navigator search, and YAML search."
+        "expert_desc": "Unlock the diff viewer, navigator search, and YAML search."
+      }
+    }
+  },
+  "tour": {
+    "step_counter": "Step {current} of {total}",
+    "skip": "Skip tour",
+    "next": "Next",
+    "finish": "Finish",
+    "continue": "Continue",
+    "steps": {
+      "create": {
+        "title": "Create your first device",
+        "body": "Everything starts here. Open the guided setup to add a device.",
+        "hint": "Click “Create device” to continue"
+      },
+      "method": {
+        "title": "Choose how to start",
+        "body": "“Create new project” walks you through a starter kit or any ESP board.",
+        "hint": "Click “Create new project”"
+      },
+      "board": {
+        "title": "Pick a board",
+        "body": "Starter kits come pre-configured and are ideal for your first device. Select the featured kit.",
+        "hint": "Click “Select” on the starter kit"
+      },
+      "name": {
+        "title": "Name it, then finish",
+        "body": "We’ve suggested a name and generated a working config. Finish to open it.",
+        "hint": "Click “Finish setup”"
+      },
+      "navigator": {
+        "title": "Your device navigator",
+        "body": "Browse and edit core configuration, components, and automations. No YAML required."
+      },
+      "central": {
+        "title": "The main editor",
+        "body": "Select a section in the navigator to open it here. Configure your board, components, and automations visually; every change updates the YAML on the right."
+      },
+      "yaml": {
+        "title": "Live YAML, kept in sync",
+        "body": "Everything you do is mirrored here. Try changing fields in the visual editor and watch the YAML update."
+      },
+      "layout": {
+        "title": "Switch your view",
+        "body": "Switch between the visual editor, YAML, or both side by side. Choose whichever view suits your workflow."
+      },
+      "install": {
+        "title": "Install to your board",
+        "body": "Flash firmware to your device over USB or the network. Your edits are saved automatically first — that’s the whole loop: configure and install."
+      },
+      "dashboard": {
+        "title": "Find it on your dashboard",
+        "body": "Your device lives here now. Switch between card and table views as your collection grows."
+      },
+      "done": {
+        "title": "You’re all set",
+        "body": "That’s the full loop: create, configure, and install. Add your next device whenever you like."
       }
     }
   },
@@ -1046,6 +1104,7 @@
     "settings": "Settings",
     "search": "Search commands",
     "search_shortcut": "Ctrl K",
+    "guided_tour": "Take a tour",
     "archived_devices": "Archived devices",
     "show_ignored_discoveries": "Show ignored discoveries ({count})",
     "hide_ignored_discoveries": "Hide ignored discoveries",

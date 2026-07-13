@@ -18,6 +18,7 @@ import { notifyError, notifySuccess } from "../util/notify.js";
 import { DeviceInstallController } from "../components/device/device-install-controller.js";
 import type { ESPHomeDeviceSectionConfig } from "../components/device/device-section-config.js";
 import type { ESPHomeFirmwareInstallDialog } from "../components/firmware-install-dialog.js";
+import { tourAnchor } from "../components/guided-tour/tour-anchor.js";
 import type { ESPHomeLogsDialog } from "../components/logs-dialog.js";
 import type { ESPHomeUnsavedChangesDialog } from "../components/unsaved-changes-dialog.js";
 import type { HighlightRange } from "../components/yaml-editor.js";
@@ -46,6 +47,7 @@ import { consumeJustCreated } from "../util/just-created.js";
 import { navigate, setLeaveGuard } from "../util/navigation.js";
 import { postInstallShowLogsHandler } from "../util/post-install-logs.js";
 import { registerMdiIcons } from "../util/register-icons.js";
+import { isTypingTarget } from "../util/typing-target.js";
 import { UnsavedGuard } from "../util/unsaved-guard.js";
 import {
   resolveSectionForUrlLine,
@@ -508,7 +510,7 @@ export class ESPHomePageDevice extends LitElement {
        composedPath()[0] is the actual focused element across shadow
        boundaries; e.target gets retargeted to the host. */
     const target = e.composedPath()[0] as HTMLElement | undefined;
-    if (this._isTextEntry(target)) return;
+    if (isTypingTarget(target)) return;
     if (this._drawerOpen) {
       e.preventDefault();
       this._drawerOpen = false;
@@ -519,22 +521,6 @@ export class ESPHomePageDevice extends LitElement {
     e.preventDefault();
     window.history.back();
   };
-
-  private _isTextEntry(el: HTMLElement | undefined): boolean {
-    if (!el) return false;
-    const tag = el.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-    if (el.isContentEditable) return true;
-    /* The Monaco-style YAML editor renders its caret inside a
-       textarea-like child but the focused element can vary by version.
-       Walk up looking for a recognisable editor host. */
-    let cur: HTMLElement | null = el;
-    while (cur) {
-      if (cur.tagName === "ESPHOME-YAML-EDITOR") return true;
-      cur = cur.parentElement;
-    }
-    return false;
-  }
 
   updated(changedProperties: Map<string, unknown>) {
     if (changedProperties.has("id") && this.id) {
@@ -1141,6 +1127,7 @@ export class ESPHomePageDevice extends LitElement {
                         ? html`<button
                             type="button"
                             class="ghost-icon-btn nav-toggle-btn"
+                            ${tourAnchor("nav-toggle")}
                             @click=${this._onNavExpand}
                             title=${this._localize("device.show_navigator")}
                             aria-label=${this._localize("device.show_navigator")}
@@ -1331,8 +1318,13 @@ export class ESPHomePageDevice extends LitElement {
    * across two copies.
    */
   private _renderNavigator(className: "drawer-nav" | "desktop-nav") {
+    const isVisibleTourNavigator =
+      className === "desktop-nav"
+        ? !this._isMobile && !this._navCollapsed
+        : this._isMobile && this._drawerOpen;
     return html`<esphome-device-navigator
       class=${className}
+      .tourAnchorId=${isVisibleTourNavigator ? "nav" : undefined}
       .openSections=${this._openSections}
       .yaml=${this._yaml}
       .board=${this._board}
