@@ -1,24 +1,26 @@
 import { consume } from "@lit/context";
-import {
-  mdiCodeBraces,
-  mdiCompassOutline,
-  mdiLaptop,
-  mdiServerNetwork,
-  mdiSprout,
-} from "@mdi/js";
+import { mdiCodeBraces, mdiCompassOutline, mdiServerNetwork, mdiSprout } from "@mdi/js";
 import { LitElement, html, nothing } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { customElement, state } from "lit/decorators.js";
 import type { ESPHomeAPI } from "../../api/index.js";
+import type { RemoteBuildPeer } from "../../api/types/remote-build.js";
 import { ExperienceLevel } from "../../api/types/system.js";
-import type { LocalizeFunc } from "../../common/localize.js";
-import { apiContext, localizeContext } from "../../context/index.js";
+import { activeLocale, type LocalizeFunc } from "../../common/localize.js";
+import {
+  apiContext,
+  buildOffloadDiscoveredHostsContext,
+  isHaAddonContext,
+  localizeContext,
+} from "../../context/index.js";
 import { dialogActionButtonStyles } from "../../styles/dialog-action-buttons.js";
+import { fullscreenMobileDialog } from "../../styles/dialog-mobile.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { withBase } from "../../util/base-path.js";
 import { EnterController } from "../../util/enter-controller.js";
 import { EXPERIENCE_OPTIONS } from "../../util/experience.js";
 import { formatApiError } from "../../util/format-api-error.js";
 import { notifyWarning } from "../../util/notify.js";
+import { remoteBuildPeerName } from "../../util/remote-build-peer-name.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { closeOpenDialogs } from "../base-dialog.js";
 import { choiceCardStyles } from "./choice-card-styles.js";
@@ -27,13 +29,13 @@ import { onboardingWizardStyles } from "./onboarding-wizard-styles.js";
 import { type WizardScreen, wizardScreens } from "./wizard-screens.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
+import "@home-assistant/webawesome/dist/components/switch/switch.js";
 
 export const RESET_ONBOARDING_PARAM = "resetOnboarding";
 
 registerMdiIcons({
   "code-braces": mdiCodeBraces,
   "compass-outline": mdiCompassOutline,
-  laptop: mdiLaptop,
   "server-network": mdiServerNetwork,
   sprout: mdiSprout,
 });
@@ -41,11 +43,12 @@ registerMdiIcons({
 /**
  * Mandatory first-run onboarding flow.
  *
- * A fresh install walks through Welcome and experience. Expert users on non-HA
- * installs also choose a use case. The choices are persisted before the final
- * tour offer appears, so "Maybe later" only skips the optional tour. Wi-Fi is
- * intentionally absent: the first Wi-Fi device that needs shared credentials
- * collects them.
+ * A fresh install walks through Welcome and experience. When another Device
+ * Builder is on the network (non-add-on installs), an orientation step follows
+ * with an opt-in "remote compute only" switch. The choices are persisted before
+ * the final tour offer appears, so "Maybe later" only skips the optional tour.
+ * Wi-Fi is intentionally absent: the first Wi-Fi device that needs shared
+ * credentials collects them.
  *
  * ``?resetOnboarding=1`` reopens a clean default run for frontend development.
  * It does not reset data before opening; completing the choices writes them
@@ -60,18 +63,24 @@ export class ESPHomeOnboardingWizardDialog extends LitElement {
   @consume({ context: apiContext })
   private _api!: ESPHomeAPI;
 
-  /** Whether this install can ask expert users the remote-compute use-case
-   *  question (non-HA only). Seeded by the app shell from onboarding state. */
-  @property({ type: Boolean }) hasUseCase = false;
+  @consume({ context: buildOffloadDiscoveredHostsContext, subscribe: true })
+  @state()
+  private _discoveredHosts: Map<string, RemoteBuildPeer> | null = null;
+
+  @consume({ context: isHaAddonContext, subscribe: true })
+  @state()
+  private _isHaAddon = false;
 
   @state() private _open = false;
   @state() private _saving = false;
   @state() private _error: string | null = null;
   @state() private _index = 0;
 
-  @state() private _useCaseChosen = true;
   @state() private _remoteCompute = false;
   @state() private _experience: ExperienceLevel | null = ExperienceLevel.BEGINNER;
+  // Frozen when leaving Welcome so mDNS hosts arriving mid-flow can't
+  // insert/remove the existing-server screen under the user.
+  @state() private _existingServerPinned = false;
 
   private _startTourAfterClose = false;
   private _enter = new EnterController(this, () => {
@@ -95,9 +104,9 @@ export class ESPHomeOnboardingWizardDialog extends LitElement {
     this._saving = false;
     this._error = null;
     this._index = 0;
-    this._useCaseChosen = true;
     this._remoteCompute = false;
     this._experience = ExperienceLevel.BEGINNER;
+    this._existingServerPinned = false;
     this._startTourAfterClose = false;
     this._enter.set(true);
   }
@@ -107,14 +116,23 @@ export class ESPHomeOnboardingWizardDialog extends LitElement {
     dialogActionButtonStyles,
     choiceCardStyles,
     onboardingWizardStyles,
+    fullscreenMobileDialog("esphome-base-dialog"),
   ];
 
   /** Ordered screens for the current environment. */
   private get _screens(): WizardScreen[] {
-    return wizardScreens({
-      hasUseCase: this.hasUseCase,
-      isExpert: this._experience === ExperienceLevel.EXPERT,
-    });
+    // existing_server sits after experience (index 1). While the user is still
+    // on Welcome or experience the tail can grow as mDNS hosts arrive; freeze it
+    // once they advance past experience so a late host can't shift the flow.
+    const showExistingServer =
+      this._index <= 1 ? this._computeShowExistingServer() : this._existingServerPinned;
+    return wizardScreens({ showExistingServer });
+  }
+
+  /** Offer the orientation step only off the HA add-on, and only when another
+   *  Device Builder is on the network (nothing to build for otherwise). */
+  private _computeShowExistingServer(): boolean {
+    return !this._isHaAddon && !!this._discoveredHosts?.size;
   }
 
   private get _screen(): WizardScreen {
@@ -136,8 +154,8 @@ export class ESPHomeOnboardingWizardDialog extends LitElement {
     switch (this._screen) {
       case "welcome":
         return true;
-      case "use_case":
-        return this._useCaseChosen;
+      case "existing_server":
+        return true;
       case "experience":
         return this._experience !== null;
       case "tour":
@@ -227,8 +245,8 @@ export class ESPHomeOnboardingWizardDialog extends LitElement {
     switch (this._screen) {
       case "welcome":
         return this._renderWelcome();
-      case "use_case":
-        return this._renderUseCase();
+      case "existing_server":
+        return this._renderExistingServer();
       case "experience":
         return this._renderExperience();
       case "tour":
@@ -247,6 +265,53 @@ export class ESPHomeOnboardingWizardDialog extends LitElement {
         <p class="intro">${this._localize("onboarding.wizard.welcome.intro")}</p>
       </div>
     `;
+  }
+
+  private _renderExistingServer() {
+    const names = this._discoveredHosts
+      ? [...new Set([...this._discoveredHosts.values()].map(remoteBuildPeerName))]
+      : [];
+    // Cap the named list so a busy network can't push the switch off-screen.
+    const shown = names.slice(0, 3);
+    const extra = names.length - shown.length;
+    const joined = new Intl.ListFormat(activeLocale(), {
+      type: extra > 0 ? "unit" : "conjunction",
+    }).format(shown);
+    const foundLabel =
+      extra > 0
+        ? this._localize("onboarding.wizard.existing_server.found_overflow", {
+            name: joined,
+            count: extra,
+          })
+        : this._localize("onboarding.wizard.existing_server.found", { name: joined });
+    return html`
+      <div class="existing-server">
+        <wa-icon library="mdi" name="server-network" class="tour-offer-icon"></wa-icon>
+        ${names.length ? html`<p class="tour-ready">${foundLabel}</p>` : nothing}
+        <p class="intro">${this._localize("onboarding.wizard.existing_server.intro")}</p>
+        <label class="remote-toggle">
+          <span class="remote-toggle-text">
+            <span class="remote-toggle-title">
+              ${this._localize("onboarding.wizard.existing_server.remote_only_title")}
+            </span>
+            <span class="remote-toggle-desc">
+              ${this._localize("onboarding.wizard.existing_server.remote_only_desc")}
+            </span>
+          </span>
+          <wa-switch
+            ?checked=${this._remoteCompute}
+            ?disabled=${this._saving}
+            @change=${this._onToggleRemoteCompute}
+          ></wa-switch>
+        </label>
+      </div>
+    `;
+  }
+
+  private _onToggleRemoteCompute(event: Event) {
+    this._remoteCompute = (
+      event.target as HTMLInputElement & { checked: boolean }
+    ).checked;
   }
 
   private _renderTourOffer() {
@@ -270,40 +335,6 @@ export class ESPHomeOnboardingWizardDialog extends LitElement {
       </div>
     `;
   }
-  private _renderUseCase() {
-    const devices = this._useCaseChosen && !this._remoteCompute;
-    const remote = this._useCaseChosen && this._remoteCompute;
-    return html`
-      <p class="intro">${this._localize("onboarding.wizard.use_case.intro")}</p>
-      <div
-        class="choices"
-        role="radiogroup"
-        aria-label=${this._localize("onboarding.wizard.use_case.title")}
-        @keydown=${onChoiceGroupKeydown}
-      >
-        ${renderChoiceCard({
-          icon: "laptop",
-          title: this._localize("onboarding.wizard.use_case.devices_title"),
-          description: this._localize("onboarding.wizard.use_case.devices_desc"),
-          selected: devices,
-          tabbable: rovingTabbable(devices, this._useCaseChosen, 0),
-          badge: this._localize("onboarding.wizard.recommended"),
-          disabled: this._saving,
-          onSelect: () => this._chooseUseCase(false),
-        })}
-        ${renderChoiceCard({
-          icon: "server-network",
-          title: this._localize("onboarding.wizard.use_case.remote_title"),
-          description: this._localize("onboarding.wizard.use_case.remote_desc"),
-          selected: remote,
-          tabbable: rovingTabbable(remote, this._useCaseChosen, 1),
-          disabled: this._saving,
-          onSelect: () => this._chooseUseCase(true),
-        })}
-      </div>
-    `;
-  }
-
   private _renderExperience() {
     return html`
       <p class="intro">${this._localize("onboarding.wizard.experience.intro")}</p>
@@ -336,17 +367,8 @@ export class ESPHomeOnboardingWizardDialog extends LitElement {
     `;
   }
 
-  private _chooseUseCase(remoteCompute: boolean) {
-    this._useCaseChosen = true;
-    this._remoteCompute = remoteCompute;
-  }
-
   private _chooseExperience(level: ExperienceLevel) {
     this._experience = level;
-    if (level === ExperienceLevel.BEGINNER) {
-      this._useCaseChosen = true;
-      this._remoteCompute = false;
-    }
   }
 
   private _onBack() {
@@ -361,13 +383,16 @@ export class ESPHomeOnboardingWizardDialog extends LitElement {
         this._index += 1;
         return;
       case "experience":
-        if (this.hasUseCase && this._experience === ExperienceLevel.EXPERT) {
+        // Freeze whether the orientation step follows, now that mDNS has had
+        // Welcome + this screen to report.
+        this._existingServerPinned = this._computeShowExistingServer();
+        if (this._existingServerPinned) {
           this._index += 1;
           return;
         }
         await this._completeSetup();
         return;
-      case "use_case":
+      case "existing_server":
         await this._completeSetup();
         return;
       case "tour":

@@ -5,6 +5,12 @@ export const onboardingWizardStyles = css`
     --width: min(520px, calc(100vw - 24px));
   }
 
+  /* Let the longer step titles wrap instead of truncating (the base dialog
+     ellipsizes by default), so nothing is chopped on a narrow / mobile sheet. */
+  esphome-base-dialog::part(title-text) {
+    white-space: normal;
+  }
+
   esphome-base-dialog.mandatory::part(close-button) {
     display: none;
   }
@@ -14,7 +20,7 @@ export const onboardingWizardStyles = css`
     flex-direction: column;
     gap: var(--wa-space-m);
     box-sizing: border-box;
-    height: 300px;
+    height: 380px;
     overflow-y: auto;
   }
 
@@ -46,6 +52,53 @@ export const onboardingWizardStyles = css`
     justify-content: center;
     text-align: center;
     gap: var(--wa-space-s);
+  }
+
+  .existing-server {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: var(--wa-space-s);
+    justify-content: flex-start;
+  }
+
+  .existing-server .tour-offer-icon {
+    margin-top: var(--wa-space-s);
+  }
+
+  .remote-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--wa-space-m);
+    width: 100%;
+    text-align: left;
+    box-sizing: border-box;
+    margin-top: var(--wa-space-s);
+    padding: var(--wa-space-m);
+    border: 1px solid var(--wa-color-surface-border);
+    border-radius: var(--wa-border-radius-m);
+    cursor: pointer;
+  }
+
+  .remote-toggle-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+  }
+
+  .remote-toggle-title {
+    font-size: var(--wa-font-size-s);
+    font-weight: var(--wa-font-weight-semibold);
+    color: var(--wa-color-text-normal);
+  }
+
+  .remote-toggle-desc {
+    font-size: var(--wa-font-size-xs);
+    color: var(--wa-color-text-quiet);
+    line-height: 1.4;
   }
 
   .welcome-screen {
@@ -95,9 +148,12 @@ export const onboardingWizardStyles = css`
     flex: 1;
   }
 
-  @media (max-width: 600px), (max-height: 600px) {
+  /* On phones the dialog goes full-screen (fullscreenMobileDialog), so the
+     body fills the sheet instead of a fixed height — the switch and its
+     description then have room without scrolling. */
+  @media (max-width: 600px) {
     .body {
-      height: min(390px, calc(100dvh - 190px));
+      height: 100%;
     }
   }
 `;

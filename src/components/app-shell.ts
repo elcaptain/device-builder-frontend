@@ -40,6 +40,7 @@ import {
   firmwareJobsContext,
   importableDevicesContext,
   integrationDocsContext,
+  isHaAddonContext,
   isHaIngressContext,
   labelsContext,
   localizeContext,
@@ -137,6 +138,7 @@ export class ESPHomeApp extends LitElement {
   _desktopUpdateCapable = false;
   @provide({ context: darkModeContext }) @state() _darkMode = initialDarkMode();
   @provide({ context: isHaIngressContext }) @state() _isHaIngress = false;
+  @provide({ context: isHaAddonContext }) @state() _isHaAddon = false;
   @provide({ context: activeJobsContext }) @state() _activeJobs: Map<
     string,
     FirmwareJob
@@ -217,9 +219,6 @@ export class ESPHomeApp extends LitElement {
   // auto-popped — it's collected per-device in the create wizard, or on demand
   // via the kebab "Set up Wi-Fi" dialog.
   @state() _onboardingShouldShow = false;
-  // Whether the first-run wizard should ask the remote-compute use-case
-  // question (non-HA only). Seeded from the onboarding state's step list.
-  @state() _onboardingHasUseCase = false;
   @state() _authState: AuthState = "connecting";
   @state() _authError: string | null = null;
   @state() _rateLimitedUntil = 0;
@@ -449,6 +448,7 @@ export class ESPHomeApp extends LitElement {
       this._desktopVersion = info.desktop_version ?? "";
       this._desktopUpdateCapable = info.desktop_update_capable ?? false;
       this._isHaIngress = info.ha_ingress;
+      this._isHaAddon = info.ha_addon;
       this._apiConnected = true;
       void this._api.ready.then(() => this._afterAuthenticated());
     };
@@ -633,7 +633,6 @@ export class ESPHomeApp extends LitElement {
       <esphome-feedback-dialog></esphome-feedback-dialog>
       <esphome-onboarding-wifi-dialog></esphome-onboarding-wifi-dialog>
       <esphome-onboarding-wizard-dialog
-        .hasUseCase=${this._onboardingHasUseCase}
         @onboarding-acknowledged=${this._onOnboardingAcknowledged}
         @open-guided-tour=${this._onOpenGuidedTour}
       ></esphome-onboarding-wizard-dialog>
