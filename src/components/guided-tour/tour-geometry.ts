@@ -19,10 +19,6 @@ export interface Box {
   h: number;
 }
 
-export interface Ring extends Box {
-  radius: number;
-}
-
 export interface Bubble {
   left: number;
   top?: number;
@@ -32,7 +28,6 @@ export interface Bubble {
 
 export interface TourFrame {
   hole: Box;
-  ring: Ring;
   dim: { top: Box; bottom: Box; left: Box; right: Box };
   bubble: Bubble;
   side: Side;
@@ -44,10 +39,10 @@ export interface TourFrame {
 export const SPOTLIGHT_PADDING = 6;
 export const BUBBLE_WIDTH = 300;
 export const BUBBLE_GAP = 16;
-const RING_MAX_RADIUS = 14;
 const EDGE_MARGIN = 16;
 const BUBBLE_BOTTOM_RESERVE = 200;
 const BUBBLE_HEIGHT_EST = 220;
+const COMPACT_BUBBLE_HEIGHT_EST = 340;
 
 const SIDE_ORDER: Record<Side, Side[]> = {
   right: ["right", "left", "top", "bottom"],
@@ -134,18 +129,23 @@ function computeBubble(
 
 /** The bubble's estimated top edge in viewport coordinates. */
 function bubbleTop(bubble: Bubble, vp: Viewport): number {
-  return bubble.bottom !== undefined
-    ? vp.h - bubble.bottom - BUBBLE_HEIGHT_EST
-    : (bubble.top ?? 0);
+  const height = bubbleHeightEstimate(vp);
+  return bubble.bottom !== undefined ? vp.h - bubble.bottom - height : (bubble.top ?? 0);
+}
+
+/** Long localized copy reaches ~310px on phones; desktop copy is much wider. */
+function bubbleHeightEstimate(vp: Viewport): number {
+  return vp.w <= 600 || vp.h <= 600 ? COMPACT_BUBBLE_HEIGHT_EST : BUBBLE_HEIGHT_EST;
 }
 
 function bubbleCoversHole(bubble: Bubble, vp: Viewport, hole: Box): boolean {
   const top = bubbleTop(bubble, vp);
+  const height = bubbleHeightEstimate(vp);
   const b = {
     l: bubble.left,
     r: bubble.left + bubble.width,
     t: top,
-    b: top + BUBBLE_HEIGHT_EST,
+    b: top + height,
   };
   return !(
     b.r <= hole.x ||
@@ -159,7 +159,7 @@ function bubbleCoversHole(bubble: Bubble, vp: Viewport, hole: Box): boolean {
  *  margins (horizontal placement is already clamped in `computeBubble`). */
 function bubbleFitsViewport(bubble: Bubble, vp: Viewport): boolean {
   const top = bubbleTop(bubble, vp);
-  return top >= EDGE_MARGIN && top + BUBBLE_HEIGHT_EST <= vp.h - EDGE_MARGIN;
+  return top >= EDGE_MARGIN && top + bubbleHeightEstimate(vp) <= vp.h - EDGE_MARGIN;
 }
 
 export function computeTourFrame(
@@ -169,7 +169,6 @@ export function computeTourFrame(
   options: { pad?: number; bubbleWidth?: number } = {}
 ): TourFrame {
   const hole = computeHole(rect, options.pad);
-  const ring: Ring = { ...hole, radius: Math.min(hole.h / 2, RING_MAX_RADIUS) };
   const width = options.bubbleWidth;
 
   const candidates = SIDE_ORDER[side].map((candidate) => ({
@@ -181,7 +180,7 @@ export function computeTourFrame(
   const fitting = clear.find(({ bubble }) => bubbleFitsViewport(bubble, vp));
   const dim = computeDim(hole, vp);
   if (fitting) {
-    return { hole, ring, dim, bubble: fitting.bubble, side: fitting.candidate };
+    return { hole, dim, bubble: fitting.bubble, side: fitting.candidate };
   }
 
   // A near-full-screen hole leaves no side that both clears it and stays on
@@ -192,10 +191,10 @@ export function computeTourFrame(
     top: clamp(
       hole.y + BUBBLE_GAP,
       EDGE_MARGIN,
-      Math.max(EDGE_MARGIN, vp.h - BUBBLE_HEIGHT_EST - EDGE_MARGIN)
+      Math.max(EDGE_MARGIN, vp.h - bubbleHeightEstimate(vp) - EDGE_MARGIN)
     ),
     width: w,
   };
   // `side` is only read for caret placement, which overlay frames skip.
-  return { hole, ring, dim, bubble: overlay, side, overlay: true };
+  return { hole, dim, bubble: overlay, side, overlay: true };
 }
