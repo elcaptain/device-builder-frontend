@@ -101,6 +101,16 @@ export const onboardingWizardStyles = css`
     line-height: 1.4;
   }
 
+  .remote-feature-box {
+    width: 100%;
+    box-sizing: border-box;
+    margin: var(--wa-space-s) 0 0;
+    padding: var(--wa-space-s) var(--wa-space-m);
+    background: var(--wa-color-surface-lowered);
+    border-radius: var(--wa-border-radius-m);
+    text-align: left;
+  }
+
   .welcome-screen {
     gap: var(--wa-space-xl);
   }

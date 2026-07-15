@@ -1,5 +1,12 @@
 import { consume } from "@lit/context";
-import { mdiCodeBraces, mdiCompassOutline, mdiServerNetwork, mdiSprout } from "@mdi/js";
+import {
+  mdiCodeBraces,
+  mdiCompassOutline,
+  mdiHandshake,
+  mdiServerNetwork,
+  mdiSprout,
+  mdiMemory,
+} from "@mdi/js";
 import { LitElement, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import type { ESPHomeAPI } from "../../api/index.js";
@@ -23,6 +30,8 @@ import { notifyWarning } from "../../util/notify.js";
 import { remoteBuildPeerName } from "../../util/remote-build-peer-name.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { closeOpenDialogs } from "../base-dialog.js";
+import { REMOTE_COMPUTE_FEATURES, renderFeatureList } from "../shared/feature-list.js";
+import { featureListStyles } from "../shared/feature-list-styles.js";
 import { choiceCardStyles } from "./choice-card-styles.js";
 import { onChoiceGroupKeydown, renderChoiceCard, rovingTabbable } from "./choice-card.js";
 import { onboardingWizardStyles } from "./onboarding-wizard-styles.js";
@@ -36,8 +45,10 @@ export const RESET_ONBOARDING_PARAM = "resetOnboarding";
 registerMdiIcons({
   "code-braces": mdiCodeBraces,
   "compass-outline": mdiCompassOutline,
+  handshake: mdiHandshake,
   "server-network": mdiServerNetwork,
   sprout: mdiSprout,
+  memory: mdiMemory,
 });
 
 /**
@@ -116,6 +127,7 @@ export class ESPHomeOnboardingWizardDialog extends LitElement {
     dialogActionButtonStyles,
     choiceCardStyles,
     onboardingWizardStyles,
+    featureListStyles,
     fullscreenMobileDialog("esphome-base-dialog"),
   ];
 
@@ -305,6 +317,15 @@ export class ESPHomeOnboardingWizardDialog extends LitElement {
             @change=${this._onToggleRemoteCompute}
           ></wa-switch>
         </label>
+        ${
+          this._remoteCompute
+            ? html`
+                <div class="remote-feature-box">
+                  ${renderFeatureList(this._localize, REMOTE_COMPUTE_FEATURES)}
+                </div>
+              `
+            : nothing
+        }
       </div>
     `;
   }

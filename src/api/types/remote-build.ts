@@ -314,4 +314,12 @@ export interface IdentityView {
   server_version: string;
   esphome_version: string;
   listener_bound: boolean;
+  /**
+   * mDNS-advertised pairing address: host is 'null' and addresses
+   * '[]' without a registered advertiser, port is 'null' while the
+   * listener is down. All absent from pre-1.1 backends.
+   */
+  listener_host?: string | null;
+  listener_addresses?: string[];
+  listener_port?: number | null;
 }
