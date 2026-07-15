@@ -28,6 +28,10 @@ import { peerRowStyles } from "../../styles/peer-rows.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { normalizeHostnameForCompare, trimTrailingDot } from "../../util/hostname.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import {
+  pairingDisplayName,
+  pairingDisplayNameForPin,
+} from "../../util/pairing-display-name.js";
 import { remoteBuildPeerName } from "../../util/remote-build-peer-name.js";
 import type { ESPHomeConfirmDialog } from "../confirm-dialog.js";
 import type { ESPHomeEditPairingEndpointDialog } from "../edit-pairing-endpoint-dialog.js";
@@ -270,13 +274,15 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
 
   private _renderAlerts() {
     if (this._alerts === null || this._alerts.size === 0) return nothing;
-    return Array.from(this._alerts.values()).map((alert) =>
-      renderOffloaderAlert(alert, {
+    return Array.from(this._alerts.values()).map((alert) => {
+      const pairing = this._pairings?.get(alert.pin_sha256);
+      return renderOffloaderAlert(alert, {
         localize: this._localize,
+        displayLabel: pairing ? pairingDisplayName(pairing) : undefined,
         onRepair: this._onAlertRepair,
         onUnpair: this._onAlertUnpair,
-      })
-    );
+      });
+    });
   }
 
   private _renderPairings() {
@@ -478,21 +484,29 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
   };
 
   private _onAlertUnpair = (alert: OffloaderAlertSnapshotEntry): void => {
+    // An alert can outlive its pairing, so fall back to the snapshot label.
     this._pendingUnpair = {
       pin_sha256: alert.pin_sha256,
       hostname: alert.receiver_hostname,
       port: alert.receiver_port,
-      label: alert.receiver_label,
+      label: pairingDisplayNameForPin(
+        this._pairings,
+        alert.pin_sha256,
+        alert.receiver_label
+      ),
     };
     this._unpairConfirmDialog?.open();
   };
 
   private _onUnpairRequest = (pairing: PairingSummary): void => {
+    // Bare display name: the confirm-body template already appends
+    // ``({hostname}:{port})``, and the success toast reads "Unpaired
+    // {label}." — either endpoint copy comes from the template, not here.
     this._pendingUnpair = {
       pin_sha256: pairing.pin_sha256,
       hostname: pairing.receiver_hostname,
       port: pairing.receiver_port,
-      label: pairing.label,
+      label: pairingDisplayName(pairing),
     };
     this._unpairConfirmDialog?.open();
   };
@@ -514,7 +528,7 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
   private _onBuildRemoteClick = (pairing: PairingSummary): void => {
     this._jobDialog?.open({
       pin_sha256: pairing.pin_sha256,
-      receiver_label: pairing.label,
+      receiver_label: pairingDisplayName(pairing),
     });
   };
 
