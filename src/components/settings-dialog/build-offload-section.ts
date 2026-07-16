@@ -1,5 +1,5 @@
 import { consume } from "@lit/context";
-import { mdiDelete, mdiLanConnect, mdiPencil } from "@mdi/js";
+import { mdiBroom, mdiDelete, mdiLanConnect, mdiPencil } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 import { notify, notifyError, notifySuccess } from "../../util/notify.js";
@@ -39,6 +39,7 @@ import type { ESPHomePairBuildServerDialog } from "../pair-build-server-dialog.j
 import type { ESPHomeReauthWizardDialog } from "../reauth-wizard-dialog.js";
 import type { ESPHomeRemoteBuildJobDialog } from "../remote-build-job-dialog.js";
 import { renderOffloaderAlert } from "./build-offload-alert.js";
+import { requestResetPeerBuildEnv } from "../remote-build-hint.js";
 import { latestJobForPin, renderPairingRow } from "./build-offload-pairing-row.js";
 import { offloaderAlertStyles, pairingRowStyles } from "./offload-styles.js";
 import { renderStatusRow, renderToggleRow } from "./settings-rows.js";
@@ -47,6 +48,7 @@ import { settingsRowStyles, settingsSharedStyles } from "./shared-styles.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "@home-assistant/webawesome/dist/components/option/option.js";
 import "@home-assistant/webawesome/dist/components/select/select.js";
+import "@home-assistant/webawesome/dist/components/tooltip/tooltip.js";
 import "../confirm-dialog.js";
 import "../edit-pairing-endpoint-dialog.js";
 import "../pair-build-server-dialog.js";
@@ -55,6 +57,7 @@ import "../remote-build-job-dialog.js";
 import "./build-offload-advanced.js";
 
 registerMdiIcons({
+  broom: mdiBroom,
   delete: mdiDelete,
   "lan-connect": mdiLanConnect,
   pencil: mdiPencil,
@@ -301,6 +304,7 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
         onBuildRemote: this._onBuildRemoteClick,
         onViewBuild: (jobId) => this._jobDialog?.openForJob(jobId),
         onEditEndpoint: this._onEditEndpointClick,
+        onResetBuildEnv: this._onResetBuildEnvRequest,
         onUnpair: this._onUnpairRequest,
       })
     );
@@ -496,6 +500,12 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
       ),
     };
     this._unpairConfirmDialog?.open();
+  };
+
+  private _onResetBuildEnvRequest = (pairing: PairingSummary): void => {
+    // The confirm + enqueue + follow flow lives in the firmware-jobs
+    // dialog (the local reset's home); app-shell routes this event there.
+    requestResetPeerBuildEnv(this, pairing.pin_sha256);
   };
 
   private _onUnpairRequest = (pairing: PairingSummary): void => {
