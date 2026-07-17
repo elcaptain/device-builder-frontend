@@ -41,6 +41,7 @@ import { deviceCardStyles } from "./device-card/styles.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "@home-assistant/webawesome/dist/components/spinner/spinner.js";
+import "@home-assistant/webawesome/dist/components/tooltip/tooltip.js";
 
 registerMdiIcons({
   cancel: mdiCancel,
@@ -188,27 +189,45 @@ export class ESPHomeDeviceCard extends LitElement {
               ${
                 this.showModified
                   ? html`<span
-                      class="indicator-dot indicator-dot--modified"
-                      title=${this._localize("dashboard.status_modified")}
-                    ></span>`
+                        id="ind-modified"
+                        class="indicator-dot indicator-dot--modified"
+                        tabindex="0"
+                        role="img"
+                        aria-label=${this._localize("dashboard.status_modified")}
+                      ></span>
+                      <wa-tooltip for="ind-modified">
+                        ${this._localize("dashboard.status_modified")}
+                      </wa-tooltip>`
                   : nothing
               }
               ${
                 this.showUpdate
                   ? html`<span
-                      class="indicator-dot indicator-dot--update"
-                      title=${this._localize("dashboard.status_update_available")}
-                    ></span>`
+                        id="ind-update"
+                        class="indicator-dot indicator-dot--update"
+                        tabindex="0"
+                        role="img"
+                        aria-label=${this._localize("dashboard.status_update_available")}
+                      ></span>
+                      <wa-tooltip for="ind-update">
+                        ${this._localize("dashboard.status_update_available")}
+                      </wa-tooltip>`
                   : nothing
               }
               ${
                 this.queuedUpdate
                   ? html`<wa-icon
-                      class="indicator-queued"
-                      library="mdi"
-                      name="clock-outline"
-                      title=${this._localize("dashboard.status_queued_update")}
-                    ></wa-icon>`
+                        id="ind-queued"
+                        class="indicator-queued"
+                        library="mdi"
+                        name="clock-outline"
+                        tabindex="0"
+                        role="img"
+                        aria-label=${this._localize("dashboard.status_queued_update")}
+                      ></wa-icon>
+                      <wa-tooltip for="ind-queued">
+                        ${this._localize("dashboard.status_queued_update")}
+                      </wa-tooltip>`
                   : nothing
               }
               ${renderEncryptionIcon(this)}
@@ -231,28 +250,36 @@ export class ESPHomeDeviceCard extends LitElement {
                   </button>
                   ${this._renderAccentAction()}
                   <button
+                    id="btn-logs"
                     class="action-btn action-btn--ghost action-btn--tile"
                     @click=${() => this._emit("open-logs")}
                     aria-label=${this._localize("dashboard.drawer_logs")}
-                    title=${this._localize("dashboard.drawer_logs")}
                   >
                     <wa-icon library="mdi" name="text-box-outline"></wa-icon>
                   </button>
+                  <wa-tooltip for="btn-logs">
+                    ${this._localize("dashboard.drawer_logs")}
+                  </wa-tooltip>
                   ${
                     this.webUrl
                       ? renderVisitWebUiLink(this.webUrl, this._localize, {
                           className: "action-btn action-btn--ghost action-btn--tile",
                           onClick: (e) => e.stopPropagation(),
+                          tooltipId: "btn-web-ui",
                         })
                       : nothing
                   }
                   <button
+                    id="btn-more"
                     class="action-btn action-btn--ghost action-btn--icon-only"
                     aria-label=${this._localize("dashboard.more_options")}
                     @click=${this._onDotsClick}
                   >
                     <wa-icon library="mdi" name="dots-vertical"></wa-icon>
                   </button>
+                  <wa-tooltip for="btn-more">
+                    ${this._localize("dashboard.more_options")}
+                  </wa-tooltip>
                 </div>
               `
             : nothing
@@ -267,30 +294,34 @@ export class ESPHomeDeviceCard extends LitElement {
   private _renderAccentAction() {
     if (this.showUpdate) {
       return html`<button
-        class="action-btn action-btn--accent action-btn--tile"
-        @click=${() => this._emit(this.busy ? "show-progress" : "update-device")}
-        aria-label=${busyActionLabel(this._localize, this.busy, "dashboard.update")}
-        title=${updateActionTitle(
-          this._localize,
-          this.busy,
-          this.installedVersion,
-          this.availableVersion,
-          "dashboard.update"
-        )}
-      >
-        <wa-icon library="mdi" name="upload"></wa-icon>
-      </button>`;
+          id="btn-accent"
+          class="action-btn action-btn--accent action-btn--tile"
+          @click=${() => this._emit(this.busy ? "show-progress" : "update-device")}
+          aria-label=${busyActionLabel(this._localize, this.busy, "dashboard.update")}
+        >
+          <wa-icon library="mdi" name="upload"></wa-icon>
+        </button>
+        <wa-tooltip for="btn-accent">
+          ${updateActionTitle(
+            this._localize,
+            this.busy,
+            this.installedVersion,
+            this.availableVersion,
+            "dashboard.update"
+          )}
+        </wa-tooltip>`;
     }
     if (this.showModified) {
       const label = busyActionLabel(this._localize, this.busy, "dashboard.install");
       return html`<button
-        class="action-btn action-btn--accent action-btn--tile"
-        @click=${() => this._emit(this.busy ? "show-progress" : "install-device")}
-        aria-label=${label}
-        title=${label}
-      >
-        <wa-icon library="mdi" name="upload"></wa-icon>
-      </button>`;
+          id="btn-accent"
+          class="action-btn action-btn--accent action-btn--tile"
+          @click=${() => this._emit(this.busy ? "show-progress" : "install-device")}
+          aria-label=${label}
+        >
+          <wa-icon library="mdi" name="upload"></wa-icon>
+        </button>
+        <wa-tooltip for="btn-accent">${label}</wa-tooltip>`;
     }
     return nothing;
   }
