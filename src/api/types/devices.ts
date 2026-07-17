@@ -62,13 +62,15 @@ export interface DeviceRuntimeState {
    * mismatch / plaintext.
    */
   api_encryption_active: string | null;
-  /** Whether an unexpired ``_http._tcp`` identity TXT currently backs
-   *  the deployed identity of a device without api:. Session-only —
-   *  false on backend cold start until the broadcast is heard.
-   *  ``deployedIdentityTrusted`` gates the non-api deployed identity
-   *  on it, mirroring the ``active_source === "mdns"`` gate api
-   *  devices use. */
-  http_identity_live: boolean;
+  /** Whether fresh first-party evidence backs the deployed identity:
+   *  an unexpired ``_http._tcp`` identity TXT (devices without api:),
+   *  a live Native API device_info connection the backend made (api
+   *  devices mDNS doesn't own, e.g. Docker-bridge), or a flash this
+   *  dashboard performed. Session-only — false on backend cold start
+   *  until evidence arrives. mDNS taking ownership of an api device
+   *  clears it; the announce lifecycle vouches from there, which is
+   *  the other half of ``deployedIdentityTrusted``'s gate. */
+  deployed_identity_live: boolean;
 }
 
 /** A configured ESPHome device. */
@@ -137,12 +139,12 @@ export interface ConfiguredDevice {
   expected_config_hash: string;
   /** True until successfully compiled + deployed */
   has_pending_changes: boolean;
-  /** True when ``has_pending_changes`` came from the mDNS-sourced
+  /** True when ``has_pending_changes`` came from the deployed
    *  config-hash compare (vs the local mtime fallback). The UI gates
    *  only this case on a trusted deployed identity (see
    *  ``deployedIdentityTrusted``), so a local YAML edit still cues
-   *  "install" when mDNS is dark. Optional / absent reads as a local
-   *  (non-mDNS-dependent) pending. */
+   *  "install" when the deployed identity can't be trusted. Optional /
+   *  absent reads as a local (mtime-driven) pending. */
   pending_changes_via_hash?: boolean;
   /** True if compiled with older ESPHome version */
   update_available: boolean;

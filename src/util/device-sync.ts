@@ -2,40 +2,39 @@ import type { ConfiguredDevice } from "../api/types/devices.js";
 
 // Whether mDNS is the channel currently driving the device's online state.
 // Deliberately unexported: for gating the deployed identity (version /
-// config hash) use deployedIdentityTrusted below, never this directly —
-// this predicate can never be true for a device without api:.
+// config hash) use deployedIdentityTrusted below, never this directly.
 const mdnsOnline = (d: ConfiguredDevice): boolean =>
   d.runtime_state.active_source === "mdns";
 
-// Whether the mDNS-sourced deployed identity (version / config hash) is
-// trustworthy. An api: device broadcasts it on _esphomelib._tcp, the same
-// service that claims active_source === "mdns", so that source doubles as the
-// freshness signal: when mDNS is dark (a ping/MQTT-only "odd setup", e.g. a
-// Docker-bridge dashboard) the values go stale, so blanking them avoids a
-// false "out of sync". A device without api: broadcasts the same identity
-// trio on _http._tcp (ESPHome 2026.7.0+), which by backend design never
-// claims reachability, so active_source can't vouch for it — the backend
-// tracks that broadcast's freshness itself and ships it as
-// runtime_state.http_identity_live (session-only; false on backend cold
-// start until the broadcast is heard). A powered-down device blanks
-// rather than showing its last-heard identity: an arbitrarily old
-// broadcast is not evidence, matching how an api: device blanks when
-// mDNS goes dark.
+// Whether the deployed identity (version / config hash) is trustworthy.
+// Two evidence channels, one per disjunct. An api: device broadcasts the
+// identity on _esphomelib._tcp, the service mdns ownership rides on —
+// and the api_enabled guard there is load-bearing: a device without
+// api: can also hold active_source === "mdns", but off a bare A-record
+// resolve that vouches for reachability only, never identity.
+// Everywhere mdns can't vouch, the backend ships its own first-party
+// evidence as runtime_state.deployed_identity_live (session-only). Where
+// mDNS can reach the device, the backend clears the flag when mDNS takes
+// ownership, so a powered-down device blanks through the announce
+// lifecycle. In an mDNS-dark deployment the flag deliberately never
+// expires — no evidence of staleness can arrive, so the last-confirmed
+// identity stays up and reachability is signalled separately by the
+// state indicator. Full semantics: docs/API.md in the backend repo
+// (esphome/device-builder), Device.runtime_state.
 export const deployedIdentityTrusted = (d: ConfiguredDevice): boolean =>
-  d.api_enabled ? mdnsOnline(d) : d.runtime_state.http_identity_live;
+  (d.api_enabled && mdnsOnline(d)) || d.runtime_state.deployed_identity_live;
 
 // Whether to SHOW the "modified" (needs-install) and "update available"
-// indicators, gated so a stale mDNS-dark value can't flag a false "out of
+// indicators, gated so a stale untrusted value can't flag a false "out of
 // sync". The raw truth stays on the device fields (``has_pending_changes`` /
 // ``update_available``); these say whether to surface it. Every indicator site
 // derives from these so the rule lives in one place.
 //
 // ``update_available`` (``deployed_version`` vs ``current_version``) is purely
-// mDNS-sourced, so it always needs a trusted deployed identity.
-// ``has_pending_changes`` is only
-// mDNS-dependent when it came from the config-hash compare
-// (``pending_changes_via_hash``); a local mtime-driven edit is trustworthy
-// without mDNS, so it still cues "install".
+// deployed-identity-sourced, so it always needs a trusted deployed identity.
+// ``has_pending_changes`` is only identity-dependent when it came from the
+// config-hash compare (``pending_changes_via_hash``); a local mtime-driven
+// edit is trustworthy without it, so it still cues "install".
 export const showPendingChanges = (d: ConfiguredDevice): boolean =>
   d.has_pending_changes === true &&
   (deployedIdentityTrusted(d) || d.pending_changes_via_hash !== true);
