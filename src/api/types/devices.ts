@@ -325,3 +325,27 @@ export interface UpdateDeviceResponse {
 export interface AddComponentResponse {
   yaml: string;
 }
+
+/** One line of decoder output, tagged with the excerpt line that produced it. */
+export interface DecodedBacktraceLine {
+  index: number;
+  text: string;
+}
+
+/** Response from devices/decode_backtrace. */
+export interface DecodeBacktraceResponse {
+  decoded: DecodedBacktraceLine[];
+  /** The running firmware was built from a different config than the local
+   *  build, so the symbols are confident but wrong. */
+  stale_build: boolean;
+  /** Why nothing was decoded: "no_backtrace" | "no_build" |
+   *  "unsupported_platform" | "decode_failed" | "helper_failed"; "" on
+   *  success.
+   *
+   *  Never shown: the report states that the backtrace was not decoded without
+   *  naming a cause, because most of these are indistinguishable to a reader
+   *  and a caught timeout reaches the same branch anyway. Read only to tell a
+   *  fact about this region from a fact about the backend, which decides
+   *  whether the verdict is worth remembering. */
+  unavailable_reason: string;
+}

@@ -20,12 +20,14 @@ import { apiContext, darkModeContext, localizeContext } from "../context/index.j
 import { primaryDialogHeaderStyles } from "../styles/dialog-header.js";
 import { fullscreenMobileDialog } from "../styles/dialog-mobile.js";
 import { espHomeStyles } from "../styles/shared.js";
-import { type CrashKind, detectCrashKind } from "../util/crash-detector.js";
+import { type CrashKind, classifyLine } from "../util/crash-detector.js";
+import { normalizeLogLine } from "../util/log-line.js";
 import { initialDarkMode } from "../util/dark-mode.js";
 import { configurationStem, downloadAnsiText } from "../util/download-text.js";
 import { LineBatcher } from "../util/line-batcher.js";
 import { notifyError } from "../util/notify.js";
 import { registerMdiIcons } from "../util/register-icons.js";
+import { CrashDecodeController } from "./crash-decode-controller.js";
 import type { ESPHomeCrashReportDialog } from "./crash-report-dialog.js";
 import { logsDialogStyles } from "./logs-dialog.styles.js";
 import {
@@ -125,6 +127,15 @@ export class ESPHomeLogsDialog extends LitElement {
   @state()
   private _crashKind: CrashKind | null = null;
 
+  // Inline crash decoding, including the absolute-position-onto-_lines map it
+  // needs. Read lazily so field-initialisation order doesn't matter.
+  private _crashDecode = new CrashDecodeController({
+    api: () => this._api,
+    configuration: () => this.configuration,
+    getLines: () => this._lines,
+    setLines: (next) => this._setLinesCapped(next),
+  });
+
   // Rendered unconditionally in this dialog's template, so the query is
   // always resolved by the time the callout button can be clicked.
   @query("esphome-crash-report-dialog")
@@ -206,6 +217,7 @@ export class ESPHomeLogsDialog extends LitElement {
     void this._teardownSession();
     this._resetPendingLines();
     this._lines = [];
+    this._crashDecode.reset();
     this._crashKind = null;
     this._expanded = false;
     this._showStates = true;
@@ -448,7 +460,12 @@ export class ESPHomeLogsDialog extends LitElement {
   // underneath; the stream keeps running.
   private _openCrashReport = () => {
     this._flushPendingLines();
-    this._crashReportDialog.open(this.configuration, this.name, [...this._lines]);
+    this._crashReportDialog.open(
+      this.configuration,
+      this.name,
+      [...this._lines],
+      this._crashDecode.staleBuild
+    );
   };
 
   // Start button (only shown while not streaming; the leading guard also
@@ -568,6 +585,7 @@ export class ESPHomeLogsDialog extends LitElement {
   private _clearLogs() {
     this._resetPendingLines();
     this._lines = [];
+    this._crashDecode.reset();
     this._crashKind = null;
   }
 
@@ -581,22 +599,36 @@ export class ESPHomeLogsDialog extends LitElement {
   // single place the cap is enforced, shared by the batched flush and the
   // direct recovery-path append (setSerialOpenFailed).
   private _appendCapped(lines: string[]): void {
-    const merged = [...this._lines, ...lines];
-    this._lines = merged.length > MAX_LOG_LINES ? merged.slice(-MAX_LOG_LINES) : merged;
-    if (this._crashKind !== "live") {
-      const kind = detectCrashKind(lines);
-      if (kind && kind !== this._crashKind) {
-        const firstDetection = this._crashKind === null;
-        this._crashKind = kind;
-        // The callout shrinks the log container; re-pin so the crash
-        // tail stays visible.
-        if (firstDetection) {
-          void this.updateComplete
-            .then(() => this._terminal?.scrollToBottom())
-            .catch((err) => console.warn("crash callout re-pin scroll failed", err));
-        }
+    this._setLinesCapped([...this._lines, ...lines]);
+    // One normalization per line, shared by the crash classifier and the
+    // decode controller: this runs for every line of a stream that can push
+    // thousands a second.
+    let kind: CrashKind | null = null;
+    for (const line of lines) {
+      const normalized = normalizeLogLine(line);
+      this._crashDecode.observe(line, normalized);
+      const lineKind = classifyLine(normalized);
+      if (lineKind === "live" || (lineKind && !kind)) kind = lineKind;
+    }
+    if (this._crashKind !== "live" && kind && kind !== this._crashKind) {
+      const firstDetection = this._crashKind === null;
+      this._crashKind = kind;
+      // The callout shrinks the log container; re-pin so the crash
+      // tail stays visible.
+      if (firstDetection) {
+        void this.updateComplete
+          .then(() => this._terminal?.scrollToBottom())
+          .catch((err) => console.warn("crash callout re-pin scroll failed", err));
       }
     }
+  }
+
+  // The single place MAX_LOG_LINES is enforced, so the cap policy and the
+  // index shift it causes can't drift apart.
+  private _setLinesCapped(next: string[]): void {
+    const overflow = Math.max(0, next.length - MAX_LOG_LINES);
+    if (overflow) this._crashDecode.noteTrimmed(overflow);
+    this._lines = overflow ? next.slice(-MAX_LOG_LINES) : next;
   }
 
   // Drain pending lines into ``_lines`` now, trimmed to the newest
