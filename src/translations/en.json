@@ -385,6 +385,9 @@
   "command": {
     "install_title": "Install — {name}",
     "compile_title": "Compile — {name}",
+    "offline_compile_title": "Offline compile — {name}",
+    "offline_compile_success": "Offline compile successful",
+    "offline_compile_failed": "Offline compile failed",
     "validate_title": "Validate — {name}",
     "clean_title": "Clean — {name}",
     "reset_title": "Reset build environment",
@@ -1598,6 +1601,7 @@
     "reset_peer_confirm_button": "Reset build environment",
     "reset_peer_failed": "Couldn't start the build environment reset on {label}: {detail}",
     "type_compile": "Compile",
+    "type_offline_compile": "Offline compile",
     "type_upload": "Upload",
     "type_install": "Install",
     "type_clean": "Clean",

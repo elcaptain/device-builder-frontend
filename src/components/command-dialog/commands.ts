@@ -1,7 +1,6 @@
 import { APIError } from "../../api/api-error.js";
 import { type FirmwareJob, JobStatus, JobType } from "../../api/types/firmware-jobs.js";
 import { ErrorCode } from "../../api/types/protocol.js";
-import { effectiveJobType } from "../../util/firmware-job-display.js";
 import { isTerminalJobStatus } from "../../util/firmware-job-status.js";
 import { isValidationFailureLine } from "../../util/validation-log.js";
 import { classifyNoCompatiblePeerReason } from "../../util/version-mismatch.js";
@@ -24,12 +23,17 @@ export function deriveFollowCommandType(
   jobs: Map<string, FirmwareJob>,
   job: FirmwareJob
 ): CommandType {
+  // COMPILE-gated like firmwareJobTypeLabel: a failed OTA upload converted
+  // offline also carries the flag but reopens as the Install it was.
+  if (job.is_deferred_install && job.job_type === JobType.COMPILE) {
+    return "offline_compile";
+  }
   if (job.job_type === JobType.COMPILE && !isTerminalJobStatus(job.status)) {
     const dependent = [...jobs.values()].find((j) => j.depends_on === job.job_id);
     if (dependent?.job_type === JobType.RENAME) return "rename";
     if (dependent?.job_type === JobType.UPLOAD) return "install";
   }
-  return JOB_TYPE_TO_COMMAND[effectiveJobType(job)] ?? "install";
+  return JOB_TYPE_TO_COMMAND[job.job_type];
 }
 
 // An install chain is followed via its COMPILE head, but the flash target
@@ -148,6 +152,7 @@ export async function startFirmwareJob(host: ESPHomeCommandDialog): Promise<void
   let job: FirmwareJob;
   try {
     switch (host._commandType) {
+      case "offline_compile":
       case "install":
         job = await host._api.firmwareInstall(
           host.configuration,
