@@ -77,4 +77,15 @@ export const changeBoardDialogStyles = css`
     font-size: var(--wa-font-size-xs);
     color: var(--wa-color-text-quiet);
   }
+
+  .load-more-loading {
+    text-align: center;
+    color: var(--wa-color-text-quiet);
+    padding: var(--wa-space-m);
+  }
+
+  /* Chrome comes from the shared inputStyles sheet; only layout here. */
+  .board-search {
+    margin-bottom: var(--wa-space-s);
+  }
 `;

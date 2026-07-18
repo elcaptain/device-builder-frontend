@@ -124,7 +124,7 @@ import { sortDevices } from "../util/device-sort.js";
 import { normalizeUpdateBuckets } from "../util/facets.js";
 import { computeLabelUsage } from "../util/label-usage.js";
 import { navigate } from "../util/navigation.js";
-import { notifyInfo } from "../util/notify.js";
+import { notifyError, notifyInfo } from "../util/notify.js";
 import { consumePendingHighlight } from "../util/pending-highlight.js";
 import { consumePendingSerialSetup } from "../util/pending-serial-setup.js";
 import { postInstallShowLogsHandler } from "../util/post-install-logs.js";
@@ -147,6 +147,9 @@ import "../components/dashboard/device-drawer.js";
 import "../components/dashboard/device-table.js";
 import "../components/dashboard/table-row-menu.js";
 import "../components/device-card.js";
+import "../components/device/board-reselect-dialog.js";
+import type { ESPHomeBoardReselectDialog } from "../components/device/board-reselect-dialog.js";
+import { findBoardDisagreement, openBoardReselect } from "../util/board-change.js";
 import "../components/discovered-device-card.js";
 import "../components/firmware-install-dialog.js";
 import type { ESPHomeFirmwareInstallDialog } from "../components/firmware-install-dialog.js";
@@ -326,6 +329,8 @@ export class ESPHomePageDashboard extends LitElement {
   @query("esphome-command-dialog") _commandDialog!: ESPHomeCommandDialog;
   @query("esphome-firmware-install-dialog")
   _firmwareDialog!: ESPHomeFirmwareInstallDialog;
+  @query("esphome-board-reselect-dialog")
+  _boardReselectDialog!: ESPHomeBoardReselectDialog;
   @query("esphome-logs-dialog") _logsDialog!: ESPHomeLogsDialog;
   @query(".search-input") _searchInputEl?: HTMLElement & { focus: () => void };
 
@@ -952,10 +957,48 @@ export class ESPHomePageDashboard extends LitElement {
     this._drawerOpen = true;
   }
 
-  _openCommand = (device: ConfiguredDevice, type: CommandType, port?: string) =>
+  _openCommand = (device: ConfiguredDevice, type: CommandType, port?: string) => {
+    if (type === "install") {
+      void this._guardBoardThen(device, () => openCommand(this, device, type, port));
+      return;
+    }
     openCommand(this, device, type, port);
+  };
   _showJobProgress = (device: ConfiguredDevice) => showJobProgress(this, device);
-  _openInstallMethod = (device: ConfiguredDevice) => openInstallMethod(this, device);
+  _openInstallMethod = (device: ConfiguredDevice) => {
+    void this._guardBoardThen(device, () => openInstallMethod(this, device));
+  };
+
+  /** Hard block: force the board fix before a single-device install
+   *  opens. Re-attaching to a running job starts no install, so it
+   *  skips the guard's fetches; bulk update stays ungated (OTA only,
+   *  N pickers can't stack). A picker with nothing to offer falls
+   *  through — the chip check downstream stays the guard, and
+   *  blocking would strand the install with only a toast. */
+  _guardBoardThen = async (
+    device: ConfiguredDevice,
+    proceed: () => void | Promise<void>
+  ) => {
+    // Whole body guarded: the void call sites would otherwise turn any
+    // throw into a silent unhandled rejection.
+    try {
+      if (showJobProgress(this, device)) return;
+      const yaml = await findBoardDisagreement(this._api, this._localize, device);
+      if (
+        yaml &&
+        (await openBoardReselect(this._boardReselectDialog, {
+          configuration: device.configuration,
+          yaml,
+        }))
+      ) {
+        return;
+      }
+      await proceed();
+    } catch (err) {
+      console.error("Install entry failed:", err);
+      notifyError(this._localize("device.install_start_failed"));
+    }
+  };
   _onInstallMethodSelect = (e: CustomEvent<{ method: string; port?: string }>) =>
     onInstallMethodSelect(this, e);
   _openLogs = (device: ConfiguredDevice) => openLogs(this, device);
@@ -965,6 +1008,13 @@ export class ESPHomePageDashboard extends LitElement {
   );
   _onRequestOpenEditor = (e: CustomEvent<{ configuration: string }>) => {
     navigate(`/device/${encodeURIComponent(e.detail.configuration)}`);
+  };
+
+  /** Chip-mismatch recovery hand-off from the install dialog. */
+  _onRequestChangeBoard = (e: CustomEvent<{ configuration: string }>) => {
+    void openBoardReselect(this._boardReselectDialog, {
+      configuration: e.detail.configuration,
+    });
   };
 
   _toggleDevice(configuration: string) {
