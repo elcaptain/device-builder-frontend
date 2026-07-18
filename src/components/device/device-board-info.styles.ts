@@ -123,6 +123,15 @@ export const deviceBoardInfoStyles = css`
     line-height: 1.5;
   }
 
+  /* Compact variant of .action-item (defined below; compound selector
+     outweighs its base rules regardless of source order). */
+  .action-item.welcome-banner-install {
+    width: auto;
+    margin-top: var(--wa-space-xs);
+    font-size: var(--wa-font-size-s);
+    font-weight: var(--wa-font-weight-semibold);
+  }
+
   .welcome-banner-close {
     position: absolute;
     top: var(--wa-space-2xs);
