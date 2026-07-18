@@ -67,6 +67,16 @@ export class ESPHomeWizardStepSetup extends LitElement {
   @state()
   private _fullSetup = true;
 
+  /**
+   * Full setup never applies to a remote-package board — the package
+   * reference is the whole config, so both the checkbox and the emitted
+   * finish-setup flag must stay off even if the body also carries
+   * full_config and bundles.
+   */
+  private get _offersFullSetup(): boolean {
+    return !this.board?.package_import_url && boardOffersFullSetup(this.board);
+  }
+
   @state()
   private _wifiSsid = "";
 
@@ -408,22 +418,28 @@ export class ESPHomeWizardStepSetup extends LitElement {
         </div>
 
         ${
-          boardOffersFullSetup(this.board)
+          this.board?.package_import_url
             ? html`<div class="full-setup">
-                <wa-checkbox
-                  .checked=${this._fullSetup}
-                  @change=${(e: Event) => {
-                    this._fullSetup = (
-                      e.currentTarget as HTMLElement & { checked: boolean }
-                    ).checked;
-                  }}
-                  >${this._localize("wizard.full_setup")}</wa-checkbox
-                >
                 <p class="section-subtitle">
-                  ${this._localize("wizard.full_setup_desc")}
+                  ${this._localize("wizard.package_config_desc")}
                 </p>
               </div>`
-            : null
+            : this._offersFullSetup
+              ? html`<div class="full-setup">
+                  <wa-checkbox
+                    .checked=${this._fullSetup}
+                    @change=${(e: Event) => {
+                      this._fullSetup = (
+                        e.currentTarget as HTMLElement & { checked: boolean }
+                      ).checked;
+                    }}
+                    >${this._localize("wizard.full_setup")}</wa-checkbox
+                  >
+                  <p class="section-subtitle">
+                    ${this._localize("wizard.full_setup_desc")}
+                  </p>
+                </div>`
+              : null
         }
       </section>
     `;
@@ -525,7 +541,7 @@ export class ESPHomeWizardStepSetup extends LitElement {
           name: this._deviceName,
           wifiSsid,
           wifiPassword,
-          fullSetup: boardOffersFullSetup(this.board) && this._fullSetup,
+          fullSetup: this._offersFullSetup && this._fullSetup,
         },
         bubbles: true,
         composed: true,
