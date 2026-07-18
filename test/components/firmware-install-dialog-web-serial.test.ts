@@ -62,9 +62,7 @@ function makeHost() {
     _open: true,
     _showLogsAfterInstall: false,
     _detected: null as unknown,
-    _failedDuringCompile: false,
-    _failedDuringValidate: false,
-    _failedChipMismatch: false,
+    _failureKind: null,
     _jobId: "",
     _streamId: "",
     _jobSource: JobSource.LOCAL,
@@ -236,8 +234,8 @@ describe("Web Serial install — HTTP byte download", () => {
     await startWebSerialInstall(host as unknown as ESPHomeFirmwareInstallDialog);
 
     expect(host._fail).toHaveBeenCalledWith("firmware.chip_mismatch");
-    // The flag routes the footer to the change-board hand-off.
-    expect(host._failedChipMismatch).toBe(true);
+    // The kind routes the footer to the change-board hand-off.
+    expect(host._failureKind).toBe("chip-mismatch");
     expect(wsSerial.flashFirmware).not.toHaveBeenCalled();
   });
 
@@ -250,6 +248,6 @@ describe("Web Serial install — HTTP byte download", () => {
 
     await startWebSerialInstall(host as unknown as ESPHomeFirmwareInstallDialog);
 
-    expect(host._failedChipMismatch).toBe(false);
+    expect(host._failureKind).toBe(null);
   });
 });
