@@ -2,7 +2,7 @@ import { autocompletion, completionStatus } from "@codemirror/autocomplete";
 import { indentWithTab, undoDepth } from "@codemirror/commands";
 import { indentUnit } from "@codemirror/language";
 import { forceLinting } from "@codemirror/lint";
-import { StateEffect, StateField, Transaction } from "@codemirror/state";
+import { StateEffect, StateField, Transaction, type Line } from "@codemirror/state";
 import { Decoration, keymap, tooltips, type DecorationSet } from "@codemirror/view";
 import { consume } from "@lit/context";
 import { indentationMarkers } from "@replit/codemirror-indentation-markers";
@@ -32,7 +32,11 @@ import { fireEvent } from "../util/fire-event.js";
 import { idleCompletion } from "../util/idle-completion.js";
 import { createYamlCompletionSource } from "../util/yaml-completion.js";
 import { cursorKeyPathAt, indexedKeyPathAt } from "../util/yaml-cursor-paths.js";
-import { lineKeyToken, type YamlAutoFix } from "../util/yaml-error-analysis.js";
+import {
+  emptyBlockFixKind,
+  lineKeyToken,
+  type YamlAutoFix,
+} from "../util/yaml-error-analysis.js";
 import { createYamlHoverTooltip } from "../util/yaml-hover.js";
 import { indentOf } from "../util/yaml-line-walker.js";
 import {
@@ -597,20 +601,24 @@ export class ESPHomeYamlEditor extends CodeMirrorEditorElement {
    * undoable transaction.
    *
    * The re-validation is the real safety net against a stale banner: the
-   * `- <key>` re-check (before and after the async step) is a cheap filter,
-   * but the key is often a shared token (`platform`), so validating the
-   * proposed document is what actually catches fixing the wrong item or
-   * double-fixing one already repaired. A validation failure rejects (the
-   * caller surfaces it) rather than silently applying.
+   * key + indent re-check (before and after the async step) is a cheap
+   * filter, but the key is often a shared token (`platform`), so validating
+   * the proposed document is what actually catches fixing the wrong item or
+   * double-fixing one already repaired. The destructive kinds lean harder on
+   * the structural check — deleting or commenting the wrong line often still
+   * validates clean — so they additionally require the line to still hold
+   * the exact empty/commented shape the fix was diagnosed for. A validation
+   * failure rejects (the caller surfaces it) rather than silently applying.
    */
   async applyAutoFix(
     fix: YamlAutoFix,
     confirm?: () => Promise<boolean>
   ): Promise<AutoFixOutcome> {
     const view = this._view;
-    if (!view || !this._api || (fix.kind !== "dash-space" && fix.indent === 0)) {
+    if (!view || !this._api || (fix.kind === undefined && fix.indent === 0)) {
       return "unavailable";
     }
+    const destructive = fix.kind === "comment-out" || fix.kind === "remove-line";
     // Resolve the target only when the line the fix wants to edit is still
     // the line the analysis saw — same key, same indent — so a stale click
     // after edits shifted line numbers, or on a line the user already
@@ -619,7 +627,7 @@ export class ESPHomeYamlEditor extends CodeMirrorEditorElement {
     // on a different line than the one it repairs (a continuation error
     // blames the line below the pair that moves), so re-analyzing at the
     // fix line can't reproduce every shape.
-    const targetFrom = (): number | null => {
+    const targetLine = (): Line | null => {
       const doc = view.state.doc;
       if (fix.line < 1 || fix.line > doc.lines) return null;
       const t = doc.line(fix.line);
@@ -628,21 +636,42 @@ export class ESPHomeYamlEditor extends CodeMirrorEditorElement {
       }
       // A dedent must have the spaces it wants to remove.
       if (fix.indent < 0 && fix.fromIndent + fix.indent < 0) return null;
-      return t.from;
+      // A destructive fix's target IS its diagnosed line, so unlike the
+      // general anchored-elsewhere case above, re-running the shape check is
+      // valid — and required: a key that has since gained a value or a real
+      // child must not be commented out or deleted.
+      if (destructive) {
+        const readLine = (n: number): string | undefined =>
+          n >= 1 && n <= doc.lines ? doc.line(n).text : undefined;
+        if (emptyBlockFixKind(readLine, fix.line) !== fix.kind) return null;
+      }
+      return t;
     };
-    const from = targetFrom();
-    if (from === null) return "stale";
+    const line = targetLine();
+    if (line === null) return "stale";
 
     const doc = view.state.doc;
-    // The dash-space repair inserts after the stuck dash; indent repairs
-    // insert or remove leading spaces at the line start.
-    const changeAt = (at: number): { from: number; to?: number; insert?: string } =>
-      fix.kind === "dash-space"
-        ? { from: at + fix.fromIndent + 1, insert: " " }
-        : fix.indent > 0
-          ? { from: at, insert: " ".repeat(fix.indent) }
-          : { from: at, to: at - fix.indent };
-    const change = changeAt(from);
+    // The dash-space repair inserts after the stuck dash; comment-out
+    // inserts `# ` at the line's indent; remove-line deletes the whole
+    // line; indent repairs insert or remove leading spaces at the line
+    // start. Pure arithmetic on the resolved line + its doc, so both
+    // invocations (pre-await proposal, post-await dispatch) stay
+    // consistent with the doc they resolved against.
+    const changeAt = (
+      target: Line,
+      docLength: number
+    ): { from: number; to?: number; insert?: string } => {
+      const at = target.from;
+      if (fix.kind === "dash-space")
+        return { from: at + fix.fromIndent + 1, insert: " " };
+      if (fix.kind === "comment-out") return { from: at + fix.fromIndent, insert: "# " };
+      if (fix.kind === "remove-line")
+        return { from: at, to: Math.min(target.to + 1, docLength) };
+      return fix.indent > 0
+        ? { from: at, insert: " ".repeat(fix.indent) }
+        : { from: at, to: at - fix.indent };
+    };
+    const change = changeAt(line, doc.length);
     const proposed =
       doc.sliceString(0, change.from) +
       (change.insert ?? "") +
@@ -656,10 +685,10 @@ export class ESPHomeYamlEditor extends CodeMirrorEditorElement {
     if (!proceed) return "declined";
 
     // Re-resolve the target: the doc may have changed while we awaited.
-    const settled = targetFrom();
+    const settled = targetLine();
     if (settled === null) return "stale";
     view.dispatch({
-      changes: changeAt(settled),
+      changes: changeAt(settled, view.state.doc.length),
       scrollIntoView: true,
     });
     view.focus();

@@ -267,4 +267,152 @@ describe("yaml-editor applyAutoFix (#1884)", () => {
     );
     expect(validateYaml).not.toHaveBeenCalled();
   });
+
+  it("applies a comment-out fix at the key's indent", async () => {
+    const validateYaml = vi.fn(async () => CLEAN);
+    const broken =
+      'esp32:\n  framework:\n    advanced:\n#      minimum_chip_revision: "3.1"\n';
+    const fixed =
+      'esp32:\n  framework:\n    # advanced:\n#      minimum_chip_revision: "3.1"\n';
+    const el = await mountEditor(validateYaml, broken);
+    const view = viewOf(el);
+
+    expect(
+      await el.applyAutoFix({
+        line: 3,
+        indent: 0,
+        key: "advanced",
+        fromIndent: 4,
+        kind: "comment-out",
+      })
+    ).toBe("applied");
+
+    expect(view.state.doc.toString()).toBe(fixed);
+    expect(validateYaml).toHaveBeenCalledWith("x.yaml", fixed);
+    undo(view);
+    expect(view.state.doc.toString()).toBe(broken);
+  });
+
+  it("no-ops a stale comment-out fix whose line was already commented", async () => {
+    const validateYaml = vi.fn(async () => CLEAN);
+    const doc = "esp32:\n  framework:\n    # advanced:\n";
+    const el = await mountEditor(validateYaml, doc);
+
+    expect(
+      await el.applyAutoFix({
+        line: 3,
+        indent: 0,
+        key: "advanced",
+        fromIndent: 4,
+        kind: "comment-out",
+      })
+    ).toBe("stale");
+    expect(validateYaml).not.toHaveBeenCalled();
+  });
+
+  it("applies a remove-line fix by deleting the whole line", async () => {
+    const validateYaml = vi.fn(async () => CLEAN);
+    const broken = "esp32:\n  framework:\n    advanced:\n  board: esp32dev\n";
+    const fixed = "esp32:\n  framework:\n  board: esp32dev\n";
+    const el = await mountEditor(validateYaml, broken);
+    const view = viewOf(el);
+
+    expect(
+      await el.applyAutoFix({
+        line: 3,
+        indent: 0,
+        key: "advanced",
+        fromIndent: 4,
+        kind: "remove-line",
+      })
+    ).toBe("applied");
+
+    expect(view.state.doc.toString()).toBe(fixed);
+    expect(validateYaml).toHaveBeenCalledWith("x.yaml", fixed);
+    undo(view);
+    expect(view.state.doc.toString()).toBe(broken);
+  });
+
+  it("applies a remove-line fix on the document's last line", async () => {
+    const validateYaml = vi.fn(async () => CLEAN);
+    const broken = "esp32:\n  framework:\n    advanced:";
+    const fixed = "esp32:\n  framework:\n";
+    const el = await mountEditor(validateYaml, broken);
+    const view = viewOf(el);
+
+    expect(
+      await el.applyAutoFix({
+        line: 3,
+        indent: 0,
+        key: "advanced",
+        fromIndent: 4,
+        kind: "remove-line",
+      })
+    ).toBe("applied");
+
+    expect(view.state.doc.toString()).toBe(fixed);
+    expect(validateYaml).toHaveBeenCalledWith("x.yaml", fixed);
+  });
+
+  // Deleting or commenting the wrong line often still validates clean, so
+  // the destructive kinds must refuse structurally once the diagnosed
+  // shape is gone: the key gained a value, gained a real child (which the
+  // fix would orphan), or flipped to the other empty-block shape.
+  it("no-ops a stale destructive fix once the key has gained a value", async () => {
+    const validateYaml = vi.fn(async () => CLEAN);
+    const doc = "esp32:\n  framework:\n    advanced: true\n";
+    const el = await mountEditor(validateYaml, doc);
+
+    expect(
+      await el.applyAutoFix({
+        line: 3,
+        indent: 0,
+        key: "advanced",
+        fromIndent: 4,
+        kind: "remove-line",
+      })
+    ).toBe("stale");
+    expect(viewOf(el).state.doc.toString()).toBe(doc);
+    expect(validateYaml).not.toHaveBeenCalled();
+  });
+
+  it("no-ops a stale destructive fix once the key has gained a real child", async () => {
+    const validateYaml = vi.fn(async () => CLEAN);
+    const doc =
+      'esp32:\n  framework:\n    advanced:\n      minimum_chip_revision: "3.1"\n';
+    const el = await mountEditor(validateYaml, doc);
+
+    expect(
+      await el.applyAutoFix({
+        line: 3,
+        indent: 0,
+        key: "advanced",
+        fromIndent: 4,
+        kind: "remove-line",
+      })
+    ).toBe("stale");
+    expect(viewOf(el).state.doc.toString()).toBe(doc);
+    expect(validateYaml).not.toHaveBeenCalled();
+  });
+
+  it("no-ops a destructive fix whose empty-block shape has flipped", async () => {
+    const validateYaml = vi.fn(async () => CLEAN);
+    // Diagnosed remove-line (nothing under the key); a commented child has
+    // since appeared, so the right repair is now comment-out, not deletion.
+    const doc =
+      'esp32:\n  framework:\n    advanced:\n#      minimum_chip_revision: "3.1"\n';
+    const el = await mountEditor(validateYaml, doc);
+
+    expect(
+      await el.applyAutoFix({
+        line: 3,
+        indent: 0,
+        key: "advanced",
+        fromIndent: 4,
+        kind: "remove-line",
+      })
+    ).toBe("stale");
+    expect(viewOf(el).state.doc.toString()).toBe(doc);
+    expect(validateYaml).not.toHaveBeenCalled();
+  });
 });

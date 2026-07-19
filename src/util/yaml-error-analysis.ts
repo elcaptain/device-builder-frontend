@@ -603,7 +603,7 @@ export function describeValueTypeCause(
   // ("'board' is a required option") must not pick up a remove-the-line hint.
   if (EXPECTED_DICT_RE.test(message)) {
     const emptyBlock = describeEmptyBlock(readLine, line, localize);
-    if (emptyBlock) return { text: emptyBlock };
+    if (emptyBlock) return emptyBlock;
   }
   const token = text.trim();
   if (token && !token.includes(":") && !token.startsWith("#") && !token.startsWith("-")) {
@@ -634,22 +634,20 @@ function isCommentedChild(text: string, keyIndent: number): boolean {
 }
 
 /**
- * The empty-block cause behind "expected a dictionary." anchored on a
- * value-less plain `key:`: nothing is indented under it, so its value is
- * null. Distinguishes children that are all commented out (the classic
- * "commented the option, left the key" repair — uncomment or comment the
- * key too) from a key with nothing under it at all. Null when the key has
- * any real child, or the line isn't a value-less plain key.
+ * Classify the empty-block shape at *line*: a value-less plain `key:`
+ * whose children are all commented out ("comment-out") or absent
+ * entirely ("remove-line"); null when the key has any real child, or
+ * the line isn't a value-less plain key. Also the apply site's stale
+ * check for the destructive fixes — the diagnosed line must still hold
+ * the exact shape the fix was built for.
  */
-function describeEmptyBlock(
+export function emptyBlockFixKind(
   readLine: ReadLine,
-  line: number,
-  localize: LocalizeFunc
-): string | null {
+  line: number
+): "comment-out" | "remove-line" | null {
   const text = readLine(line);
   if (text === undefined || parseListItemMarker(text)) return null;
-  const key = valuelessKeyOf(stripComment(text));
-  if (key === null) return null;
+  if (valuelessKeyOf(stripComment(text)) === null) return null;
   const keyIndent = indentOf(text);
   let sawComment = false;
   for (let n = line + 1; n <= line + WALK_BOUND; n++) {
@@ -663,12 +661,33 @@ function describeEmptyBlock(
     if (indentOf(next) > keyIndent) return null;
     break;
   }
-  return localize(
-    sawComment
-      ? "yaml_editor.error_commented_block_hint"
-      : "yaml_editor.error_empty_block_hint",
-    { line, key }
-  );
+  return sawComment ? "comment-out" : "remove-line";
+}
+
+/**
+ * The empty-block cause behind "expected a dictionary.": the hint names
+ * the commented-out or empty shape and carries the matching repair
+ * (comment the key out too, or remove the line).
+ */
+function describeEmptyBlock(
+  readLine: ReadLine,
+  line: number,
+  localize: LocalizeFunc
+): ValueTypeCause | null {
+  const kind = emptyBlockFixKind(readLine, line);
+  if (kind === null) return null;
+  const text = readLine(line);
+  const key = valuelessKeyOf(stripComment(text ?? ""));
+  if (key === null) return null;
+  return {
+    text: localize(
+      kind === "comment-out"
+        ? "yaml_editor.error_commented_block_hint"
+        : "yaml_editor.error_empty_block_hint",
+      { line, key }
+    ),
+    fix: { line, indent: 0, key, fromIndent: indentOf(text ?? ""), kind },
+  };
 }
 
 /** Matches `[X] is an invalid option for [Y].` with any trailing hint
@@ -803,11 +822,11 @@ export function lineAccessorFor(content: string): ReadLine {
 }
 
 /** A one-click one-line repair: re-indent `line` by the signed `indent`
- *  delta, or (kind "dash-space") insert the missing space after its list
- *  dash. */
+ *  delta, or a kind-specific edit — insert the missing space after a list
+ *  dash, comment the line out, or delete it. */
 export interface YamlAutoFix {
   line: number;
-  /** Signed leading-space delta; 0 (unused) for kind "dash-space". */
+  /** Signed leading-space delta; 0 (unused) for the kind-specific edits. */
   indent: number;
   /** The target line's own key, so the apply site can confirm the line still
    *  targets the same item after edits shift line numbers. */
@@ -815,8 +834,10 @@ export interface YamlAutoFix {
   /** The target line's indent when the fix was computed; the apply site
    *  refuses when the line no longer starts there. */
   fromIndent: number;
-  /** Absent means re-indent; "dash-space" inserts a space after the dash. */
-  kind?: "dash-space";
+  /** Absent means re-indent; "dash-space" inserts a space after the dash,
+   *  "comment-out" inserts `# ` at the line's indent, "remove-line" deletes
+   *  the whole line. */
+  kind?: "dash-space" | "comment-out" | "remove-line";
 }
 
 /** A humanized YAML error: display text, best line to jump to, optional auto-fix. */
