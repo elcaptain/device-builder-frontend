@@ -16,6 +16,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import type { ESPHomeAPI } from "../api/index.js";
 import { DeviceState } from "../api/types/devices.js";
+import { esphomeWebUrl } from "../common/docs.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import { apiContext, localizeContext } from "../context/index.js";
 import { backButtonStyles } from "../styles/back-button.js";
@@ -224,19 +225,28 @@ export class ESPHomeInstallMethodDialog extends LitElement {
     // actionable solely via in-app Web Serial, so show it only when that's
     // available; otherwise logs go through server-serial / OTA.
     const showUsbRow = isEsptool && (isLogs ? hasWebSerial : !dropDisabledUsb);
+    // Logs on an insecure origin: the in-app USB row is hidden (Web Serial is
+    // blocked here and the external flasher only flashes), so offer a link to
+    // ESPHome Web — a secure-context origin where the user can connect over USB
+    // and read serial logs. ESP-only, like the USB row.
+    const showLogsWebRow = isLogs && isEsptool && availability === "insecure-context";
 
     const ctx = this._rowContext();
     const otaRow = renderOtaOption(ctx);
     const usbRow = showUsbRow ? this._renderUsbOption(availability) : nothing;
+    const logsWebRow = showLogsWebRow ? this._renderLogsWebOption() : nothing;
     const serverRow = showServerSerialRow
       ? renderServerSerialOption(this._localize, env, () => this._onServerSerial())
       : nothing;
     // A never-flashed device can't receive an OTA by itself — lead with
     // the USB rows so the first install goes over a cable. At least one
     // of the two renders in install mode (their hide conditions are
-    // mutually exclusive).
+    // mutually exclusive). The logs → ESPHome Web row only appears in logs
+    // mode, so it's inert (``nothing``) in the usbFirst (install) ordering.
     const usbFirst = !isLogs && this.neverFlashed;
-    const rows = usbFirst ? [usbRow, serverRow, otaRow] : [otaRow, usbRow, serverRow];
+    const rows = usbFirst
+      ? [usbRow, logsWebRow, serverRow, otaRow]
+      : [otaRow, usbRow, logsWebRow, serverRow];
 
     return html`
       ${renderInstallNotice(ctx)}
@@ -292,6 +302,32 @@ export class ESPHomeInstallMethodDialog extends LitElement {
         : this._renderUsbRemoteDesc(),
       onClick: () => this._selectMethod(inApp ? "web-serial" : "web-flash"),
     });
+  }
+
+  /**
+   * Logs-mode row for an insecure origin: open ESPHome Web (a secure-context
+   * origin) with the ``?dashboard_logs`` hint so it steers the user to Logs
+   * after they connect over USB. web.esphome.io is https, so Web Serial works
+   * there even when this origin (HA add-on over http) blocks it.
+   */
+  private _renderLogsWebOption() {
+    return html`
+      <div
+        class="option"
+        @click=${() =>
+          // noreferrer as well as noopener: this runs on the insecure/local
+          // add-on origin, so don't leak that URL to web.esphome.io as referrer.
+          window.open(esphomeWebUrl("logs"), "_blank", "noopener,noreferrer")}
+      >
+        <wa-icon library="mdi" name="usb"></wa-icon>
+        <div class="info">
+          <span class="title">${this._localize("dashboard.logs_method_web_serial")}</span>
+          <span class="desc"
+            >${this._localize("dashboard.logs_method_web_serial_desc")}</span
+          >
+        </div>
+      </div>
+    `;
   }
 
   /**

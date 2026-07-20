@@ -2,6 +2,9 @@ node_modules/
 # Built JS bundles. `npm run build` populates this directory; it
 # doubles as the Python package source for the wheel.
 esphome_device_builder_frontend/
+# Standalone ESPHome Web static-site build output (`npm run build:web`).
+# Deployed to GitHub Pages (web.esphome.io); never part of the wheel.
+esphome_web/
 # Legacy build dir (kept in gitignore in case anything still drops
 # files here during development).
 dist/

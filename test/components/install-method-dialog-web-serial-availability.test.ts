@@ -118,12 +118,22 @@ describe("install-method-dialog USB row availability", () => {
     expect(row!.textContent).toContain("Web Serial support");
   });
 
-  it("in logs mode hides the USB row on an insecure origin (no web-flash logs)", async () => {
-    // web-flash is install-only; logs over USB need in-app Web Serial, which an
-    // insecure origin can't do. The row must not render a no-op web-flash here.
+  it("in logs mode on an insecure origin links to ESPHome Web, not a web-flash row", async () => {
+    // web-flash is install-only; logs over USB need a secure context, which an
+    // insecure origin can't provide. Instead of a no-op web-flash row, offer a
+    // link out to ESPHome Web (a secure origin) with the ?dashboard_logs hint.
     setEnv({ serial: false, secure: false, href: "http://0.0.0.0:6052/" });
     const dialog = await mount("logs");
-    expect(usbRow(dialog)).toBeNull();
+    const row = usbRow(dialog);
+    expect(row).not.toBeNull();
+    // It opens a tab; it does NOT dispatch an in-app / web-flash method.
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    expect(methodOnClick(dialog, row!)).toBeNull();
+    expect(open).toHaveBeenCalledWith(
+      "https://web.esphome.io/?dashboard_logs",
+      "_blank",
+      "noopener,noreferrer"
+    );
     // Logs still have a serial path via server-serial.
     expect(serialRow(dialog)).not.toBeUndefined();
   });

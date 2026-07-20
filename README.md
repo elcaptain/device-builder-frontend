@@ -85,6 +85,19 @@ python3 -m build --wheel
 | `npm test`           | Run the Vitest suite once              |
 | `npm run test:watch` | Run tests in watch mode                |
 | `npm run format`     | Format `src/` with Prettier            |
+| `npm run dev:web`    | ESPHome Web dev server (port 5174)     |
+| `npm run build:web`  | Build the standalone ESPHome Web site  |
+
+## ESPHome Web
+
+This repo also builds **[ESPHome Web](https://web.esphome.io)** — the standalone, backend-free Web Serial tool (connect an ESP or Raspberry Pi Pico W over USB to install firmware, view logs, and provision Wi-Fi via Improv). It's a second build target that shares this repo's `src/` tree — the design system, the esptool-js flash engine (`src/util/web-serial.ts`), and localization — and adds only the app under `src/web/`.
+
+```bash
+npm run dev:web    # HMR dev server on http://localhost:5174 (no backend needed)
+npm run build:web  # static site → esphome_web/ (gitignored)
+```
+
+Unlike the wheel build (`npm run build` → `esphome_device_builder_frontend/`), ESPHome Web has no WebSocket, no auth, and no server: everything runs in the browser. Its output (`esphome_web/`) is **never** part of the wheel; `.github/workflows/deploy-web.yml` publishes it to GitHub Pages at web.esphome.io. New copy goes in `en.json` under the `web.*` namespace like the rest of the app.
 
 ## Translations
 
@@ -155,7 +168,8 @@ src/
 ├── util/           # Helpers (debounce, YAML parsing, icons, ...)
 ├── styles/         # Theme and shared styles
 ├── translations/   # Language files (only en.json committed; rest from Lokalise)
-└── entrypoint.ts   # App bootstrap
+├── web/            # Standalone ESPHome Web site (backend-free; its own entrypoint)
+└── entrypoint.ts   # App bootstrap (wheel dashboard)
 
 public/
 ├── __init__.py     # Python package entry — copied into the build

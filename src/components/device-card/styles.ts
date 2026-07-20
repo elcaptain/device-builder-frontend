@@ -1,8 +1,11 @@
 import { css } from "lit";
+import { actionBtnStyles } from "../../styles/action-buttons.js";
 
 import { textStyles } from "../../styles/text.js";
 
 export const deviceCardStyles = [
+  // Shared .action-btn language (also used by ESPHome Web's cards).
+  actionBtnStyles,
   textStyles,
   css`
     /* Only rendered when the device carries labels; an untagged device
@@ -244,12 +247,6 @@ export const deviceCardStyles = [
       color: var(--wa-color-text-quiet);
     }
 
-    .action-btn:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-      pointer-events: none;
-    }
-
     .device-checkbox {
       font-size: 22px;
       color: var(--wa-color-text-quiet);
@@ -273,74 +270,6 @@ export const deviceCardStyles = [
       gap: var(--wa-space-2xs);
       padding: var(--wa-space-s) var(--wa-space-m);
       margin-top: auto;
-    }
-
-    .action-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 5px 12px;
-      border-radius: var(--wa-border-radius-m);
-      font-size: var(--wa-font-size-xs);
-      font-weight: var(--wa-font-weight-bold);
-      font-family: inherit;
-      cursor: pointer;
-      border: var(--wa-border-width-s) solid transparent;
-      /* Reset anchor presentation so the Visit Web UI link matches buttons. */
-      text-decoration: none;
-      transition:
-        background 0.12s,
-        border-color 0.12s;
-      white-space: nowrap;
-      min-width: 0;
-    }
-
-    .action-btn wa-icon {
-      font-size: 15px;
-    }
-
-    .action-btn--primary {
-      background: var(--esphome-primary);
-      color: var(--esphome-on-primary);
-    }
-
-    .action-btn--primary:hover {
-      background: var(--esphome-primary-hover);
-    }
-
-    .action-btn--accent {
-      background: var(--esphome-tint);
-      color: var(--esphome-primary);
-      border-color: var(--esphome-tint-border);
-    }
-
-    .action-btn--accent:hover {
-      background: var(--esphome-tint-strong);
-      border-color: var(--esphome-primary);
-    }
-
-    .action-btn--ghost {
-      background: transparent;
-      color: var(--wa-color-text-normal);
-      border-color: var(--wa-color-surface-border);
-    }
-
-    .action-btn--ghost:hover {
-      background: var(--wa-color-surface-lowered);
-      border-color: var(--wa-color-text-quiet);
-    }
-
-    .action-btn--icon-only {
-      padding: 5px;
-      flex-shrink: 0;
-      margin-left: auto;
-    }
-
-    /* Compact icon-only that sits inline with labelled buttons — same
-       visual size as the kebab but without the auto left-margin. */
-    .action-btn--tile {
-      padding: 5px;
-      flex-shrink: 0;
     }
   `,
 ];
