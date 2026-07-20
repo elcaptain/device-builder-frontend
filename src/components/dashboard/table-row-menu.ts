@@ -25,7 +25,9 @@ import { localizeContext } from "../../context/index.js";
 import { dropdownMenuStyles } from "../../styles/dropdown-menu.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { EscapeController } from "../../util/escape-controller.js";
+import { fireEvent } from "../../util/fire-event.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import { busyActionLabel } from "../../util/update-tooltip.js";
 import { renderVisitWebUiLink } from "../../util/visit-web-ui-link.js";
 import { buildWebUiUrl } from "../../util/web-ui-url.js";
 
@@ -114,15 +116,6 @@ export class ESPHomeTableRowMenu extends LitElement {
         overflow-y: auto;
       }
 
-      /* The Visit-web-UI item renders as an <a> so the browser
-         enforces rel="noopener noreferrer" instead of relying on a
-         flaky window.open flag. Reset anchor defaults so it visually
-         matches the surrounding <div class="menu-item"> items. */
-      .menu-item--link {
-        text-decoration: none;
-        color: inherit;
-      }
-
       .menu-item wa-icon {
         font-size: 16px;
         color: var(--wa-color-text-quiet);
@@ -130,12 +123,6 @@ export class ESPHomeTableRowMenu extends LitElement {
 
       .menu-item:hover wa-icon {
         color: var(--esphome-primary);
-      }
-
-      .menu-divider {
-        height: 1px;
-        background: var(--wa-color-surface-border);
-        margin: var(--wa-space-2xs) 0;
       }
 
       .menu-item--disabled {
@@ -204,14 +191,14 @@ export class ESPHomeTableRowMenu extends LitElement {
           ${this._localize("dashboard.action_validate")}
         </div>
         <div
-          class="menu-item menu-item--install ${this.busy ? "menu-item--disabled" : ""}"
-          @click=${this.busy ? undefined : () => this._emit("install-device")}
+          class="menu-item menu-item--install"
+          @click=${() => this._emit(this.busy ? "show-progress" : "install-device")}
         >
           <wa-icon library="mdi" name="upload"></wa-icon>
-          ${this._localize("dashboard.action_install")}
+          ${busyActionLabel(this._localize, this.busy, "dashboard.action_install")}
         </div>
         ${
-          this.device?.queued_update
+          this.device?.runtime_state.queued_update
             ? html`<div
                 class="menu-item ${this.busy ? "menu-item--disabled" : ""}"
                 @click=${this.busy ? undefined : () => this._emit("clear-queued-update")}
@@ -352,7 +339,7 @@ export class ESPHomeTableRowMenu extends LitElement {
   private _close() {
     this.device = null;
     this.position = null;
-    this.dispatchEvent(new CustomEvent("menu-close", { bubbles: true, composed: true }));
+    fireEvent(this, "menu-close");
   }
 
   private _preventAndClose(e: Event) {
@@ -361,13 +348,7 @@ export class ESPHomeTableRowMenu extends LitElement {
   }
 
   private _emit(name: string) {
-    this.dispatchEvent(
-      new CustomEvent(name, {
-        detail: this.device,
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, name, this.device);
     this._close();
   }
 

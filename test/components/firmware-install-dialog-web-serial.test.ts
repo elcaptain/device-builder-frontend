@@ -28,6 +28,7 @@ import type { ESPHomeFirmwareInstallDialog } from "../../src/components/firmware
 import { startWebSerialInstall } from "../../src/components/firmware-install-dialog/install-flow.js";
 import { _clearBoardBodyCache } from "../../src/util/board-body-cache.js";
 import { identityLocalize } from "../_dom.js";
+import { fakeLogBuffer } from "../_fake-host.js";
 
 function makeHost() {
   const api = {
@@ -57,12 +58,11 @@ function makeHost() {
     _step: "connecting",
     _statusMessage: "",
     _flashPercent: 0,
-    _logLines: [] as string[],
+    _log: fakeLogBuffer(),
     _open: true,
     _showLogsAfterInstall: false,
     _detected: null as unknown,
-    _failedDuringCompile: false,
-    _failedDuringValidate: false,
+    _failureKind: null,
     _jobId: "",
     _streamId: "",
     _jobSource: JobSource.LOCAL,
@@ -126,8 +126,8 @@ describe("Web Serial install — HTTP byte download", () => {
 
     await startWebSerialInstall(host as unknown as ESPHomeFirmwareInstallDialog);
 
-    expect(host._logLines).toContain("Detecting chip type... ESP32");
-    expect(host._logLines).toContain("Writing at 0x00010000...");
+    expect(host._log.lines).toContain("Detecting chip type... ESP32");
+    expect(host._log.lines).toContain("Writing at 0x00010000...");
   });
 
   it("releases the port when the post-flash reset throws", async () => {
@@ -234,6 +234,20 @@ describe("Web Serial install — HTTP byte download", () => {
     await startWebSerialInstall(host as unknown as ESPHomeFirmwareInstallDialog);
 
     expect(host._fail).toHaveBeenCalledWith("firmware.chip_mismatch");
+    // The kind routes the footer to the change-board hand-off.
+    expect(host._failureKind).toBe("chip-mismatch");
     expect(wsSerial.flashFirmware).not.toHaveBeenCalled();
+  });
+
+  it("leaves the chip-mismatch flag unset on a matching chip", async () => {
+    const { host } = makeHost();
+    wsSerial.detectChip.mockResolvedValue(CHIP);
+    wsSerial.disconnect.mockResolvedValue(undefined);
+    wsSerial.flashFirmware.mockResolvedValue(undefined);
+    wsSerial.resetAndDisconnect.mockResolvedValue(undefined);
+
+    await startWebSerialInstall(host as unknown as ESPHomeFirmwareInstallDialog);
+
+    expect(host._failureKind).toBe(null);
   });
 });

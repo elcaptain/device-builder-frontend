@@ -1,15 +1,17 @@
 /**
  * Unit-pins the pure ``automation-rows`` module lifted out of
- * ``device-section-config``'s ``_renderTriggersTable`` /
- * ``_renderActionFieldsTable``: filter + label of inline trigger and
- * action-field rows. The catalog/i18n labels are injected so these run with
- * no DOM, controller, or live API — the component methods are now thin
- * wrappers that feed in ``parseYamlAutomations(yaml)`` and the label callback.
+ * ``device-section-config``'s ``renderTriggersTable`` /
+ * ``renderActionFieldsTable`` (render-tables.ts): filter + label of inline
+ * trigger and action-field rows. The catalog/i18n labels are injected so
+ * these run with no DOM, controller, or live API — the table renderers are
+ * thin wrappers that feed in ``parseYamlAutomations(yaml)`` and the label
+ * callback.
  */
 import { describe, expect, it } from "vitest";
 
 import {
   selectActionFieldRows,
+  selectApiActionRows,
   selectTriggerRows,
 } from "../../../src/components/device/device-section-config/automation-rows.js";
 import type { YamlSection } from "../../../src/util/yaml-sections.js";
@@ -115,5 +117,19 @@ describe("selectActionFieldRows", () => {
   it("returns an empty list when the instance declares no action fields", () => {
     const sections = [section({ key: "trigger", eventKey: "on_press", id: "c1" })];
     expect(selectActionFieldRows(sections, "c1", labelField)).toEqual([]);
+  });
+});
+
+describe("selectApiActionRows", () => {
+  it("keeps only api_action rows, labelled by id", () => {
+    const sections = [
+      section({ key: "automation:api_action:greet", id: "greet" }),
+      section({ key: "automation:trigger:esphome:on_boot", eventKey: "on_boot" }),
+      section({ key: "automation:api_action:anon" }), // no id -> empty label
+    ];
+    expect(selectApiActionRows(sections)).toEqual([
+      { key: "automation:api_action:greet", label: "greet" },
+      { key: "automation:api_action:anon", label: "" },
+    ]);
   });
 });

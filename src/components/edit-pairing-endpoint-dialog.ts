@@ -6,11 +6,14 @@ import { APIError } from "../api/api-error.js";
 import type { ESPHomeAPI } from "../api/index.js";
 import { ErrorCode } from "../api/types/protocol.js";
 import type { PairingSummary } from "../api/types/remote-build.js";
+import { pairingDisplayName } from "../util/pairing-display-name.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import { apiContext, localizeContext } from "../context/index.js";
 import { inputStyles } from "../styles/inputs.js";
 import { espHomeStyles } from "../styles/shared.js";
 import { EnterController } from "../util/enter-controller.js";
+import { fireEvent } from "../util/fire-event.js";
+import { formatApiError } from "../util/format-api-error.js";
 import {
   normalizeHostnameForCompare,
   parsePortInput,
@@ -88,7 +91,7 @@ export class ESPHomeEditPairingEndpointDialog extends LitElement {
    *  knows. */
   open(pairing: PairingSummary): void {
     this._pinSha256 = pairing.pin_sha256;
-    this._label = pairing.label;
+    this._label = pairingDisplayName(pairing);
     // Render with the trailing dot stripped — a typo-prone
     // FQDN-form like ``desktop.local.`` reads as
     // ``desktop.local`` in the dashboard's host-display
@@ -148,17 +151,11 @@ export class ESPHomeEditPairingEndpointDialog extends LitElement {
       // event so this dialog doesn't have to write the
       // returned PairingSummary into state itself. Just
       // close.
-      this.dispatchEvent(
-        new CustomEvent("pairing-endpoint-edited", {
-          bubbles: true,
-          composed: true,
-          detail: {
-            pin_sha256: this._pinSha256,
-            hostname,
-            port,
-          },
-        })
-      );
+      fireEvent(this, "pairing-endpoint-edited", {
+        pin_sha256: this._pinSha256,
+        hostname,
+        port,
+      });
       this._open = false;
     } catch (err) {
       // Pass the values that actually went on the wire (trimmed
@@ -201,10 +198,14 @@ export class ESPHomeEditPairingEndpointDialog extends LitElement {
             detail: err.details,
           });
         default:
-          return this._localize("settings.edit_pairing_endpoint_generic_error");
+          break;
       }
     }
-    return this._localize("settings.edit_pairing_endpoint_generic_error");
+    return formatApiError(
+      err,
+      this._localize,
+      "settings.edit_pairing_endpoint_generic_error"
+    );
   }
 
   private _onRequestClose = (e: Event): void => {

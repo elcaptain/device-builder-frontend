@@ -8,8 +8,10 @@ import { localizeContext } from "../../context/index.js";
 import { disclosureStyles } from "../../styles/disclosure.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { FileDropController } from "../../util/file-drop-controller.js";
+import { fireEvent } from "../../util/fire-event.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { ACCEPTED_UPLOAD_EXTENSIONS } from "../../util/upload-file-types.js";
+import { tourAnchor } from "../guided-tour/tour-anchor.js";
 import { renderDisclosure } from "../shared/disclosure.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
@@ -168,7 +170,11 @@ export class ESPHomeWizardStepMethod extends LitElement {
 
         <div class="method-layout">
           <div class="option-cards">
-            <button class="option-card" @click=${this._goToBoard}>
+            <button
+              class="option-card"
+              ${tourAnchor("create-method-basic")}
+              @click=${this._goToBoard}
+            >
               <div class="option-card-text">
                 <h3>${this._localize("wizard.create_new")}</h3>
                 <p>${this._localize("wizard.create_new_desc")}</p>
@@ -224,15 +230,11 @@ export class ESPHomeWizardStepMethod extends LitElement {
   private _toggleAdvanced() {
     // Just signal intent; the dialog owns the flag (it outlives this element)
     // and flips it.
-    this.dispatchEvent(
-      new CustomEvent("toggle-advanced", { bubbles: true, composed: true })
-    );
+    fireEvent(this, "toggle-advanced");
   }
 
   private _goToBoard() {
-    this.dispatchEvent(
-      new CustomEvent("next-step", { detail: "board", bubbles: true, composed: true })
-    );
+    fireEvent(this, "next-step", "board");
   }
 
   private _importFile() {
@@ -251,23 +253,11 @@ export class ESPHomeWizardStepMethod extends LitElement {
   private _sendImportFile(file: File) {
     // Imports don't ask for a board — the YAML already declares its platform.
     // The dialog reads the file and creates the device immediately.
-    this.dispatchEvent(
-      new CustomEvent("import-file", {
-        detail: { file },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "import-file", { file });
   }
 
   private _emptyConfig() {
-    this.dispatchEvent(
-      new CustomEvent("next-step", {
-        detail: { step: "empty-config", method: "empty" },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "next-step", { step: "empty-config", method: "empty" });
   }
 }
 

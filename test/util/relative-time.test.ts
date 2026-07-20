@@ -16,6 +16,8 @@ import { describe, expect, it } from "vitest";
 import {
   ageOf,
   formatCountdown,
+  formatDuration,
+  formatMinSec,
   formatSecondsAgo,
   getNumberFormatter,
   remainingOf,
@@ -130,6 +132,35 @@ describe("getNumberFormatter", () => {
   it("does not crash without a language argument", () => {
     expect(() => getNumberFormatter(undefined, 0)).not.toThrow();
   });
+
+  it("keys on minimum integer digits", () => {
+    const plain = getNumberFormatter("en", 0);
+    const padded = getNumberFormatter("en", 0, 2);
+    expect(plain).not.toBe(padded);
+    expect(padded).toBe(getNumberFormatter("en", 0, 2));
+    expect(padded.format(5)).toBe("05");
+  });
+});
+
+describe("formatDuration", () => {
+  it("renders the compact variant by default", () => {
+    expect(formatDuration(45)).toBe("45s");
+    expect(formatDuration(8 * 60 + 30)).toBe("8m");
+    expect(formatDuration(3600)).toBe("1h");
+    expect(formatDuration(3600 + 14 * 60)).toBe("1h 14m");
+  });
+
+  it("keeps the finer unit in the counter variant, padding hour-range minutes", () => {
+    expect(formatDuration(45, { variant: "counter" })).toBe("45s");
+    expect(formatDuration(4 * 60 + 32, { variant: "counter" })).toBe("4m 32s");
+    expect(formatDuration(3600 + 5 * 60, { variant: "counter" })).toBe("1h 05m");
+    expect(formatDuration(3600, { variant: "counter" })).toBe("1h 00m");
+  });
+
+  it("clamps negative input to zero", () => {
+    expect(formatDuration(-5)).toBe("0s");
+    expect(formatDuration(-5, { variant: "counter" })).toBe("0s");
+  });
 });
 
 describe("remainingOf", () => {
@@ -190,5 +221,22 @@ describe("formatCountdown", () => {
 
   it("does not crash without a language argument", () => {
     expect(() => formatCountdown(75)).not.toThrow();
+  });
+});
+
+describe("formatMinSec", () => {
+  it("returns empty string for null", () => {
+    expect(formatMinSec(null)).toBe("");
+  });
+
+  it("floors fractional seconds into clock-style M:SS", () => {
+    expect(formatMinSec(127.4)).toBe("2:07");
+    expect(formatMinSec(59.9)).toBe("0:59");
+  });
+
+  it("zero-pads the seconds", () => {
+    expect(formatMinSec(60)).toBe("1:00");
+    expect(formatMinSec(605)).toBe("10:05");
+    expect(formatMinSec(0)).toBe("0:00");
   });
 });

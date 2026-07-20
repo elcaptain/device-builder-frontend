@@ -11,11 +11,10 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@home-assistant/webawesome/dist/components/dialog/dialog.js", () => ({}));
-vi.mock("@home-assistant/webawesome/dist/components/icon/icon.js", () => ({}));
+import "../../_mock-webawesome.js";
+
 vi.mock("@home-assistant/webawesome/dist/components/option/option.js", () => ({}));
 vi.mock("@home-assistant/webawesome/dist/components/select/select.js", () => ({}));
-vi.mock("@home-assistant/webawesome/dist/components/spinner/spinner.js", () => ({}));
 vi.mock("sonner-js", () => ({ default: { error: vi.fn() } }));
 
 import type { ESPHomeAPI } from "../../../src/api/index.js";
@@ -463,6 +462,101 @@ describe("add-automation-dialog sub-entity targets (#1263)", () => {
     expect((dialog as any)._componentId).toBe("");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((dialog as any)._canContinue()).toBe(false);
+  });
+});
+
+const buttonAvailable = (): AvailableAutomations =>
+  ({
+    triggers: [
+      {
+        id: "button.on_press",
+        name: "On Press",
+        applies_to: ["button"],
+        is_device_level: false,
+        supports_list: false,
+        config_entries: [],
+      },
+      {
+        id: "switch.on_turn_on",
+        name: "On Turn On",
+        applies_to: ["switch"],
+        is_device_level: false,
+        supports_list: false,
+        config_entries: [],
+      },
+      {
+        id: "switch.on_turn_off",
+        name: "On Turn Off",
+        applies_to: ["switch"],
+        is_device_level: false,
+        supports_list: false,
+        config_entries: [],
+      },
+    ],
+    actions: [],
+    conditions: [],
+    scripts: [],
+    devices: [
+      { id: "my_button", name: "Button", component_id: "button.template" },
+      { id: "relay", name: "Relay", component_id: "switch.gpio" },
+    ],
+  }) as unknown as AvailableAutomations;
+
+describe("add-automation-dialog unique-trigger preselect (device-builder#2214)", () => {
+  async function mountPrefilled(
+    componentId: string,
+    yaml = ""
+  ): Promise<ESPHomeAddAutomationDialog> {
+    const api = {
+      getAvailableAutomations: vi.fn(() => Promise.resolve(buttonAvailable())),
+    } as unknown as ESPHomeAPI;
+    const dialog = await mountDialog(api);
+    dialog.yaml = yaml;
+    dialog.open({ kind: "component_on", componentId });
+    await dialog.updateComplete;
+    await flush();
+    await dialog.updateComplete;
+    return dialog;
+  }
+
+  it("preselects the only trigger so Continue is a single click", async () => {
+    const dialog = await mountPrefilled("my_button");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((dialog as any)._triggerId).toBe("button.on_press");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((dialog as any)._canContinue()).toBe(true);
+  });
+
+  it("leaves the multi-trigger case unselected", async () => {
+    const dialog = await mountPrefilled("relay");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((dialog as any)._triggerId).toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((dialog as any)._canContinue()).toBe(false);
+  });
+
+  it("preselects the only remaining trigger when the rest are already used", async () => {
+    const yaml = `switch:
+  - platform: gpio
+    id: relay
+    on_turn_on:
+      - logger.log: hi
+`;
+    const dialog = await mountPrefilled("relay", yaml);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((dialog as any)._triggerId).toBe("switch.on_turn_off");
+  });
+
+  it("re-evaluates on component change in both directions", async () => {
+    const dialog = await mountPrefilled("relay");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (dialog as any)._onComponentChange("my_button");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((dialog as any)._triggerId).toBe("button.on_press");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (dialog as any)._onComponentChange("relay");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((dialog as any)._triggerId).toBeNull();
   });
 });
 

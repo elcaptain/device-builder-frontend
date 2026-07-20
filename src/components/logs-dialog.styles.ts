@@ -44,8 +44,6 @@ export const logsDialogStyles = css`
        (full value stays on the title tooltip). */
     flex-shrink: 0;
     max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
     padding: 1px 8px;
     border-radius: 999px;
     font-family: var(--term-mono-font);
@@ -54,10 +52,45 @@ export const logsDialogStyles = css`
     color: var(--esphome-on-primary);
     background: color-mix(in srgb, var(--esphome-on-primary) 16%, transparent);
     border: 1px solid color-mix(in srgb, var(--esphome-on-primary) 32%, transparent);
-    white-space: nowrap;
   }
   esphome-base-dialog::part(footer) {
     display: none;
+  }
+
+  /* Crash callout — slotted into the terminal's suggestion slot. Louder
+     than the muted reset-suggestion idiom on purpose: this is the primary
+     "report it" affordance, shown the moment a crash lands in the log. */
+  .crash-callout {
+    display: flex;
+    align-items: center;
+    gap: var(--wa-space-s);
+    padding: 8px 20px;
+    border-top: 1px solid var(--term-border);
+    background: color-mix(in srgb, var(--esphome-error, #d32f2f) 14%, var(--term-bg));
+    color: var(--term-fg);
+    font-size: var(--wa-font-size-s);
+  }
+
+  .crash-callout wa-icon {
+    flex-shrink: 0;
+    color: var(--esphome-error, #d32f2f);
+  }
+
+  .crash-callout-text {
+    flex: 1;
+  }
+
+  /* Composes .term-btn (shape/typography from termButtonStyles); only the
+     primary-CTA colours are local. */
+  .crash-callout-button {
+    flex-shrink: 0;
+    border-color: transparent;
+    background: var(--esphome-primary);
+    color: var(--esphome-on-primary);
+  }
+
+  .crash-callout-button:hover {
+    background: var(--esphome-primary-hover);
   }
 
   /* Expanded → "just give me logs": full viewport, the terminal fills the

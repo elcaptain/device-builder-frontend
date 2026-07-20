@@ -10,6 +10,7 @@ import {
   startUsbFlash,
 } from "../../src/components/firmware-install-dialog/install-flow.js";
 import { identityLocalize } from "../_dom.js";
+import { fakeLogBuffer } from "../_fake-host.js";
 
 const bin = (file: string): FirmwareBinary => ({ file, title: file });
 
@@ -41,14 +42,13 @@ function makeHost(opts: { compileOk: boolean; binaries?: FirmwareBinary[] }) {
     _step: "queued",
     _statusMessage: "",
     _errorMessage: "",
-    _logLines: [] as string[],
+    _log: fakeLogBuffer(),
     _jobId: "",
     _streamId: "",
     _compileReject: null,
     _jobSource: 0,
     _jobSourceLabel: "",
-    _failedDuringCompile: false,
-    _failedDuringValidate: false,
+    _failureKind: null,
     _binaries: [] as FirmwareBinary[],
     _usbFirmware: null as ArrayBuffer | null,
     _usbFirmwareName: "",

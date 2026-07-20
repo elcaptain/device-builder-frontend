@@ -27,9 +27,15 @@ import type { LocalizeFunc } from "../../../common/localize.js";
 import { localizeContext } from "../../../context/index.js";
 import { inputStyles } from "../../../styles/inputs.js";
 import { espHomeStyles } from "../../../styles/shared.js";
+import { fireEvent } from "../../../util/fire-event.js";
 import { registerMdiIcons } from "../../../util/register-icons.js";
 import "./automation-action-node.js";
 import { automationEditorStyles } from "./automation-editor.styles.js";
+import {
+  type AutomationFocus,
+  childFocus,
+  focusTargetHasChanged,
+} from "./automation-focus.js";
 import "./catalog-picker-dialog.js";
 import type {
   CatalogPickedDetail,
@@ -81,6 +87,11 @@ export class ESPHomeAutomationActionList extends LitElement {
   @property({ type: Boolean, attribute: "hide-add" })
   hideAdd = false;
 
+  /** Cursor focus target whose ``node`` head indexes this list; the
+   *  matching row gets the sliced remainder. */
+  @property({ attribute: false, hasChanged: focusTargetHasChanged })
+  focusTarget: AutomationFocus | null = null;
+
   @query("esphome-catalog-picker-dialog")
   private _picker!: ESPHomeCatalogPickerDialog;
 
@@ -98,7 +109,7 @@ export class ESPHomeAutomationActionList extends LitElement {
         }
         ${
           this.actions.length === 0
-            ? html`<p class="ae-empty-block" role="status">
+            ? html`<p class="empty-message--dashed" role="status">
                 ${this._localize("device.automation_actions_empty")}
               </p>`
             : this.actions.map((node, idx) =>
@@ -136,6 +147,9 @@ export class ESPHomeAutomationActionList extends LitElement {
   private _renderRow(node: ActionNode, idx: number, isLast: boolean) {
     return html`<esphome-automation-action-node
       .value=${node}
+      .focusTarget=${
+        this.focusTarget?.node[0] === idx ? childFocus(this.focusTarget) : null
+      }
       .catalog=${this.catalog}
       .conditionCatalog=${this.conditionCatalog}
       .scripts=${this.scripts}
@@ -177,13 +191,7 @@ export class ESPHomeAutomationActionList extends LitElement {
   }
 
   private _emit(actions: ActionNode[]) {
-    this.dispatchEvent(
-      new CustomEvent("actions-change", {
-        detail: { actions },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "actions-change", { actions });
   }
 }
 

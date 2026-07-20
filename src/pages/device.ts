@@ -9,6 +9,7 @@ import type { ConfiguredDevice } from "../api/types/devices.js";
 import type { FirmwareJob } from "../api/types/firmware-jobs.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import type { ESPHomeCommandDialog } from "../components/command-dialog.js";
+import type { ESPHomeBoardReselectDialog } from "../components/device/board-reselect-dialog.js";
 import type { NavSectionName } from "../components/device/device-board-info.js";
 import type { DeviceLayoutMode } from "../components/device/device-editor.js";
 import { notifyError, notifySuccess } from "../util/notify.js";
@@ -18,6 +19,8 @@ import { notifyError, notifySuccess } from "../util/notify.js";
 import { DeviceInstallController } from "../components/device/device-install-controller.js";
 import type { ESPHomeDeviceSectionConfig } from "../components/device/device-section-config.js";
 import type { ESPHomeFirmwareInstallDialog } from "../components/firmware-install-dialog.js";
+import { TourLayoutController } from "../components/guided-tour/tour-layout-controller.js";
+import { tourAnchor } from "../components/guided-tour/tour-anchor.js";
 import type { ESPHomeLogsDialog } from "../components/logs-dialog.js";
 import type { ESPHomeUnsavedChangesDialog } from "../components/unsaved-changes-dialog.js";
 import type { HighlightRange } from "../components/yaml-editor.js";
@@ -34,19 +37,30 @@ import {
   backendErrorCounts,
   backendErrorsForInstance,
   formRelativePath,
+  instanceKey,
   resolveBackendErrors,
   type BackendFieldError,
 } from "../util/backend-field-errors.js";
 import { withBase } from "../util/base-path.js";
 import { fetchBoard } from "../util/board-body-cache.js";
+import { applyBoardChange, openBoardReselect } from "../util/board-change.js";
 import { showPendingChanges, showUpdateAvailable } from "../util/device-sync.js";
 import { deviceLayoutToPref, prefToDeviceLayout } from "../util/editor-layout.js";
+import { followActiveJob } from "../util/firmware-job-display.js";
 import { consumeJustCreated } from "../util/just-created.js";
 import { navigate, setLeaveGuard } from "../util/navigation.js";
 import { postInstallShowLogsHandler } from "../util/post-install-logs.js";
 import { registerMdiIcons } from "../util/register-icons.js";
+import { isTypingTarget } from "../util/typing-target.js";
 import { UnsavedGuard } from "../util/unsaved-guard.js";
-import { resolveSectionForUrlLine } from "../util/url-line-resolver.js";
+import {
+  resolveSectionForUrlLine,
+  resolveUrlLineFocus,
+} from "../util/url-line-resolver.js";
+import { buildWebUiUrl } from "../util/web-ui-url.js";
+import { boardDisagreesWithYaml, readPlatformBoard } from "../util/yaml-board.js";
+import { loadCatalog } from "../util/yaml-completion-catalog.js";
+import { knownTopLevelKeys } from "../util/yaml-completion-items.js";
 import {
   getLastValidatedResult,
   type YamlDiagnosticsDetail,
@@ -73,6 +87,7 @@ import {
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "../components/command-dialog.js";
+import "../components/device/board-reselect-dialog.js";
 import "../components/device/device-editor.js";
 import "../components/device/device-navigator.js";
 import "../components/firmware-install-dialog.js";
@@ -125,6 +140,14 @@ export class ESPHomePageDevice extends LitElement {
   @state()
   private _layout: DeviceLayoutMode = "both";
 
+  private _tourLayout = new TourLayoutController(
+    this,
+    () => this._layout,
+    (layout: DeviceLayoutMode) => {
+      this._layout = layout;
+    }
+  );
+
   @state()
   private _openSections = new Set<number>(this._readUrlSections());
 
@@ -168,12 +191,24 @@ export class ESPHomePageDevice extends LitElement {
   private _selectedSection: string | null = this._readUrlParam("section", null);
 
   @state()
-  private _selectedFromLine?: number = this._readUrlLine();
+  private _selectedFromLine?: number;
+
+  /** One-shot ``?line=`` deep-link intent, consumed (cleared) by
+   *  ``_maybeResolveLineFromUrl`` once the YAML is loaded. Kept apart
+   *  from ``_selectedFromLine`` — that field is durable section-instance
+   *  state the URL round-trips, so parking the intent there would
+   *  re-derive focus on every later ``_loadYaml`` (board swap). */
+  private _pendingUrlLine?: number = this._readUrlLine();
 
   /** Instance-relative field path the YAML cursor is on, for the form to
    *  scroll into view; empty on a section header / non-field line. */
   @state()
   private _focusFieldPath?: string[];
+
+  /** Document-absolute indexed key path at the cursor — the automation
+   *  editor resolves it against its tree to deep-target a nested node. */
+  @state()
+  private _focusYamlPath?: (string | number)[];
 
   /** Backend validation errors resolved onto section instances, refreshed
    *  on every lint pass. Feeds the navigator badges and the selected
@@ -181,11 +216,40 @@ export class ESPHomePageDevice extends LitElement {
   @state()
   private _backendErrors: BackendFieldError[] = [];
 
+  /** instanceKey of the half-typed unknown section whose selection switch
+   *  and navigator error chip are held while the user is still typing its
+   *  key; null when nothing is held. */
+  @state()
+  private _heldUnknownInstance: string | null = null;
+
+  /** Valid top-level keys (core + automation + catalog domains/ids); null
+   *  until the catalog resolves — treated as "everything is known" so a
+   *  failed catalog fetch degrades to no holds, never to holding all
+   *  typed section switches. */
+  private _knownTopLevelKeys: Set<string> | null = null;
+  private _catalogKicked = false;
+
   // Memoised so idle re-renders keep the prop identities stable — the
   // section editor keys its per-edit error suppression on the prop
   // changing, and a fresh object every render would wipe it immediately.
   private _instanceBackendErrors = memoizeOne(backendErrorsForInstance);
-  private _navErrorCounts = memoizeOne(backendErrorCounts);
+  private _baseErrorCounts = memoizeOne(backendErrorCounts);
+
+  /** Navigator error counts minus the held instance's chip. The held key
+   *  changes on every keystroke of a half-typed section name, so the base
+   *  map is memoized on the errors alone and returned as-is (stable
+   *  identity, no navigator churn) unless it actually contains the held
+   *  entry. */
+  private _navErrorCounts(
+    errors: readonly BackendFieldError[],
+    held: string | null
+  ): Map<string, number> {
+    const base = this._baseErrorCounts(errors);
+    if (held === null || !base.has(held)) return base;
+    const counts = new Map(base);
+    counts.delete(held);
+    return counts;
+  }
 
   /** Form-relative path of the last focused field, and whether its YAML
    *  line wasn't found yet (a just-added value whose debounced write is
@@ -280,6 +344,17 @@ export class ESPHomePageDevice extends LitElement {
   @query("esphome-yaml-validation-dialog")
   private _yamlValidationDialog!: ESPHomeYamlValidationDialog;
 
+  @query("esphome-board-reselect-dialog")
+  private _boardReselectDialog!: ESPHomeBoardReselectDialog;
+
+  /** Holds the post-save board prompt while an install-triggered save
+   *  runs, so it can't stack under the install-method dialog. */
+  private _suppressBoardPrompt = false;
+
+  /** Disagreement key the prompt already fired for; blocks a re-prompt
+   *  on every save of the same dismissed state. */
+  private _boardPromptShownFor: string | null = null;
+
   /** First-error / count snapshot driving the save-time validation
    *  prompt. Reset before opening the dialog and read by it via
    *  property bindings. */
@@ -323,6 +398,16 @@ export class ESPHomePageDevice extends LitElement {
       get firmwareDialog() {
         return page._firmwareDialog ?? null;
       },
+      get logsDialog() {
+        return page._logsDialog ?? null;
+      },
+      get api() {
+        return page._api;
+      },
+      get localize() {
+        return page._localize;
+      },
+      openActiveJobProgress: () => page._showActiveJobProgress(),
     });
   }
 
@@ -481,7 +566,7 @@ export class ESPHomePageDevice extends LitElement {
        composedPath()[0] is the actual focused element across shadow
        boundaries; e.target gets retargeted to the host. */
     const target = e.composedPath()[0] as HTMLElement | undefined;
-    if (this._isTextEntry(target)) return;
+    if (isTypingTarget(target)) return;
     if (this._drawerOpen) {
       e.preventDefault();
       this._drawerOpen = false;
@@ -492,22 +577,6 @@ export class ESPHomePageDevice extends LitElement {
     e.preventDefault();
     window.history.back();
   };
-
-  private _isTextEntry(el: HTMLElement | undefined): boolean {
-    if (!el) return false;
-    const tag = el.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-    if (el.isContentEditable) return true;
-    /* The Monaco-style YAML editor renders its caret inside a
-       textarea-like child but the focused element can vary by version.
-       Walk up looking for a recognisable editor host. */
-    let cur: HTMLElement | null = el;
-    while (cur) {
-      if (cur.tagName === "ESPHOME-YAML-EDITOR") return true;
-      cur = cur.parentElement;
-    }
-    return false;
-  }
 
   updated(changedProperties: Map<string, unknown>) {
     if (changedProperties.has("id") && this.id) {
@@ -524,6 +593,8 @@ export class ESPHomePageDevice extends LitElement {
       // handler ignores results for other configurations, so these
       // would linger until the new device's first lint pass.
       if (this._backendErrors.length) this._backendErrors = [];
+      this._heldUnknownInstance = null;
+      this._kickKnownKeys();
       this._loadYaml();
     }
     // Devices context arrives async after connect; kick off the board
@@ -563,30 +634,21 @@ export class ESPHomePageDevice extends LitElement {
   };
 
   /**
-   * Swap the device's board to the picked alternate, then reload the YAML
-   * pane (`devices/update` rewrote `board:`). The header refreshes itself
-   * via the `DEVICE_UPDATED` event.
+   * Swap the device's board to the picked alternate. `devices/update`
+   * writes only the sidecar `board_id` (the YAML keeps its `board:`),
+   * so no reload is needed — the header refreshes itself via the
+   * `DEVICE_UPDATED` event.
    */
   private _onChangeBoard = async (e: CustomEvent<{ boardId: string }>) => {
     const boardId = e.detail?.boardId;
     const device = this._device;
     if (!boardId || !device || boardId === device.board_id) return;
-    // Reloading YAML after the swap would discard unsaved edits.
+    // An unsaved buffer may disagree with the board being applied.
     if (this._isDirty) {
       notifyError(this._localize("device.change_board_unsaved"));
       return;
     }
-    try {
-      await this._api.updateDevice({
-        configuration: device.configuration,
-        board_id: boardId,
-      });
-      await this._loadYaml();
-      notifySuccess(this._localize("device.change_board_success"));
-    } catch (err) {
-      console.error("Failed to change board:", err);
-      notifyError(this._localize("device.change_board_error"));
-    }
+    await applyBoardChange(this._api, this._localize, device.configuration, boardId);
   };
 
   private _readStoredLayout(): DeviceLayoutMode | null {
@@ -659,8 +721,7 @@ export class ESPHomePageDevice extends LitElement {
   }
 
   /**
-   * Resolve a ``?line=N`` URL parameter to a concrete section
-   * once the YAML has loaded.
+   * Consume the one-shot ``?line=`` intent once the YAML has loaded.
    *
    * Direct-link arrivals from the dashboard's YAML hit list
    * carry only ``?line=N`` (not ``?section=``); the navigator's
@@ -669,16 +730,22 @@ export class ESPHomePageDevice extends LitElement {
    * the just-loaded YAML to find the section that contains line
    * N and pin both ``_selectedSection`` and ``_scrollToHighlight``
    * — the navigator's existing emit-on-update logic then fires
-   * the scroll-into-view dispatch in CodeMirror.
+   * the scroll-into-view dispatch in CodeMirror. The focus paths
+   * deep-target the line's field in the structured editor, and
+   * ``_selectedFromLine`` is pinned to the section's own start so
+   * the arrival is state-identical to a live caret move onto the
+   * line (instance disambiguation, same-section move checks).
    */
   private _maybeResolveLineFromUrl() {
-    const resolved = resolveSectionForUrlLine(
-      this._yaml,
-      this._selectedFromLine,
-      this._selectedSection
-    );
+    if (this._pendingUrlLine === undefined || !this._yaml) return;
+    const line = this._pendingUrlLine;
+    this._pendingUrlLine = undefined;
+    const resolved = resolveUrlLineFocus(this._yaml, line, this._selectedSection);
     if (!resolved) return;
     this._selectedSection = resolved.sectionKey;
+    this._selectedFromLine = resolved.sectionFromLine;
+    this._focusFieldPath = resolved.fieldPath;
+    this._focusYamlPath = resolved.yamlPath;
     // ``_highlightRange`` is what the editor reads to drive
     // scroll-into-view; the user-click path sets it via
     // ``_onYamlHighlight`` from the navigator's ``yaml-highlight``
@@ -872,7 +939,56 @@ export class ESPHomePageDevice extends LitElement {
     const message = saved ? "device.yaml_saved" : "device.yaml_save_error";
     const variant = saved ? notifySuccess : notifyError;
     variant(this._localize(message));
+    if (saved) void this._maybePromptBoardReselect();
     return saved;
+  };
+
+  /** The parsed YAML platform block when it names a different chip than
+   *  the selected board, else null. */
+  private _boardDisagreement() {
+    if (!this._board) return null;
+    const parsed = readPlatformBoard(this._yaml);
+    return parsed && boardDisagreesWithYaml(parsed, this._board) ? parsed : null;
+  }
+
+  private _openBoardReselect(): Promise<boolean> {
+    return openBoardReselect(this._boardReselectDialog, {
+      configuration: this.id,
+      yaml: this._yaml,
+    });
+  }
+
+  /** Offer to reselect the stored board when the saved YAML names a
+   *  different chip — the stale `board_id` would dead-end the Web
+   *  Serial chip check. */
+  private async _maybePromptBoardReselect(): Promise<void> {
+    if (this._suppressBoardPrompt) return;
+    const parsed = this._boardDisagreement();
+    if (!parsed) return;
+    const key = `${this.id}|${parsed.platform}|${parsed.board}|${parsed.variant}`;
+    if (this._boardPromptShownFor === key) return;
+    // Record up front so a save during the open can't double-fire, but
+    // un-record when nothing opened (transient fetch failure) so the
+    // next save re-offers the prompt.
+    this._boardPromptShownFor = key;
+    const opened = await this._openBoardReselect().catch((err) => {
+      console.error("Board reselect prompt failed:", err);
+      return false;
+    });
+    if (!opened && this._boardPromptShownFor === key) {
+      this._boardPromptShownFor = null;
+    }
+  }
+
+  /** Chip-mismatch recovery hand-off from the install dialog. */
+  private _onRequestChangeBoard = (e: CustomEvent<{ configuration: string }>) => {
+    // Hand over the buffer only when it matches the saved config; a
+    // dirty buffer would resolve candidates the backend doesn't hold.
+    const cleanBuffer = e.detail.configuration === this.id && !this._isDirty;
+    void openBoardReselect(this._boardReselectDialog, {
+      configuration: e.detail.configuration,
+      yaml: cleanBuffer ? this._yaml : undefined,
+    });
   };
 
   private _onValidationSaveAnyway = async () => {
@@ -909,7 +1025,7 @@ export class ESPHomePageDevice extends LitElement {
       this._cacheLayout("both");
     }
     this._setHighlight({ fromLine: line, toLine: line }, true, true);
-    const resolved = resolveSectionForUrlLine(this._yaml, line, null);
+    const resolved = resolveSectionForUrlLine(this._yaml, line);
     if (resolved) {
       this._selectedSection = resolved.sectionKey;
     }
@@ -938,9 +1054,13 @@ export class ESPHomePageDevice extends LitElement {
   };
 
   // Persist the editor buffer before building — install/compile build the
-  // on-disk file, so an unsaved edit would flash the previous version.
-  private _installAfterSave = async (run: () => void): Promise<void> => {
+  // on-disk file, so an unsaved edit would flash the previous version. A
+  // click while a job already runs re-attaches to it instead: no save (the
+  // edit stays in the buffer), no second job.
+  private _installAfterSave = async (run: () => void | Promise<void>): Promise<void> => {
+    if (this._showActiveJobProgress()) return;
     let saved: boolean;
+    this._suppressBoardPrompt = true;
     try {
       saved = await this._saveYaml();
     } catch (e) {
@@ -949,11 +1069,41 @@ export class ESPHomePageDevice extends LitElement {
       console.error("Failed to save before install:", e);
       notifyError(this._localize("device.yaml_save_error"));
       return;
+    } finally {
+      this._suppressBoardPrompt = false;
     }
-    if (saved) run();
+    if (!saved) return;
+    // Hard block: an unresolved YAML/board disagreement dead-ends the
+    // install chip check, so force the fix before offering install
+    // methods. Dismissing the picker keeps install blocked; the next
+    // click re-prompts. When the picker has nothing to offer (no
+    // catalog candidates, or a transient failure) fall through — the
+    // chip check downstream stays the guard, and blocking here would
+    // strand the install with only a toast.
+    if (this._boardDisagreement() && (await this._openBoardReselect())) {
+      return;
+    }
+    try {
+      await run();
+    } catch (err) {
+      // Surfaced rather than lost as an unhandled rejection.
+      console.error("Install entry failed:", err);
+      notifyError(this._localize("device.install_start_failed"));
+    }
   };
   private _saveThenInstall = () => this._installAfterSave(this._installCtrl.onInstall);
   private _saveThenUpdate = () => this._installAfterSave(this._installCtrl.onUpdate);
+
+  /** Re-attach the command dialog to this device's running job; true when one existed. */
+  private _showActiveJobProgress(): boolean {
+    return followActiveJob(
+      this._activeJobs,
+      this.id,
+      this._commandDialog,
+      this._devices,
+      this._localize
+    );
+  }
 
   /** Catch ``clean-build`` from the install dialog's post-failure
    *  hint and route it through this page's command-dialog —
@@ -961,11 +1111,22 @@ export class ESPHomePageDevice extends LitElement {
    *  build files for this device" link works the same way on
    *  the device page. */
   private _onCleanBuild = (e: CustomEvent<ConfiguredDevice>) => {
-    const device = e.detail;
+    this._cleanBuild(e.detail);
+  };
+
+  /** "Logs" from the editor's device-actions menu. */
+  private _onEditorOpenLogs = () => this._installCtrl.onLogs();
+
+  /** "Clean build files" from the editor's device-actions menu. */
+  private _onEditorCleanBuild = () => {
+    if (this._device) this._cleanBuild(this._device);
+  };
+
+  private _cleanBuild(device: ConfiguredDevice) {
     this._commandDialog.configuration = device.configuration;
     this._commandDialog.name = device.friendly_name || device.name;
     this._commandDialog.open("clean");
-  };
+  }
 
   /** Catch ``request-open-editor`` from the post-validation-failure
    *  hint. ``stopPropagation`` to prevent any future higher-level
@@ -1055,6 +1216,7 @@ export class ESPHomePageDevice extends LitElement {
             .selectedSection=${this._selectedSection}
             .selectedFromLine=${this._selectedFromLine}
             .focusFieldPath=${this._focusFieldPath}
+            .focusYamlPath=${this._focusYamlPath}
             .backendErrors=${this._instanceBackendErrors(
               this._backendErrors,
               this._selectedSection,
@@ -1062,14 +1224,18 @@ export class ESPHomePageDevice extends LitElement {
             )}
             .justCreated=${this._justCreated}
             @just-created-dismiss=${this._dismissJustCreated}
+            @request-install=${this._saveThenInstall}
             @goto-line=${this._onEditorGoToLine}
             @change-board=${this._onChangeBoard}
+            @open-logs=${this._onEditorOpenLogs}
+            @clean-build=${this._onEditorCleanBuild}
             ?hasUnsavedEdits=${this._isDirty}
             ?saving=${this._saving}
             ?showModified=${this._device ? showPendingChanges(this._device) : false}
             ?showUpdate=${this._device ? showUpdateAvailable(this._device) : false}
-            .installedVersion=${this._device?.deployed_version ?? ""}
+            .installedVersion=${this._device?.runtime_state.deployed_version ?? ""}
             .availableVersion=${this._device?.current_version ?? ""}
+            .webUiUrl=${this._device ? buildWebUiUrl(this._device) : ""}
             ?busy=${this._activeJobs.has(this.id)}
           >
             ${
@@ -1080,6 +1246,7 @@ export class ESPHomePageDevice extends LitElement {
                         ? html`<button
                             type="button"
                             class="ghost-icon-btn nav-toggle-btn"
+                            ${tourAnchor("nav-toggle")}
                             @click=${this._onNavExpand}
                             title=${this._localize("device.show_navigator")}
                             aria-label=${this._localize("device.show_navigator")}
@@ -1118,6 +1285,7 @@ export class ESPHomePageDevice extends LitElement {
           @request-show-logs-after-install=${this._onPostInstallShowLogs}
           @clean-build=${this._onCleanBuild}
           @request-open-editor=${this._onRequestOpenEditor}
+          @request-change-board=${this._onRequestChangeBoard}
         ></esphome-firmware-install-dialog>
         <esphome-logs-dialog></esphome-logs-dialog>
         <esphome-install-method-dialog
@@ -1126,6 +1294,8 @@ export class ESPHomePageDevice extends LitElement {
           .deviceTargetPlatform=${this._installCtrl.deviceTargetPlatform}
           .deviceCurrentAddress=${this._installCtrl.deviceCurrentAddress}
           .canFlashBootloader=${this._installCtrl.canFlashBootloader}
+          .neverFlashed=${this._installCtrl.neverFlashed}
+          .mode=${this._installCtrl.methodMode}
           @close=${this._installCtrl.onInstallMethodClose}
           @select-method=${this._installCtrl.onInstallMethodSelect}
         ></esphome-install-method-dialog>
@@ -1139,6 +1309,7 @@ export class ESPHomePageDevice extends LitElement {
           @goto=${this._onValidationGoTo}
           @cancel=${this._onValidationCancel}
         ></esphome-yaml-validation-dialog>
+        <esphome-board-reselect-dialog></esphome-board-reselect-dialog>
       </div>
     `;
   }
@@ -1148,6 +1319,7 @@ export class ESPHomePageDevice extends LitElement {
    *  the device entirely is the app-shell's top-left back button —
    *  not this one. */
   private _onBack = () => {
+    this._heldUnknownInstance = null;
     this._guardSectionSwitch(() => {
       const prev = this._sectionHistory.length
         ? this._sectionHistory[this._sectionHistory.length - 1]
@@ -1269,8 +1441,13 @@ export class ESPHomePageDevice extends LitElement {
    * across two copies.
    */
   private _renderNavigator(className: "drawer-nav" | "desktop-nav") {
+    const isVisibleTourNavigator =
+      className === "desktop-nav"
+        ? !this._isMobile && !this._navCollapsed
+        : this._isMobile && this._drawerOpen;
     return html`<esphome-device-navigator
       class=${className}
+      .tourAnchorId=${isVisibleTourNavigator ? "nav" : undefined}
       .openSections=${this._openSections}
       .yaml=${this._yaml}
       .board=${this._board}
@@ -1281,7 +1458,7 @@ export class ESPHomePageDevice extends LitElement {
       .platformReady=${this._platformReady}
       .selectedKey=${this._selectedSection}
       .selectedFromLine=${this._selectedFromLine}
-      .errorCounts=${this._navErrorCounts(this._backendErrors)}
+      .errorCounts=${this._navErrorCounts(this._backendErrors, this._heldUnknownInstance)}
     ></esphome-device-navigator>`;
   }
 
@@ -1345,7 +1522,14 @@ export class ESPHomePageDevice extends LitElement {
    * `if` blocks in `yaml-editor.ts:_buildExtensions`'s
    * `updateListener`.
    */
-  private _onYamlCursorLine(e: CustomEvent<{ line: number; path?: string[] }>) {
+  private _onYamlCursorLine(
+    e: CustomEvent<{
+      line: number;
+      path?: string[];
+      viaEdit?: boolean;
+      indexedPath?: (string | number)[];
+    }>
+  ) {
     // The user is driving from the YAML pane now — drop any pending
     // form-field retry so it can't re-highlight after they've moved on.
     this._clearPendingFieldLine();
@@ -1366,8 +1550,26 @@ export class ESPHomePageDevice extends LitElement {
       // Same section: update the field target directly for intra-section
       // moves (the switch below would early-return and freeze it).
       this._focusFieldPath = rel;
+      this._focusYamlPath = e.detail.indexedPath;
       return;
     }
+    // A doc edit that resolves an unknown top-level key is a key still
+    // being typed (`sendx:` on its way to `sensor:`) — hold the switch so
+    // the pane doesn't flip to the unknown-component error surface on
+    // every keystroke (#2211). Clicks and caret moves (viaEdit false)
+    // always switch, so a settled external component still opens its
+    // pane deliberately. One quirk to know: the editor's same-line
+    // throttle means clicking the held line itself emits no event; the
+    // navigator entry (kept visible) is the release path there.
+    if (e.detail.viaEdit === true) {
+      // An unresolved key set (catalog still loading, or failed — retried
+      // on the next device load, never from this hot path) means no holds.
+      if (this._knownTopLevelKeys !== null && !this._knownTopLevelKeys.has(match.key)) {
+        this._heldUnknownInstance = instanceKey(sectionKey, match.fromLine);
+        return;
+      }
+    }
+    this._heldUnknownInstance = null;
     // Cross-section: set the field path only when the switch actually
     // applies, so a guard veto (unsaved edits) can't point the old
     // section's form at a path meant for the new one.
@@ -1375,6 +1577,7 @@ export class ESPHomePageDevice extends LitElement {
       this._selectedSection = sectionKey;
       this._selectedFromLine = match.fromLine;
       this._focusFieldPath = rel;
+      this._focusYamlPath = e.detail.indexedPath;
       // The navigator selection follows the caret; a block highlight
       // left on the previously clicked component would disagree with
       // it (#1885). The highlight is a navigator/form affordance —
@@ -1510,6 +1713,7 @@ export class ESPHomePageDevice extends LitElement {
     e: CustomEvent<{ sectionKey: string | null; fromLine?: number }>
   ) {
     const { sectionKey, fromLine } = e.detail;
+    this._heldUnknownInstance = null;
     if (sectionKey === this._selectedSection && fromLine === this._selectedFromLine) {
       this._drawerOpen = false;
       return;
@@ -1533,6 +1737,11 @@ export class ESPHomePageDevice extends LitElement {
       }
       this._selectedSection = sectionKey;
       this._selectedFromLine = fromLine;
+      // A navigator click carries no field intent — a stale cursor path
+      // would scroll/flash a target in the newly mounted editor that the
+      // user never pointed at.
+      this._focusFieldPath = undefined;
+      this._focusYamlPath = undefined;
       this._drawerOpen = false;
       this._updateUrl();
     });
@@ -1551,6 +1760,20 @@ export class ESPHomePageDevice extends LitElement {
   private _guardSectionSwitch(action: () => void): void {
     this._activeSection?.flushPending();
     action();
+  }
+
+  /** Resolve the known-top-level-key set off the session-cached catalog.
+   *  ``loadCatalog`` never rejects — a failed fetch resolves an empty index
+   *  (null set) and resets its cache — so clearing the kicked flag only on
+   *  that outcome allows a later retry without a per-keystroke refetch
+   *  storm against an already-unhealthy backend. */
+  private _kickKnownKeys(): void {
+    if (this._catalogKicked) return;
+    this._catalogKicked = true;
+    void loadCatalog(this._api).then((catalog) => {
+      this._knownTopLevelKeys = knownTopLevelKeys(catalog);
+      if (this._knownTopLevelKeys === null) this._catalogKicked = false;
+    });
   }
 
   private _onSectionMount = (e: Event) => {

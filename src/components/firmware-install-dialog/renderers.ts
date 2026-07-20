@@ -1,8 +1,16 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { type FirmwareBinary, JobSource } from "../../api/types/firmware-jobs.js";
 import { FLASHER_HOST } from "../../common/docs.js";
+import { activeLocale } from "../../common/localize.js";
 import { configurationStem, downloadAnsiText } from "../../util/download-text.js";
+import { formatElapsed } from "../../util/format-job-time.js";
+import { pairingDisplayNameForPin } from "../../util/pairing-display-name.js";
+import { canResetBuildEnv } from "../remote-build-hint.js";
 import type { ESPHomeFirmwareInstallDialog } from "../firmware-install-dialog.js";
+import {
+  renderOffloadHint,
+  shouldShowOffloadHint,
+} from "../process-terminal/offload-hint.js";
 import type { ProcessTerminalState } from "../process-terminal/process-terminal.js";
 import {
   renderBuildFailureSuggestion,
@@ -59,14 +67,18 @@ function isPeerLinkSessionLostError(message: string): boolean {
 export function renderResetSuggestion(
   host: ESPHomeFirmwareInstallDialog
 ): TemplateResult | typeof nothing {
-  if (!host._failedDuringCompile) return nothing;
-  if (host._failedDuringValidate) return renderValidationFailureSuggestion(host);
+  if (host._failureKind === "validate") return renderValidationFailureSuggestion(host);
+  if (host._failureKind !== "compile") return nothing;
   if (isPeerLinkSessionLostError(host._errorMessage)) return nothing;
   const remoteLabel =
     host._jobSource === JobSource.REMOTE && host._jobSourceLabel
-      ? host._jobSourceLabel
+      ? pairingDisplayNameForPin(host._pairings, host._jobSourcePin, host._jobSourceLabel)
       : null;
-  return renderBuildFailureSuggestion(host, remoteLabel);
+  const pairing = host._jobSourcePin
+    ? host._pairings?.get(host._jobSourcePin)
+    : undefined;
+  const resetPin = pairing && canResetBuildEnv(pairing) ? host._jobSourcePin : null;
+  return renderBuildFailureSuggestion(host, remoteLabel, resetPin);
 }
 
 // ── card status mapping ──────────────────────────────────────────────
@@ -149,7 +161,27 @@ export function cardStatusDetail(host: ESPHomeFirmwareInstallDialog): string {
         : "firmware.flashing_keep_visible"
     );
   }
+  // Once compilation begins, surface the elapsed so a slow build reads as slow.
+  if (host._step === "compiling" && host._timer.compileElapsedMs !== null) {
+    return formatElapsed(host._timer.compileElapsedMs, activeLocale());
+  }
   return "";
+}
+
+// Nudge a slow local compile toward "send builds to a faster machine". Same
+// gate as the command-dialog: compile elapsed past the threshold, suppressed
+// for remote builds and when offloading is already set up.
+export function renderOffloadHintSlot(
+  host: ESPHomeFirmwareInstallDialog
+): TemplateResult | typeof nothing {
+  if (!host._timer.isCompiling) return nothing;
+  const visible = shouldShowOffloadHint({
+    elapsedMs: host._timer.compileElapsedMs ?? 0,
+    source: host._jobSource,
+    pairings: host._pairings,
+    desktop: Boolean(host._desktopVersion),
+  });
+  return visible ? renderOffloadHint(host) : nothing;
 }
 
 // ── status-extra slot ────────────────────────────────────────────────
@@ -211,14 +243,17 @@ export function renderStatusExtra(
 }
 
 function downloadInstallLogs(host: ESPHomeFirmwareInstallDialog): void {
+  // Land the pending rAF batch so a mid-stream download can't drop the
+  // last frame of lines (mirrors command-dialog's _downloadOutput).
+  host._log.flush();
   const stem = configurationStem(host._device?.configuration, "install");
-  downloadAnsiText(host._logLines, `${stem}-install.txt`);
+  downloadAnsiText(host._log.lines, `${stem}-install.txt`);
 }
 
 export function renderLogs(
   host: ESPHomeFirmwareInstallDialog
 ): TemplateResult | typeof nothing {
-  if (host._logLines.length === 0) return nothing;
+  if (host._log.lines.length === 0) return nothing;
   return html`
     <div class="logs-header">
       <button
@@ -246,7 +281,7 @@ export function renderLogs(
       host._logsExpanded
         ? html`<div class="logs-container">
             <esphome-ansi-log
-              .lines=${host._logLines}
+              .lines=${host._log.lines}
               ?light=${!host._darkMode}
             ></esphome-ansi-log>
           </div>`
@@ -316,6 +351,20 @@ export function renderFooter(host: ESPHomeFirmwareInstallDialog): TemplateResult
       </div>
     `;
   }
+  // A chip mismatch against the stored board can't be retried into success —
+  // offer the board-reselect hand-off instead.
+  if (host._step === "error" && host._failureKind === "chip-mismatch") {
+    return html`
+      <div class="footer">
+        <button class="btn btn--ghost" @click=${host._close}>
+          ${host._localize("command.close")}
+        </button>
+        <button class="btn btn--primary" @click=${host._tryChangeBoard}>
+          ${host._localize("firmware.change_board_action")}
+        </button>
+      </div>
+    `;
+  }
   // A failed Web Serial or USB (web-flash) flash can be retried in place: re-run
   // the install (web-flash re-opens the external flasher). Excludes compile /
   // validate failures, which surface the reset-build hint (renderResetSuggestion)
@@ -323,8 +372,7 @@ export function renderFooter(host: ESPHomeFirmwareInstallDialog): TemplateResult
   const canRetry =
     host._step === "error" &&
     (host._installer === "web-serial" || host._installer === "web-flash") &&
-    !host._failedDuringCompile &&
-    !host._failedDuringValidate;
+    host._failureKind === null;
   if (canRetry) {
     return html`
       <div class="footer">

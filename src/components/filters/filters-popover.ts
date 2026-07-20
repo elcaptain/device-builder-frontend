@@ -6,15 +6,18 @@
  * reached through ``this.children`` because slot assignment is empty
  * while the popover is closed.
  *
- * Popover / dismiss are hand-rolled (not ``wa-popover``) so the
- * document-level dismissal can't fight the modal dialogs that label
- * management opens after a ``request-popover-close``.
+ * Popover / dismiss are hand-rolled (not ``wa-popover``, dismissal via
+ * the shared :class:`LightDismissController`) so the document-level
+ * dismissal can't fight the modal dialogs that label management opens
+ * after a ``request-popover-close``.
  */
 import { mdiFilterVariant } from "@mdi/js";
 import { LitElement, html, nothing } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { espHomeStyles } from "../../styles/shared.js";
-import { EscapeController } from "../../util/escape-controller.js";
+import { textStyles } from "../../styles/text.js";
+import { fireEvent } from "../../util/fire-event.js";
+import { LightDismissController } from "../../util/light-dismiss-controller.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { filterStyles } from "./filter-styles.js";
 import { filtersPopoverStyles } from "./filters-popover.styles.js";
@@ -55,23 +58,23 @@ export class ESPHomeFiltersPopover extends LitElement {
 
   @query(".facet-trigger") private _triggerEl?: HTMLButtonElement;
 
-  private _escape = new EscapeController(this, (e) => {
-    e.preventDefault();
-    this._close();
-    // Focus usually sits on a row inside the popover; hand it back
-    // to the trigger so keyboard flow doesn't dead-end.
-    this._triggerEl?.focus();
+  private _dismiss = new LightDismissController(this, () => this._close(), {
+    onEscape: (e) => {
+      e.preventDefault();
+      // Focus usually sits on a row inside the popover; hand it back
+      // to the trigger so keyboard flow doesn't dead-end.
+      this._triggerEl?.focus();
+    },
   });
 
-  static styles = [espHomeStyles, filterStyles, filtersPopoverStyles];
+  static styles = [espHomeStyles, textStyles, filterStyles, filtersPopoverStyles];
 
   protected willUpdate(changed: Map<string, unknown>) {
-    if (changed.has("_open")) this._escape.set(this._open);
+    if (changed.has("_open")) this._dismiss.set(this._open);
   }
 
   override connectedCallback() {
     super.connectedCallback();
-    document.addEventListener("click", this._onDocumentClick, true);
     window.addEventListener("resize", this._onResize);
     this.addEventListener("filter-section-toggle", this._onSectionToggle);
     this.addEventListener("request-popover-close", this._onRequestClose);
@@ -79,7 +82,6 @@ export class ESPHomeFiltersPopover extends LitElement {
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    document.removeEventListener("click", this._onDocumentClick, true);
     window.removeEventListener("resize", this._onResize);
     this.removeEventListener("filter-section-toggle", this._onSectionToggle);
     this.removeEventListener("request-popover-close", this._onRequestClose);
@@ -154,12 +156,6 @@ export class ESPHomeFiltersPopover extends LitElement {
     this._close();
   };
 
-  private _onDocumentClick = (e: MouseEvent) => {
-    if (!this._open) return;
-    if (e.composedPath().includes(this)) return;
-    this._close();
-  };
-
   // The anchor side is computed at open time; rather than recompute on
   // every resize, close so it can't sit mispositioned.
   private _onResize = () => this._close();
@@ -187,9 +183,7 @@ export class ESPHomeFiltersPopover extends LitElement {
   }
 
   private _onClearAll = () => {
-    this.dispatchEvent(
-      new CustomEvent("clear-filters", { bubbles: true, composed: true })
-    );
+    fireEvent(this, "clear-filters");
     this._close();
   };
 }

@@ -12,13 +12,13 @@ import {
   mdiWeb,
 } from "@mdi/js";
 import type { SortingState, VisibilityState } from "@tanstack/lit-table";
-import { LitElement, html, type PropertyValues } from "lit";
+import { LitElement, html, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 import memoizeOne from "memoize-one";
 import type { ESPHomeAPI } from "../api/index.js";
 import type { AdoptableDevice, ConfiguredDevice, Label } from "../api/types/devices.js";
 import type { FirmwareJob } from "../api/types/firmware-jobs.js";
-import type { PairingSummary } from "../api/types/remote-build.js";
+import type { PairingSummary, PeerSummary } from "../api/types/remote-build.js";
 import type { ArchivedDevice } from "../api/types/system.js";
 import { DashboardView } from "../api/types/system.js";
 import type { LocalizeFunc } from "../common/localize.js";
@@ -58,6 +58,12 @@ import {
   type PendingConfirm,
 } from "../components/dashboard/render-dialogs.js";
 import {
+  dashboardStacksStyles,
+  renderBuilderStack,
+  renderRemoteStack,
+} from "../components/dashboard/render-stacks.js";
+import { stackBarStyles } from "../components/shared/stack-bar-styles.js";
+import {
   renderEmptySearch,
   renderSelectBarOrFab,
   renderToolbar,
@@ -78,14 +84,17 @@ import {
 } from "../components/dashboard/skeletons.js";
 import { dashboardStyles } from "../components/dashboard/styles.js";
 import { yamlModeStyles } from "../components/dashboard/yaml-mode-styles.js";
+import { TourActivityController } from "../components/guided-tour/tour-activity-controller.js";
 import { YamlSearchController } from "../components/yaml-search-controller.js";
 import {
   activeJobsContext,
   apiContext,
   buildOffloadPairingsContext,
+  buildServerPeersContext,
   devicesContext,
   devicesLoadedContext,
   expertModeContext,
+  hideDeviceBuilderContext,
   importableDevicesContext,
   labelsContext,
   localizeContext,
@@ -96,11 +105,13 @@ import {
 } from "../context/index.js";
 import { inputStyles } from "../styles/inputs.js";
 import { espHomeStyles } from "../styles/shared.js";
-import { runBulkUpdate } from "../util/bulk-update.js";
+import { textStyles } from "../styles/text.js";
+import { runBulkCompile, runBulkUpdate } from "../util/bulk-update.js";
 import {
   loadDashboardFilters,
   saveDashboardFilters,
 } from "../util/dashboard-filters-session.js";
+import { DashboardStacksController } from "../util/dashboard-stacks-controller.js";
 import { readDashboardUrl, writeDashboardUrl } from "../util/dashboard-url.js";
 import {
   activeFacetCount,
@@ -114,7 +125,7 @@ import { sortDevices } from "../util/device-sort.js";
 import { normalizeUpdateBuckets } from "../util/facets.js";
 import { computeLabelUsage } from "../util/label-usage.js";
 import { navigate } from "../util/navigation.js";
-import { notifyInfo } from "../util/notify.js";
+import { notifyError, notifyInfo } from "../util/notify.js";
 import { consumePendingHighlight } from "../util/pending-highlight.js";
 import { consumePendingSerialSetup } from "../util/pending-serial-setup.js";
 import { postInstallShowLogsHandler } from "../util/post-install-logs.js";
@@ -137,6 +148,9 @@ import "../components/dashboard/device-drawer.js";
 import "../components/dashboard/device-table.js";
 import "../components/dashboard/table-row-menu.js";
 import "../components/device-card.js";
+import "../components/device/board-reselect-dialog.js";
+import type { ESPHomeBoardReselectDialog } from "../components/device/board-reselect-dialog.js";
+import { findBoardDisagreement, openBoardReselect } from "../util/board-change.js";
 import "../components/discovered-device-card.js";
 import "../components/firmware-install-dialog.js";
 import type { ESPHomeFirmwareInstallDialog } from "../components/firmware-install-dialog.js";
@@ -147,6 +161,7 @@ import "../components/labels/bulk-labels-dialog.js";
 import type { ESPHomeBulkLabelsDialog } from "../components/labels/bulk-labels-dialog.js";
 import "../components/labels/label-dialog.js";
 import "../components/logs-dialog.js";
+import "../components/remote-build-panel.js";
 import type { ESPHomeLogsDialog } from "../components/logs-dialog.js";
 import "../components/rename-device-dialog.js";
 import type { ESPHomeRenameDeviceDialog } from "../components/rename-device-dialog.js";
@@ -169,6 +184,8 @@ registerMdiIcons({
 
 @customElement("esphome-page-dashboard")
 export class ESPHomePageDashboard extends LitElement {
+  private _tourActivity = new TourActivityController(this);
+
   @consume({ context: localizeContext, subscribe: true })
   @state()
   _localize: LocalizeFunc = (key) => key;
@@ -196,24 +213,33 @@ export class ESPHomePageDashboard extends LitElement {
     [];
   @consume({ context: apiContext }) _api!: ESPHomeAPI;
 
-  // When true this install is a remote build node: every device-creation
-  // affordance (New device card, FAB, table Create, Adopt, serial wizard)
-  // is hidden. See _hideDeviceCreation for the actual gate.
+  // Remote-compute install: the dashboard leads with the remote build
+  // server stack. Nothing is hidden — the device builder keeps every
+  // affordance and just starts collapsed.
   @consume({ context: remoteComputeOnlyContext, subscribe: true })
   @state()
   _remoteComputeOnly = false;
+  @consume({ context: hideDeviceBuilderContext, subscribe: true })
+  @state()
+  _hideDeviceBuilder = false;
 
-  // False until preferences load once. Creation fails closed while it's
-  // false so a remote-compute install can't flash creation UI when the
-  // initial prefs fetch fails (remote_compute_only would still be default).
+  // False until preferences load once; the remote stack's expanded-by-
+  // default treatment waits for the real preference value.
   @consume({ context: prefsLoadedContext, subscribe: true })
   @state()
   _prefsLoaded = false;
 
-  /** Whether every device-creation affordance should be hidden. */
-  get _hideDeviceCreation(): boolean {
-    return this._remoteComputeOnly || !this._prefsLoaded;
-  }
+  @consume({ context: buildServerPeersContext, subscribe: true })
+  @state()
+  _buildServerPeers: PeerSummary[] | null = null;
+
+  /** Build server / Device builder accordion state (always one open). */
+  _stacks = new DashboardStacksController(this, {
+    remoteComputeReady: () => this._remoteComputeOnly && this._prefsLoaded,
+    hasApprovedSender: () =>
+      this._buildServerPeers?.some((p) => p.status === "approved") ?? false,
+    hideBuilder: () => this._hideDeviceBuilder,
+  });
 
   // Passed to runBulkUpdate for the NO_COMPATIBLE_PEER toast
   // classifier. Same context the settings dialog reads; null until
@@ -304,6 +330,8 @@ export class ESPHomePageDashboard extends LitElement {
   @query("esphome-command-dialog") _commandDialog!: ESPHomeCommandDialog;
   @query("esphome-firmware-install-dialog")
   _firmwareDialog!: ESPHomeFirmwareInstallDialog;
+  @query("esphome-board-reselect-dialog")
+  _boardReselectDialog!: ESPHomeBoardReselectDialog;
   @query("esphome-logs-dialog") _logsDialog!: ESPHomeLogsDialog;
   @query(".search-input") _searchInputEl?: HTMLElement & { focus: () => void };
 
@@ -311,6 +339,9 @@ export class ESPHomePageDashboard extends LitElement {
     espHomeStyles,
     inputStyles,
     dashboardStyles,
+    stackBarStyles,
+    dashboardStacksStyles,
+    textStyles,
     deviceGridStyles,
     yamlModeStyles,
     skeletonStyles,
@@ -322,9 +353,6 @@ export class ESPHomePageDashboard extends LitElement {
   };
 
   private _startSerialSetup(port: SerialPort | null): void {
-    // Remote-compute installs don't create devices; a plugged-in board
-    // shouldn't pop the creation wizard.
-    if (this._hideDeviceCreation) return;
     void detectAndOpenWizard(this._api, this._createDialog, {
       port,
       devices: this._devices,
@@ -390,8 +418,8 @@ export class ESPHomePageDashboard extends LitElement {
       this._tryConsumePendingScroll();
     }
     // USB "Set it up" actioned from another route stashes the port and
-    // navigates here. Defer to first render: _createDialog (@query) and
-    // the prefs contexts driving _hideDeviceCreation land during it.
+    // navigates here. Defer to first render so _createDialog (@query)
+    // lands during it.
     const pendingSerial = consumePendingSerialSetup();
     if (pendingSerial !== null) {
       void this.updateComplete.then(() => {
@@ -544,6 +572,19 @@ export class ESPHomePageDashboard extends LitElement {
     if (changed.has("_importableDevices") || changed.has("_showIgnored")) {
       this.toggleAttribute("has-discovered", this._visibleImportableDevices.length > 0);
     }
+    this._stacks.refreshTourState();
+    // ``stacks`` re-homes the discovery banner: floating at the page top
+    // normally, in-flow inside the Device builder section when the
+    // remote/builder stacks are shown; ``remote-open`` pins the page to
+    // the viewport (internal scroll only) while the remote section is
+    // the expanded one. Toggled unconditionally — the inputs span six
+    // properties plus tour session state, and toggleAttribute is an
+    // idempotent no-op when nothing changed.
+    this.toggleAttribute("stacks", this._stacks.show);
+    this.toggleAttribute(
+      "remote-open",
+      this._stacks.show && !this._stacks.remoteCollapsed
+    );
     if (changed.has("_devicesLoaded") && this._devicesLoaded) void loadPreferences(this);
     // The catalog arrives over WS after ``connectedCallback`` runs.
     // Resolve any URL-sourced pending label names the moment it does.
@@ -631,41 +672,66 @@ export class ESPHomePageDashboard extends LitElement {
     // matches drop out and matching ones expand to show their YAML
     // snippets.
     if (this._yamlMode) {
-      return html`
-        ${renderDiscoveredSection(this)} ${renderYamlToolbar(this)}
-        ${renderYamlMode(this)} ${renderDrawer(this)} ${renderSelectBarOrFab(this)}
-        ${renderDialogs(this)}
-      `;
+      return this._renderStacked(
+        () => html`
+          ${renderDiscoveredSection(this)} ${renderYamlToolbar(this)}
+          ${renderYamlMode(this)}
+        `
+      );
     }
 
-    const q = this._search.trim().toLowerCase();
-    const facetFiltered = this._applyFacetFilters(this._sortedDevices);
-    const filtered = q
-      ? facetFiltered.filter((d) => matchesDeviceName(d, q))
-      : facetFiltered;
-    // Show the no-results pivot whenever facets and/or search hide
-    // every device that actually exists — facet-only filtering used
-    // to silently leave the card grid empty with no escape hatch.
-    const showCardEmptyState =
-      this._view === DashboardView.CARDS &&
-      this._devices.length > 0 &&
-      filtered.length === 0 &&
-      this._hasActiveFilters;
+    return this._renderStacked(() => {
+      const q = this._search.trim().toLowerCase();
+      const facetFiltered = this._applyFacetFilters(this._sortedDevices);
+      const filtered = q
+        ? facetFiltered.filter((d) => matchesDeviceName(d, q))
+        : facetFiltered;
+      // Show the no-results pivot whenever facets and/or search hide
+      // every device that actually exists — facet-only filtering used
+      // to silently leave the card grid empty with no escape hatch.
+      const showCardEmptyState =
+        this._view === DashboardView.CARDS &&
+        this._devices.length > 0 &&
+        filtered.length === 0 &&
+        this._hasActiveFilters;
 
+      return html`
+        ${renderDiscoveredSection(this)}
+        ${
+          this._devices.length > 0 && this._view === DashboardView.CARDS
+            ? renderToolbar(this, filtered.length, this._devices.length)
+            : ""
+        }
+        ${showCardEmptyState ? renderEmptySearch(this) : ""}
+        ${
+          this._view === DashboardView.CARDS
+            ? renderCardGrid(this, filtered)
+            : renderTable(this)
+        }
+      `;
+    });
+  }
+
+  /** The accordion scaffold shared by the YAML and cards/table branches.
+   *  *content* is a thunk so a collapsed builder section never pays for
+   *  building the device grid it would immediately discard. */
+  private _renderStacked(content: () => TemplateResult): TemplateResult {
     return html`
-      ${renderDiscoveredSection(this)}
+      ${this._stacks.show ? renderRemoteStack(this) : ""}
       ${
-        this._devices.length > 0 && this._view === DashboardView.CARDS
-          ? renderToolbar(this, filtered.length, this._devices.length)
-          : ""
+        this._stacks.builderHidden
+          ? ""
+          : this._stacks.show
+            ? renderBuilderStack(this, content)
+            : content()
       }
-      ${showCardEmptyState ? renderEmptySearch(this) : ""}
+      ${renderDrawer(this)}
       ${
-        this._view === DashboardView.CARDS
-          ? renderCardGrid(this, filtered)
-          : renderTable(this)
+        this._stacks.show && this._stacks.builderCollapsed
+          ? ""
+          : renderSelectBarOrFab(this)
       }
-      ${renderDrawer(this)} ${renderSelectBarOrFab(this)} ${renderDialogs(this)}
+      ${renderDialogs(this)}
     `;
   }
 
@@ -893,10 +959,48 @@ export class ESPHomePageDashboard extends LitElement {
     this._drawerOpen = true;
   }
 
-  _openCommand = (device: ConfiguredDevice, type: CommandType, port?: string) =>
+  _openCommand = (device: ConfiguredDevice, type: CommandType, port?: string) => {
+    if (type === "install") {
+      void this._guardBoardThen(device, () => openCommand(this, device, type, port));
+      return;
+    }
     openCommand(this, device, type, port);
+  };
   _showJobProgress = (device: ConfiguredDevice) => showJobProgress(this, device);
-  _openInstallMethod = (device: ConfiguredDevice) => openInstallMethod(this, device);
+  _openInstallMethod = (device: ConfiguredDevice) => {
+    void this._guardBoardThen(device, () => openInstallMethod(this, device));
+  };
+
+  /** Hard block: force the board fix before a single-device install
+   *  opens. Re-attaching to a running job starts no install, so it
+   *  skips the guard's fetches; bulk update stays ungated (OTA only,
+   *  N pickers can't stack). A picker with nothing to offer falls
+   *  through — the chip check downstream stays the guard, and
+   *  blocking would strand the install with only a toast. */
+  _guardBoardThen = async (
+    device: ConfiguredDevice,
+    proceed: () => void | Promise<void>
+  ) => {
+    // Whole body guarded: the void call sites would otherwise turn any
+    // throw into a silent unhandled rejection.
+    try {
+      if (showJobProgress(this, device)) return;
+      const yaml = await findBoardDisagreement(this._api, this._localize, device);
+      if (
+        yaml &&
+        (await openBoardReselect(this._boardReselectDialog, {
+          configuration: device.configuration,
+          yaml,
+        }))
+      ) {
+        return;
+      }
+      await proceed();
+    } catch (err) {
+      console.error("Install entry failed:", err);
+      notifyError(this._localize("device.install_start_failed"));
+    }
+  };
   _onInstallMethodSelect = (e: CustomEvent<{ method: string; port?: string }>) =>
     onInstallMethodSelect(this, e);
   _openLogs = (device: ConfiguredDevice) => openLogs(this, device);
@@ -906,6 +1010,13 @@ export class ESPHomePageDashboard extends LitElement {
   );
   _onRequestOpenEditor = (e: CustomEvent<{ configuration: string }>) => {
     navigate(`/device/${encodeURIComponent(e.detail.configuration)}`);
+  };
+
+  /** Chip-mismatch recovery hand-off from the install dialog. */
+  _onRequestChangeBoard = (e: CustomEvent<{ configuration: string }>) => {
+    void openBoardReselect(this._boardReselectDialog, {
+      configuration: e.detail.configuration,
+    });
   };
 
   _toggleDevice(configuration: string) {
@@ -920,6 +1031,18 @@ export class ESPHomePageDashboard extends LitElement {
     this._selectMode = false;
     this._selectedDevices = new Set();
     await runBulkUpdate(selected, {
+      api: this._api,
+      localize: this._localize,
+      appVersion: this._appVersion,
+      pairings: this._pairings?.values() ?? [],
+    });
+  };
+
+  _compileSelected = async () => {
+    const selected = [...this._selectedDevices];
+    this._selectMode = false;
+    this._selectedDevices = new Set();
+    await runBulkCompile(selected, {
       api: this._api,
       localize: this._localize,
       appVersion: this._appVersion,

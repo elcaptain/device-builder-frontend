@@ -104,11 +104,11 @@ describe("describeValueTypeCause", () => {
     const { describeValueTypeCause } =
       await import("../../src/util/yaml-error-analysis.js");
     const doc = (n: number): string | undefined => ["logger:", "  le"][n - 1];
-    expect(describeValueTypeCause(doc, 2, localize)).toEqual({
+    expect(describeValueTypeCause(doc, 2, localize, "")).toEqual({
       text: 'yaml_editor.error_missing_colon_hint:{"line":2,"key":"le"}',
     });
     const keyed = (n: number): string | undefined => ["logger:", "  level: DEBUG"][n - 1];
-    expect(describeValueTypeCause(keyed, 2, localize)).toBeNull();
+    expect(describeValueTypeCause(keyed, 2, localize, "")).toBeNull();
   });
 
   // The valid-YAML variant of the stuck dash: `-platform:` with no deeper
@@ -119,9 +119,95 @@ describe("describeValueTypeCause", () => {
       await import("../../src/util/yaml-error-analysis.js");
     const doc = (n: number): string | undefined =>
       ["ota:", "  -platform: esphome"][n - 1];
-    expect(describeValueTypeCause(doc, 2, localize)).toEqual({
+    expect(describeValueTypeCause(doc, 2, localize, "")).toEqual({
       text: 'yaml_editor.error_dash_space_fix:{"line":2,"key":"platform"}',
       fix: { line: 2, indent: 0, key: "-platform", fromIndent: 2, kind: "dash-space" },
+    });
+  });
+
+  // The commented-out-children shape: a `#` at column 0 in front of a
+  // still-indented option (hand-commented), so `advanced:` parses as null.
+  it("names the commented-out block behind 'expected a dictionary.'", async () => {
+    const { describeValueTypeCause } =
+      await import("../../src/util/yaml-error-analysis.js");
+    const doc = (n: number): string | undefined =>
+      ["    advanced:", '#      minimum_chip_revision: "3.1"', "  board: esp32dev"][
+        n - 1
+      ];
+    expect(describeValueTypeCause(doc, 1, localize, "expected a dictionary.")).toEqual({
+      text: 'yaml_editor.error_commented_block_hint:{"line":1,"key":"advanced"}',
+      fix: { line: 1, indent: 0, key: "advanced", fromIndent: 4, kind: "comment-out" },
+    });
+  });
+
+  it("names the commented-out block when the comment keeps its indent", async () => {
+    const { describeValueTypeCause } =
+      await import("../../src/util/yaml-error-analysis.js");
+    const doc = (n: number): string | undefined =>
+      ["    advanced:", '      # minimum_chip_revision: "3.1"', "  board: esp32dev"][
+        n - 1
+      ];
+    expect(describeValueTypeCause(doc, 1, localize, "expected a dictionary.")).toEqual({
+      text: 'yaml_editor.error_commented_block_hint:{"line":1,"key":"advanced"}',
+      fix: { line: 1, indent: 0, key: "advanced", fromIndent: 4, kind: "comment-out" },
+    });
+  });
+
+  it("names the empty block when nothing follows the key at all", async () => {
+    const { describeValueTypeCause } =
+      await import("../../src/util/yaml-error-analysis.js");
+    const beforeSibling = (n: number): string | undefined =>
+      ["  framework:", "  board: esp32dev"][n - 1];
+    expect(
+      describeValueTypeCause(beforeSibling, 1, localize, "expected a dictionary.")
+    ).toEqual({
+      text: 'yaml_editor.error_empty_block_hint:{"line":1,"key":"framework"}',
+      fix: { line: 1, indent: 0, key: "framework", fromIndent: 2, kind: "remove-line" },
+    });
+    const atEof = (n: number): string | undefined => ["  advanced:"][n - 1];
+    expect(describeValueTypeCause(atEof, 1, localize, "expected a dictionary.")).toEqual({
+      text: 'yaml_editor.error_empty_block_hint:{"line":1,"key":"advanced"}',
+      fix: { line: 1, indent: 0, key: "advanced", fromIndent: 2, kind: "remove-line" },
+    });
+  });
+
+  it("stays silent on the empty-block shape for other messages", async () => {
+    const { describeValueTypeCause } =
+      await import("../../src/util/yaml-error-analysis.js");
+    const doc = (n: number): string | undefined => ["esp32:", "", "logger:"][n - 1];
+    expect(
+      describeValueTypeCause(
+        doc,
+        1,
+        localize,
+        "'board' is a required option for [esp32]."
+      )
+    ).toBeNull();
+    expect(describeValueTypeCause(doc, 1, localize, "")).toBeNull();
+  });
+
+  it("stays silent when the key has a real child or a value", async () => {
+    const { describeValueTypeCause } =
+      await import("../../src/util/yaml-error-analysis.js");
+    const withChild = (n: number): string | undefined =>
+      ["  framework:", "# a note", "    type: arduino"][n - 1];
+    expect(
+      describeValueTypeCause(withChild, 1, localize, "expected a dictionary.")
+    ).toBeNull();
+    const valued = (n: number): string | undefined => ["  board: esp32dev"][n - 1];
+    expect(
+      describeValueTypeCause(valued, 1, localize, "expected a dictionary.")
+    ).toBeNull();
+  });
+
+  it("treats a column-0 commented sibling as an empty block, not commented content", async () => {
+    const { describeValueTypeCause } =
+      await import("../../src/util/yaml-error-analysis.js");
+    const doc = (n: number): string | undefined =>
+      ["web_server:", "#api:", "logger:"][n - 1];
+    expect(describeValueTypeCause(doc, 1, localize, "expected a dictionary.")).toEqual({
+      text: 'yaml_editor.error_empty_block_hint:{"line":1,"key":"web_server"}',
+      fix: { line: 1, indent: 0, key: "web_server", fromIndent: 0, kind: "remove-line" },
     });
   });
 });

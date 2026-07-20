@@ -32,6 +32,7 @@ import {
   startDownload,
 } from "../../src/components/firmware-install-dialog/install-flow.js";
 import { identityLocalize } from "../_dom.js";
+import { fakeLogBuffer } from "../_fake-host.js";
 
 const FACTORY: FirmwareBinary = { title: "Factory format", file: "firmware.factory.bin" };
 const OTA: FirmwareBinary = {
@@ -66,14 +67,15 @@ function makeHost(installer: Installer, binaries: FirmwareBinary[]) {
     _statusMessage: "",
     _binaries: [] as FirmwareBinary[],
     _downloadedFilename: "",
-    _logLines: [] as string[],
-    _failedDuringCompile: false,
-    _failedDuringValidate: false,
+    _log: fakeLogBuffer(),
+    _failureKind: null,
     _jobId: "",
     _streamId: "",
     _jobSource: JobSource.LOCAL,
     _jobSourceLabel: "",
     _compileReject: null as null | ((e: unknown) => void),
+    _activeJobs: new Map<string, unknown>(),
+    _timer: { noteLine: vi.fn() },
     _localize: identityLocalize,
     _fail: vi.fn(),
   };

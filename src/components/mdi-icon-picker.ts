@@ -13,7 +13,9 @@ import { mdiClose, mdiMagnify, mdiPalette } from "@mdi/js";
 import { html, LitElement, nothing } from "lit";
 import { customElement, property, query, state } from "lit/decorators.js";
 import { inputStyles } from "../styles/inputs.js";
-import { EscapeController } from "../util/escape-controller.js";
+import { textStyles } from "../styles/text.js";
+import { fireEvent } from "../util/fire-event.js";
+import { LightDismissController } from "../util/light-dismiss-controller.js";
 import { registerMdiIcons } from "../util/register-icons.js";
 import { mdiIconPickerStyles } from "./mdi-icon-picker.styles.js";
 
@@ -117,20 +119,10 @@ export class ESPHomeMdiIconPicker extends LitElement {
 
   @query(".search-input") private _searchInput?: HTMLInputElement;
 
-  static styles = [inputStyles, mdiIconPickerStyles];
-
-  connectedCallback() {
-    super.connectedCallback();
-    document.addEventListener("click", this._onDocumentClick, true);
-  }
-
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    document.removeEventListener("click", this._onDocumentClick, true);
-  }
+  static styles = [inputStyles, textStyles, mdiIconPickerStyles];
 
   protected willUpdate(changed: Map<string, unknown>) {
-    if (changed.has("_open")) this._escape.set(this._open);
+    if (changed.has("_open")) this._dismiss.set(this._open);
     // When the picker is mounted (or assigned a value) with an icon
     // already selected, kick off the catalog load so the trigger button
     // can render the SVG. Otherwise the form would open showing only a
@@ -143,22 +135,10 @@ export class ESPHomeMdiIconPicker extends LitElement {
   /* Esc binds to ``document`` (not ``window``) and the callback uses
      ``stopPropagation`` so a parent dialog wrapping the picker doesn't
      also close on the same keypress. */
-  private _escape = new EscapeController(
-    this,
-    (e) => {
-      e.stopPropagation();
-      this._close();
-    },
-    { target: document }
-  );
-
-  private _onDocumentClick = (e: Event) => {
-    if (!this._open) return;
-    const path = e.composedPath();
-    if (!path.includes(this)) {
-      this._close();
-    }
-  };
+  private _dismiss = new LightDismissController(this, () => this._close(), {
+    escapeTarget: document,
+    onEscape: (e) => e.stopPropagation(),
+  });
 
   private async _toggle() {
     if (this.disabled) return;
@@ -192,26 +172,14 @@ export class ESPHomeMdiIconPicker extends LitElement {
   private _select(name: string) {
     const next = `mdi:${name}`;
     this.value = next;
-    this.dispatchEvent(
-      new CustomEvent("change", {
-        detail: { value: next },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "change", { value: next });
     this._close();
   }
 
   private _clear(e: Event) {
     e.stopPropagation();
     this.value = "";
-    this.dispatchEvent(
-      new CustomEvent("change", {
-        detail: { value: "" },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "change", { value: "" });
   }
 
   private _onSearchInput(e: Event) {
@@ -336,7 +304,9 @@ export class ESPHomeMdiIconPicker extends LitElement {
         @click=${this._toggle}
       >
         ${this._renderTriggerIcon()}
-        <span class=${name ? "trigger-label" : "trigger-label placeholder"}>
+        <span
+          class=${name ? "trigger-label truncate" : "trigger-label placeholder truncate"}
+        >
           ${name ? `mdi:${name}` : this.placeholder}
         </span>
         ${

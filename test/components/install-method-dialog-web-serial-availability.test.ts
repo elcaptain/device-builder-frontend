@@ -8,36 +8,19 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@home-assistant/webawesome/dist/components/dialog/dialog.js", () => ({}));
-vi.mock("@home-assistant/webawesome/dist/components/icon/icon.js", () => ({}));
-vi.mock("@home-assistant/webawesome/dist/components/spinner/spinner.js", () => ({}));
+import "../_mock-webawesome.js";
+
+vi.mock("@home-assistant/webawesome/dist/components/callout/callout.js", () => ({}));
 
 import { DeviceState } from "../../src/api/types/devices.js";
 import { defaultLocalize } from "../../src/common/localize.js";
 import { ESPHomeInstallMethodDialog } from "../../src/components/install-method-dialog.js";
+import {
+  restoreWebSerialEnv,
+  setWebSerialEnv as setEnv,
+} from "./_install-method-dialog-env.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-const origSerial = Object.getOwnPropertyDescriptor(navigator, "serial");
-const origSecure = Object.getOwnPropertyDescriptor(window, "isSecureContext");
-const origLocation = Object.getOwnPropertyDescriptor(window, "location");
-
-function setEnv(opts: { serial: boolean; secure: boolean; href: string }) {
-  if (opts.serial) {
-    Object.defineProperty(navigator, "serial", { configurable: true, value: {} });
-  } else if ("serial" in navigator) {
-    delete (navigator as any).serial;
-  }
-  Object.defineProperty(window, "isSecureContext", {
-    configurable: true,
-    value: opts.secure,
-  });
-  const u = new URL(opts.href);
-  Object.defineProperty(window, "location", {
-    configurable: true,
-    value: { hostname: u.hostname, href: u.href },
-  });
-}
-
 async function mount(
   mode: "install" | "logs" = "install"
 ): Promise<ESPHomeInstallMethodDialog> {
@@ -80,10 +63,7 @@ function methodOnClick(d: ESPHomeInstallMethodDialog, el: Element): string | nul
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 afterEach(() => {
-  if (origSerial) Object.defineProperty(navigator, "serial", origSerial);
-  else if ("serial" in navigator) delete (navigator as any).serial;
-  if (origSecure) Object.defineProperty(window, "isSecureContext", origSecure);
-  if (origLocation) Object.defineProperty(window, "location", origLocation);
+  restoreWebSerialEnv();
   vi.restoreAllMocks();
 });
 
@@ -138,12 +118,22 @@ describe("install-method-dialog USB row availability", () => {
     expect(row!.textContent).toContain("Web Serial support");
   });
 
-  it("in logs mode hides the USB row on an insecure origin (no web-flash logs)", async () => {
-    // web-flash is install-only; logs over USB need in-app Web Serial, which an
-    // insecure origin can't do. The row must not render a no-op web-flash here.
+  it("in logs mode on an insecure origin links to ESPHome Web, not a web-flash row", async () => {
+    // web-flash is install-only; logs over USB need a secure context, which an
+    // insecure origin can't provide. Instead of a no-op web-flash row, offer a
+    // link out to ESPHome Web (a secure origin) with the ?dashboard_logs hint.
     setEnv({ serial: false, secure: false, href: "http://0.0.0.0:6052/" });
     const dialog = await mount("logs");
-    expect(usbRow(dialog)).toBeNull();
+    const row = usbRow(dialog);
+    expect(row).not.toBeNull();
+    // It opens a tab; it does NOT dispatch an in-app / web-flash method.
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    expect(methodOnClick(dialog, row!)).toBeNull();
+    expect(open).toHaveBeenCalledWith(
+      "https://web.esphome.io/?dashboard_logs",
+      "_blank",
+      "noopener,noreferrer"
+    );
     // Logs still have a serial path via server-serial.
     expect(serialRow(dialog)).not.toBeUndefined();
   });

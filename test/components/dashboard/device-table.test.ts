@@ -5,7 +5,7 @@
  * real row-count size (floored at 1), and the mounted table renders
  * every row on one page while a normal size paginates (discussion #3682).
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@home-assistant/webawesome/dist/components/icon/icon.js", () => ({}));
 vi.mock("@home-assistant/webawesome/dist/components/spinner/spinner.js", () => ({}));
@@ -15,9 +15,23 @@ vi.mock("../../../src/components/dashboard/table-row-menu.js", () => ({}));
 import type { ConfiguredDevice } from "../../../src/api/types/devices.js";
 import { ESPHomeDeviceTable } from "../../../src/components/dashboard/device-table.js";
 import {
+  clearTourConfiguration,
+  setTourActive,
+  setTourConfiguration,
+} from "../../../src/components/guided-tour/tour-session.js";
+import {
   ALL_PAGE_SIZE,
   effectiveTablePageSize,
 } from "../../../src/components/dashboard/pagination.js";
+import {
+  makeConfiguredDevice,
+  type ConfiguredDeviceOverrides,
+} from "../../_make-configured-device.js";
+
+afterEach(() => {
+  setTourActive(false);
+  clearTourConfiguration();
+});
 
 describe("effectiveTablePageSize", () => {
   it("passes a normal page size through unchanged", () => {
@@ -34,27 +48,14 @@ describe("effectiveTablePageSize", () => {
 });
 
 function makeDevices(n: number): ConfiguredDevice[] {
-  return Array.from({ length: n }, (_, i) => ({
-    name: `demo-${i}`,
-    friendly_name: `Demo ${i}`,
-    configuration: `demo-${i}.yaml`,
-    state: "ONLINE",
-    address: `demo-${i}.local`,
-    ip: "",
-    ip_addresses: [],
-    mac_address: "",
-    target_platform: "ESP32",
-    deployed_version: "",
-    build_size_bytes: 0,
-    comment: "",
-    area: "",
-    labels: [],
-    has_pending_changes: false,
-    update_available: false,
-    api_enabled: true,
-    api_encrypted: false,
-    api_encryption_active: null,
-  })) as unknown as ConfiguredDevice[];
+  return Array.from({ length: n }, (_, i) =>
+    makeConfiguredDevice({
+      name: `demo-${i}`,
+      friendly_name: `Demo ${i}`,
+      configuration: `demo-${i}.yaml`,
+      address: `demo-${i}.local`,
+    })
+  );
 }
 
 async function mount(
@@ -86,6 +87,96 @@ describe("device-table All rendering", () => {
     const el = await mount(30, ALL_PAGE_SIZE);
     expect(rowCount(el)).toBe(30);
     expect(pageSizeAttr(el)).toBe("0");
+  });
+
+  it("moves to the page containing the quickstart target", async () => {
+    const el = await mount(30, 10);
+    setTourConfiguration("demo-20.yaml");
+    setTourActive(true);
+    el.requestUpdate();
+
+    await el.updateComplete;
+    await el.updateComplete;
+
+    expect(
+      el
+        .shadowRoot!.querySelector("tbody tr[data-configuration]")
+        ?.getAttribute("data-configuration")
+    ).toBe("demo-20.yaml");
+  });
+
+  it("finds the quickstart target through sorting and search filters", async () => {
+    const el = await mount(30, 10);
+    el.initialSorting = [{ id: "name", desc: true }];
+    el.search = "does-not-match";
+    setTourConfiguration("demo-0.yaml");
+    setTourActive(true);
+    el.requestUpdate();
+
+    await el.updateComplete;
+    await el.updateComplete;
+
+    expect(
+      el.shadowRoot!.querySelector('tbody tr[data-configuration="demo-0.yaml"]')
+    ).not.toBeNull();
+  });
+});
+
+describe("device-table Version column identity gating", () => {
+  async function mountWithVersionColumn(
+    device: ConfiguredDevice
+  ): Promise<ESPHomeDeviceTable> {
+    const el = new ESPHomeDeviceTable();
+    el.devices = [device];
+    el.initialColumnVisibility = { version: true };
+    document.body.appendChild(el);
+    await el.updateComplete;
+    await el.updateComplete;
+    return el;
+  }
+
+  function versionCellText(el: ESPHomeDeviceTable): string {
+    const cell = el.shadowRoot!.querySelector("tbody td.col-version");
+    expect(cell).not.toBeNull();
+    return cell!.querySelector(".cell-mono, .cell-muted")!.textContent!.trim();
+  }
+
+  it.each<[string, ConfiguredDeviceOverrides, string]>([
+    [
+      "api device with mdns ownership shows the deployed version",
+      {
+        api_enabled: true,
+        runtime_state: { active_source: "mdns", deployed_identity_live: false },
+      },
+      "2026.6.0",
+    ],
+    [
+      "api device with a dark identity blanks",
+      {
+        api_enabled: true,
+        runtime_state: { active_source: "ping", deployed_identity_live: false },
+      },
+      "—",
+    ],
+    [
+      "no-api device with a live identity TXT shows the deployed version",
+      { api_enabled: false, runtime_state: { deployed_identity_live: true } },
+      "2026.6.0",
+    ],
+    [
+      "no-api device with a dark identity blanks",
+      { api_enabled: false, runtime_state: { deployed_identity_live: false } },
+      "—",
+    ],
+  ])("%s", async (_name, overrides, expected) => {
+    const { runtime_state, ...flat } = overrides;
+    const el = await mountWithVersionColumn(
+      makeConfiguredDevice({
+        ...flat,
+        runtime_state: { deployed_version: "2026.6.0", ...runtime_state },
+      })
+    );
+    expect(versionCellText(el)).toBe(expected);
   });
 });
 

@@ -8,7 +8,7 @@ import {
   mdiPlus,
 } from "@mdi/js";
 import { html, LitElement, nothing } from "lit";
-import { customElement, property, query, state } from "lit/decorators.js";
+import { customElement, property, queryAll, state } from "lit/decorators.js";
 import type { ESPHomeAPI } from "../../api/index.js";
 import type { BoardCatalogEntry, FeaturedBundle } from "../../api/types/boards.js";
 import type { ComponentCatalogEntry } from "../../api/types/components.js";
@@ -18,12 +18,18 @@ import { apiContext, localizeContext } from "../../context/index.js";
 import { inputStyles } from "../../styles/inputs.js";
 import { loadMoreFooterStyles } from "../../styles/load-more-footer.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import { textStyles } from "../../styles/text.js";
 import { debounce } from "../../util/debounce.js";
 import { isFeaturedId } from "../../util/featured-id.js";
+import { fireEvent } from "../../util/fire-event.js";
 import { IntersectionController } from "../../util/intersection-controller.js";
+import { isVisible } from "../../util/is-visible.js";
 import { PagedListController } from "../../util/paged-list-controller.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import { ResizeController } from "../../util/resize-controller.js";
+import { setsEqual } from "../../util/set-equal.js";
 import { renderLoadMoreFooter } from "../shared/load-more-footer.js";
+import { overflowingDescriptionIds } from "./component-catalog/description-overflow.js";
 import {
   ambiguousNameIds,
   availableFeaturedCount,
@@ -36,6 +42,7 @@ import { componentCatalogStyles } from "./component-catalog/styles.js";
 
 import "@home-assistant/webawesome/dist/components/badge/badge.js";
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
+import "@home-assistant/webawesome/dist/components/tooltip/tooltip.js";
 
 registerMdiIcons({
   "arrow-collapse-all": mdiArrowCollapseAll,
@@ -101,8 +108,33 @@ export class ESPHomeComponentCatalog extends LitElement {
   // card down to the placeholder.
   @state() _imageFailed: Set<string> = new Set();
 
-  @query(".sentinel") private _sentinel?: HTMLElement | null;
+  // Cards whose clamped description actually overflows — the only ones
+  // where the expand button reveals anything. Rebuilt after every render
+  // and on host resize (wrap width changes truncation). The equality
+  // check makes the updated() -> measure -> state cycle converge:
+  // removing a button doesn't change the description's wrap width, so
+  // the second pass measures the same set and stops.
+  @state({
+    hasChanged: (next: ReadonlySet<string>, old?: ReadonlySet<string>) =>
+      !old || !setsEqual(next, old),
+  })
+  _overflowingDescriptions: ReadonlySet<string> = new Set();
 
+  @queryAll(".component-description--clamp[data-component-id]")
+  private _clampedDescriptions!: NodeListOf<HTMLElement>;
+
+  private _resize = new ResizeController(this, () => this._measureDescriptionOverflow());
+
+  // Observes against the viewport (no rootSelector) so paging works whether
+  // the grid scrolls itself or the surrounding dialog does; the sentinel is
+  // still clipped by the scroll container, and only exists while more pages
+  // remain (see render), so a missing one tears the observer down.
+  //
+  // Re-paging relies on each appended page overflowing the scroll container
+  // so the sentinel re-crosses on the next scroll. That holds because a full
+  // page far exceeds the container height and the only short page is the
+  // last (hasMore=false, sentinel removed); a short non-final page never
+  // occurs.
   private _intersection = new IntersectionController(this, () => this._list.loadMore());
 
   private _debouncedSearch = debounce(() => this._fetchComponents(), 300);
@@ -210,11 +242,21 @@ export class ESPHomeComponentCatalog extends LitElement {
   static styles = [
     espHomeStyles,
     inputStyles,
+    textStyles,
     componentCatalogStyles,
     loadMoreFooterStyles,
   ];
 
+  protected firstUpdated() {
+    // A late web-font swap changes wrap heights without a resize or a
+    // render, stranding stale expand buttons; re-measure once fonts
+    // settle. Optional-chained: happy-dom has no document.fonts.
+    document.fonts?.ready.then(() => this._measureDescriptionOverflow());
+  }
+
   protected updated() {
+    this._measureDescriptionOverflow();
+
     // The sidebar badge / auto-select read availableFeaturedCount over the
     // board's recommendations (fetch-independent), while the grid reads the
     // fetched featured cards; during prop settling (yaml/board/platform arrive
@@ -235,18 +277,6 @@ export class ESPHomeComponentCatalog extends LitElement {
       this._category = "all";
       this._fetchComponents();
     }
-
-    // Observe against the viewport (null root) so paging works whether the
-    // grid scrolls itself or the surrounding dialog does; the sentinel is
-    // still clipped by the scroll container, and only exists while more pages
-    // remain (see render), so a missing one tears the observer down.
-    //
-    // Re-paging relies on each appended page overflowing the scroll container
-    // so the sentinel re-crosses on the next scroll. That holds because a full
-    // page far exceeds the container height and the only short page is the
-    // last (hasMore=false, sentinel removed); a short non-final page never
-    // occurs.
-    this._intersection.observeIfPresent(this._sentinel, null, "200px");
   }
 
   protected render() {
@@ -356,15 +386,27 @@ export class ESPHomeComponentCatalog extends LitElement {
             loadingLabelKey: "device.loading_components",
             errorLabelKey: "device.components_load_more_error",
             onRetry: () => this._list.loadMore(),
-            loadingClass: "empty",
           })}
         </div>
       </div>
     `;
   }
 
-  _onToggleExpand(component: ComponentCatalogEntry) {
-    this._expandedId = this._expandedId === component.id ? null : component.id;
+  _onToggleExpand(id: string) {
+    this._expandedId = this._expandedId === id ? null : id;
+  }
+
+  // The catalog stays mounted (hidden) inside its dialog: a hidden
+  // subtree measures 0/0 for every paragraph, so skip rather than wipe
+  // the set on dialog close — the reopen's load() render re-measures.
+  private _measureDescriptionOverflow() {
+    if (!isVisible(this)) return;
+    const next = overflowingDescriptionIds(this._clampedDescriptions);
+    // The expanded card's unclamped text is excluded from measurement;
+    // keep its id so collapsing doesn't flash the button out for a
+    // frame before the post-collapse measure re-adds it.
+    if (this._expandedId) next.add(this._expandedId);
+    this._overflowingDescriptions = next;
   }
 
   _onImageError(id: string) {
@@ -390,23 +432,11 @@ export class ESPHomeComponentCatalog extends LitElement {
   };
 
   _onAdd(component: ComponentCatalogEntry) {
-    this.dispatchEvent(
-      new CustomEvent("add-component", {
-        detail: { component },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "add-component", { component });
   }
 
   _onAddBundle(bundle: FeaturedBundle) {
-    this.dispatchEvent(
-      new CustomEvent("add-bundle", {
-        detail: { bundle, boardId: this.boardId },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "add-bundle", { bundle, boardId: this.boardId });
   }
 }
 

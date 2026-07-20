@@ -8,6 +8,11 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardCatalogEntry } from "../../../src/api/types/boards.js";
+import {
+  clearTourPending,
+  setTourActive,
+  setTourPending,
+} from "../../../src/components/guided-tour/tour-session.js";
 import { ESPHomeWizardStepSetup } from "../../../src/components/wizard/wizard-step-setup.js";
 import { fetchSecretKeys } from "../../../src/util/secrets-cache.js";
 import { pressEnter } from "../../_press-enter.js";
@@ -26,6 +31,8 @@ vi.mock("../../../src/util/secrets-cache.js", async (importOriginal) => ({
 }));
 
 beforeEach(() => {
+  clearTourPending();
+  setTourActive(false);
   vi.mocked(fetchSecretKeys).mockResolvedValue([]);
 });
 
@@ -92,13 +99,14 @@ describe("wizard-step-setup", () => {
     expect(stage(el)).toBe("wifi");
   });
 
-  it("never shows a skip link on the Wi-Fi stage", async () => {
+  it("does not offer an unusable skip path before Wi-Fi is configured", async () => {
     const el = await mount(wifiBoard());
     await setName(el, "kitchen");
     pressEnter();
     await el.updateComplete;
+
     expect(stage(el)).toBe("wifi");
-    expect(el.shadowRoot!.querySelector(".skip-wifi")).toBeNull();
+    expect(el.shadowRoot!.querySelector(".wifi-confirm")).toBeNull();
   });
 
   it("requires an SSID to finish a Wi-Fi-only board", async () => {
@@ -162,6 +170,57 @@ describe("wizard-step-setup", () => {
     const detail = (onFinish.mock.calls[0][0] as CustomEvent).detail;
     expect(detail.wifiSsid).toBe("");
     expect(detail.wifiPassword).toBe("");
+  });
+
+  it("shows saved Wi-Fi during the tour without revealing its values", async () => {
+    setTourPending();
+    setTourActive(true);
+    const el = await mount(wifiBoard(), ["wifi_ssid", "wifi_password"]);
+    await setName(el, "kitchen");
+    pressEnter();
+    await el.updateComplete;
+
+    expect(stage(el)).toBe("wifi");
+    expect(el.shadowRoot!.querySelector(".wifi-saved")).not.toBeNull();
+    expect(el.shadowRoot!.querySelector("#onboarding-ssid")).toBeNull();
+    expect(el.shadowRoot!.querySelector(".wifi-confirm")?.textContent).toContain(
+      "wizard.wifi_use_saved"
+    );
+  });
+
+  it("collects missing Wi-Fi during the tour instead of offering skip", async () => {
+    setTourActive(true);
+    const el = await mount(wifiBoard());
+    await setName(el, "kitchen");
+    pressEnter();
+    await el.updateComplete;
+
+    expect(stage(el)).toBe("wifi");
+    expect(el.shadowRoot!.querySelector(".wifi-confirm")).toBeNull();
+    expect(
+      el.shadowRoot!.querySelector(".actions-right .btn-primary")?.textContent
+    ).toContain("wizard.finish_setup");
+
+    await setSsid(el, "tour-network");
+    const onFinish = vi.fn();
+    el.addEventListener("finish-setup", onFinish as EventListener);
+    pressEnter();
+    expect((onFinish.mock.calls[0][0] as CustomEvent).detail.wifiSsid).toBe(
+      "tour-network"
+    );
+  });
+
+  it("does not show saved Wi-Fi while the tour is paused", async () => {
+    setTourPending();
+    const el = await mount(wifiBoard(), ["wifi_ssid", "wifi_password"]);
+    await setName(el, "kitchen");
+    const onFinish = vi.fn();
+    el.addEventListener("finish-setup", onFinish as EventListener);
+
+    pressEnter();
+
+    expect(onFinish).toHaveBeenCalledOnce();
+    expect(stage(el)).toBe("name");
   });
 
   it("passes a typed SSID through unchanged for the backend to persist", async () => {
@@ -238,6 +297,45 @@ describe("wizard-step-setup", () => {
     el.addEventListener("finish-setup", onFinish as EventListener);
     pressEnter();
     expect((onFinish.mock.calls[0][0] as CustomEvent).detail.fullSetup).toBe(true);
+  });
+
+  // A remote-package board: the ready-made note replaces the checkbox — the
+  // package reference is the whole config, nothing to opt out of.
+  const packageBoard = () =>
+    board({
+      requires_wifi: false,
+      package_import_url:
+        "github://esphome/bluetooth-proxies/olimex/olimex-esp32-poe-iso.yaml@main",
+    });
+
+  it("shows the ready-made note instead of a checkbox for a package board", async () => {
+    const el = await mount(packageBoard());
+    expect(el.shadowRoot!.querySelector("wa-checkbox")).toBeNull();
+    expect(el.shadowRoot!.querySelector(".full-setup .section-subtitle")).not.toBeNull();
+  });
+
+  it("prefers the ready-made note when a package board also claims full-config", async () => {
+    const el = await mount(
+      board({
+        requires_wifi: false,
+        package_import_url:
+          "github://esphome/bluetooth-proxies/olimex/olimex-esp32-poe-iso.yaml@main",
+        full_config: true,
+        featured_components: [{ id: "relay_1" }] as never,
+        featured_bundles: [
+          { id: "all_recommended", name: "x", component_ids: ["relay_1"] },
+        ] as never,
+      })
+    );
+    expect(el.shadowRoot!.querySelector("wa-checkbox")).toBeNull();
+    expect(el.shadowRoot!.querySelector(".full-setup .section-subtitle")).not.toBeNull();
+    // The emitted flag must stay off too — a stale true would make the
+    // create dialog vendor components next to the package reference.
+    await setName(el, "kitchen");
+    const onFinish = vi.fn();
+    el.addEventListener("finish-setup", onFinish as EventListener);
+    pressEnter();
+    expect((onFinish.mock.calls[0][0] as CustomEvent).detail.fullSetup).toBe(false);
   });
 
   it("omits the full-setup option for an optional-component board", async () => {

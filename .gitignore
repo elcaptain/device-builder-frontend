@@ -2,6 +2,9 @@ node_modules/
 # Built JS bundles. `npm run build` populates this directory; it
 # doubles as the Python package source for the wheel.
 esphome_device_builder_frontend/
+# Standalone ESPHome Web static-site build output (`npm run build:web`).
+# Deployed to GitHub Pages (web.esphome.io); never part of the wheel.
+esphome_web/
 # Legacy build dir (kept in gitignore in case anything still drops
 # files here during development).
 dist/
@@ -18,6 +21,9 @@ build/
 # Generated language picker manifest (autonym + flag per locale), built
 # from src/translations/*.json by build-scripts/gen-language-manifest.cjs.
 /src/generated/
+# Throwaway working copy from `npm run translations:orphans` — a live diff
+# against Lokalise that the user prunes before `translations:orphans:delete`.
+/translation-orphans.json
 .DS_Store
 # Editor swap & backup files. Vim rotates .swp/.swo/.swn/.swm/... and a
 # swap such as .secrets.yaml.swp can hold unsaved buffer contents,

@@ -12,6 +12,7 @@ import { LANGUAGES, languageLabel, readStoredLocale } from "../../common/localiz
 import { localizeContext } from "../../context/index.js";
 import { inputStyles } from "../../styles/inputs.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import { fireEvent } from "../../util/fire-event.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { settingsRowStyles, settingsSharedStyles } from "./shared-styles.js";
 
@@ -46,13 +47,10 @@ export class ESPHomeSettingsLanguage extends LitElement {
         color: var(--wa-color-text-quiet);
         line-height: 1.4;
       }
+      /* Colour + hover come from the shared .settings-inline-link; this
+         adds only the help-line specifics. */
       .language-help-link {
-        color: var(--esphome-primary);
-        text-decoration: none;
         white-space: nowrap;
-      }
-      .language-help-link:hover {
-        text-decoration: underline;
       }
       .language-help-link wa-icon {
         font-size: 1em;
@@ -96,7 +94,7 @@ export class ESPHomeSettingsLanguage extends LitElement {
           <span aria-hidden="true">💡</span>
           ${this._localize("settings.language_help")}
           <a
-            class="language-help-link"
+            class="language-help-link settings-inline-link"
             href=${TRANSLATIONS_GUIDE_URL}
             target="_blank"
             rel="noopener noreferrer"
@@ -132,13 +130,7 @@ export class ESPHomeSettingsLanguage extends LitElement {
   private _onChange(e: Event) {
     const lang = (e.target as HTMLSelectElement).value as LanguageChoice;
     this._language = lang;
-    this.dispatchEvent(
-      new CustomEvent("set-language", {
-        detail: lang,
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "set-language", lang);
   }
 }
 

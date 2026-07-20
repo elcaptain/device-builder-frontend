@@ -6,6 +6,7 @@ import type { LocalizeFunc } from "../../common/localize.js";
 import type { ESPHomePageDashboard } from "../../pages/dashboard.js";
 import { canFlashBootloader } from "../../util/bootloader-flash.js";
 import { computeLabelUsage } from "../../util/label-usage.js";
+import { isNeverFlashed } from "../../util/never-flashed.js";
 import { performRename } from "./actions-ui.js";
 import {
   archiveBulkDevices,
@@ -238,16 +239,19 @@ export function renderDialogs(host: ESPHomePageDashboard): TemplateResult {
       @clean-build=${(e: CustomEvent<ConfiguredDevice>) =>
         host._openCommand(e.detail, "clean")}
       @request-open-editor=${host._onRequestOpenEditor}
+      @request-change-board=${host._onRequestChangeBoard}
     ></esphome-firmware-install-dialog>
+    <esphome-board-reselect-dialog></esphome-board-reselect-dialog>
     <esphome-logs-dialog></esphome-logs-dialog>
     <esphome-install-method-dialog
       ?open=${host._installMethodOpen}
-      .deviceState=${host._installMethodDevice?.state ?? DeviceState.UNKNOWN}
+      .deviceState=${host._installMethodDevice?.runtime_state.state ?? DeviceState.UNKNOWN}
       .deviceTargetPlatform=${host._installMethodDevice?.target_platform ?? ""}
       .deviceCurrentAddress=${
         host._installMethodDevice?.ip || host._installMethodDevice?.address || ""
       }
       .canFlashBootloader=${canFlashBootloader(host._installMethodDevice)}
+      .neverFlashed=${isNeverFlashed(host._installMethodDevice)}
       .mode=${host._installMethodMode}
       @close=${() => {
         host._installMethodOpen = false;

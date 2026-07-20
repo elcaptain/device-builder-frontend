@@ -27,12 +27,12 @@ const QUOTED_PATH_RE = /"([^"]*[/\\])([^"/\\]+)"/g;
 const PAIR_RE = /^\s*([^\s:#][^:]*?)\s*:(?:\s+(.*))?$/;
 
 /** Analysis walks never scan further than this many lines. */
-const WALK_BOUND = 50;
+export const WALK_BOUND = 50;
 
 /** Canonical child-indent step. A literal two: this module stays free of
  *  esphome-yaml-lang's CodeMirror import graph, where ESPHOME_YAML_INDENT
  *  is the same two spaces. */
-const YAML_INDENT_STEP = 2;
+export const YAML_INDENT_STEP = 2;
 
 /**
  * Strip absolute directory paths out of a backend error message.
@@ -577,16 +577,18 @@ function dashSpaceCause(
 /**
  * Add the misindent / half-typed-key cause to a wrong-value-type
  * validation message ("expected a dictionary.") anchored at *line*: a
- * value-less `- key:` whose items landed one level deeper, a bare word
- * with no ':' (a lone "le" under "logger:" parses as its string value),
- * or a dash stuck to its key (`-platform:` parses as a mapping key, so
- * the section fails schema validation instead of the YAML parse).
+ * value-less `- key:` whose items landed one level deeper, a dash stuck
+ * to its key (`-platform:` parses as a mapping key, so the section fails
+ * schema validation instead of the YAML parse), a value-less `key:` with
+ * nothing (or only comments) under it, or a bare word with no ':' (a
+ * lone "le" under "logger:" parses as its string value).
  * Null when the anchored line is none of these shapes.
  */
 export function describeValueTypeCause(
   readLine: ReadLine,
   line: number,
-  localize: LocalizeFunc
+  localize: LocalizeFunc,
+  message: string
 ): ValueTypeCause | null {
   const nested = describeNestedListValue(readLine, line, localize);
   if (nested) return { text: nested };
@@ -595,6 +597,13 @@ export function describeValueTypeCause(
   const dashKey = botchedDashKey(text);
   if (dashKey !== null) {
     return dashSpaceCause(line, dashKey, indentOf(text), localize);
+  }
+  // Gated on the message: a value-less `key:` with no children is legal
+  // YAML (`logger:`), so an error anchored there for another reason
+  // ("'board' is a required option") must not pick up a remove-the-line hint.
+  if (EXPECTED_DICT_RE.test(message)) {
+    const emptyBlock = describeEmptyBlock(readLine, line, localize);
+    if (emptyBlock) return emptyBlock;
   }
   const token = text.trim();
   if (token && !token.includes(":") && !token.startsWith("#") && !token.startsWith("-")) {
@@ -606,6 +615,79 @@ export function describeValueTypeCause(
     };
   }
   return null;
+}
+
+/** The wrong-value-type message the empty-block cause explains. */
+const EXPECTED_DICT_RE = /expected a dictionary/i;
+
+/**
+ * Whether a comment line reads as a commented-out *child* of a key at
+ * *keyIndent*: the `#` itself sits deeper, or the commented text is a
+ * `key:` / `- ` line whose own indent sits deeper (a `#` jammed at column
+ * 0 in front of a still-indented option — the hand-commented shape).
+ */
+function isCommentedChild(text: string, keyIndent: number): boolean {
+  if (indentOf(text) > keyIndent) return true;
+  const content = text.trimStart().replace(/^#+/, "");
+  if (indentOf(content) <= keyIndent) return false;
+  return lineKeyToken(content) !== null;
+}
+
+/**
+ * Classify the empty-block shape at *line*: a value-less plain `key:`
+ * whose children are all commented out ("comment-out") or absent
+ * entirely ("remove-line"); null when the key has any real child, or
+ * the line isn't a value-less plain key. Also the apply site's stale
+ * check for the destructive fixes — the diagnosed line must still hold
+ * the exact shape the fix was built for.
+ */
+export function emptyBlockFixKind(
+  readLine: ReadLine,
+  line: number
+): "comment-out" | "remove-line" | null {
+  const text = readLine(line);
+  if (text === undefined || parseListItemMarker(text)) return null;
+  if (valuelessKeyOf(stripComment(text)) === null) return null;
+  const keyIndent = indentOf(text);
+  let sawComment = false;
+  for (let n = line + 1; n <= line + WALK_BOUND; n++) {
+    const next = readLine(n);
+    if (next === undefined) break;
+    if (!next.trim()) continue;
+    if (next.trimStart().startsWith("#")) {
+      sawComment ||= isCommentedChild(next, keyIndent);
+      continue;
+    }
+    if (indentOf(next) > keyIndent) return null;
+    break;
+  }
+  return sawComment ? "comment-out" : "remove-line";
+}
+
+/**
+ * The empty-block cause behind "expected a dictionary.": the hint names
+ * the commented-out or empty shape and carries the matching repair
+ * (comment the key out too, or remove the line).
+ */
+function describeEmptyBlock(
+  readLine: ReadLine,
+  line: number,
+  localize: LocalizeFunc
+): ValueTypeCause | null {
+  const kind = emptyBlockFixKind(readLine, line);
+  if (kind === null) return null;
+  const text = readLine(line);
+  const key = valuelessKeyOf(stripComment(text ?? ""));
+  if (key === null) return null;
+  return {
+    text: localize(
+      kind === "comment-out"
+        ? "yaml_editor.error_commented_block_hint"
+        : "yaml_editor.error_empty_block_hint",
+      { line, key }
+    ),
+    fix: { line, indent: 0, key, fromIndent: indentOf(text ?? ""), kind },
+  };
 }
 
 /** Matches `[X] is an invalid option for [Y].` with any trailing hint
@@ -740,11 +822,11 @@ export function lineAccessorFor(content: string): ReadLine {
 }
 
 /** A one-click one-line repair: re-indent `line` by the signed `indent`
- *  delta, or (kind "dash-space") insert the missing space after its list
- *  dash. */
+ *  delta, or a kind-specific edit — insert the missing space after a list
+ *  dash, comment the line out, or delete it. */
 export interface YamlAutoFix {
   line: number;
-  /** Signed leading-space delta; 0 (unused) for kind "dash-space". */
+  /** Signed leading-space delta; 0 (unused) for the kind-specific edits. */
   indent: number;
   /** The target line's own key, so the apply site can confirm the line still
    *  targets the same item after edits shift line numbers. */
@@ -752,8 +834,10 @@ export interface YamlAutoFix {
   /** The target line's indent when the fix was computed; the apply site
    *  refuses when the line no longer starts there. */
   fromIndent: number;
-  /** Absent means re-indent; "dash-space" inserts a space after the dash. */
-  kind?: "dash-space";
+  /** Absent means re-indent; "dash-space" inserts a space after the dash,
+   *  "comment-out" inserts `# ` at the line's indent, "remove-line" deletes
+   *  the whole line. */
+  kind?: "dash-space" | "comment-out" | "remove-line";
 }
 
 /** A humanized YAML error: display text, best line to jump to, optional auto-fix. */

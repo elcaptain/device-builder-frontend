@@ -1,55 +1,60 @@
 import { consume } from "@lit/context";
-import { mdiDelete, mdiLanConnect, mdiPencil } from "@mdi/js";
+import { mdiBroom, mdiDelete, mdiLanConnect, mdiPencil } from "@mdi/js";
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, query, state } from "lit/decorators.js";
 import { notify, notifyError, notifySuccess } from "../../util/notify.js";
+import { desktopDocsUrl } from "../../util/release-notes-url.js";
+import { splitTemplate } from "../../util/template-split.js";
 
 import type { ESPHomeAPI } from "../../api/esphome-api.js";
 import type { VersionMatchPolicy } from "../../api/types/event-subscription.js";
 import type { OffloaderAlertSnapshotEntry } from "../../api/types/remote-build-events.js";
 import type { PairingSummary, RemoteBuildPeer } from "../../api/types/remote-build.js";
 import type { LocalizeFunc } from "../../common/localize.js";
-import type { RemoteBuildJobState } from "../../context/index.js";
 import {
   apiContext,
   buildOffloadAlertsContext,
   buildOffloadDiscoveredHostsContext,
-  buildOffloadJobsContext,
   buildOffloadPairingsContext,
+  desktopVersionContext,
   localizeContext,
   offloaderRemoteBuildsEnabledContext,
   offloaderVersionMatchPolicyContext,
   versionContext,
 } from "../../context/index.js";
+import { peerRowStyles } from "../../styles/peer-rows.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import { fireEvent } from "../../util/fire-event.js";
 import { normalizeHostnameForCompare, trimTrailingDot } from "../../util/hostname.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import {
+  pairingDisplayName,
+  pairingDisplayNameForPin,
+} from "../../util/pairing-display-name.js";
+import { remoteBuildPeerName } from "../../util/remote-build-peer-name.js";
 import type { ESPHomeConfirmDialog } from "../confirm-dialog.js";
 import type { ESPHomeEditPairingEndpointDialog } from "../edit-pairing-endpoint-dialog.js";
 import type { ESPHomePairBuildServerDialog } from "../pair-build-server-dialog.js";
 import type { ESPHomeReauthWizardDialog } from "../reauth-wizard-dialog.js";
-import type { ESPHomeRemoteBuildJobDialog } from "../remote-build-job-dialog.js";
 import { renderOffloaderAlert } from "./build-offload-alert.js";
-import { latestJobForPin, renderPairingRow } from "./build-offload-pairing-row.js";
+import { requestResetPeerBuildEnv } from "../remote-build-hint.js";
+import { renderPairingRow } from "./build-offload-pairing-row.js";
 import { offloaderAlertStyles, pairingRowStyles } from "./offload-styles.js";
 import { renderStatusRow, renderToggleRow } from "./settings-rows.js";
-import {
-  peerRowStyles,
-  settingsRowStyles,
-  settingsSharedStyles,
-} from "./shared-styles.js";
+import { settingsRowStyles, settingsSharedStyles } from "./shared-styles.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 import "@home-assistant/webawesome/dist/components/option/option.js";
 import "@home-assistant/webawesome/dist/components/select/select.js";
+import "@home-assistant/webawesome/dist/components/tooltip/tooltip.js";
 import "../confirm-dialog.js";
 import "../edit-pairing-endpoint-dialog.js";
 import "../pair-build-server-dialog.js";
 import "../reauth-wizard-dialog.js";
-import "../remote-build-job-dialog.js";
 import "./build-offload-advanced.js";
 
 registerMdiIcons({
+  broom: mdiBroom,
   delete: mdiDelete,
   "lan-connect": mdiLanConnect,
   pencil: mdiPencil,
@@ -77,6 +82,10 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
   @state()
   private _appVersion = "";
 
+  @consume({ context: desktopVersionContext, subscribe: true })
+  @state()
+  private _desktopVersion = "";
+
   @consume({ context: buildOffloadDiscoveredHostsContext, subscribe: true })
   @state()
   private _discoveredHosts: Map<string, RemoteBuildPeer> | null = null;
@@ -100,10 +109,6 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
   @state()
   private _alerts: Map<string, OffloaderAlertSnapshotEntry> | null = null;
 
-  @consume({ context: buildOffloadJobsContext, subscribe: true })
-  @state()
-  private _jobs: Map<string, RemoteBuildJobState> | null = null;
-
   @state()
   private _pendingUnpair: {
     pin_sha256: string;
@@ -120,9 +125,6 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
 
   @query("esphome-edit-pairing-endpoint-dialog")
   private _editEndpointDialog!: ESPHomeEditPairingEndpointDialog;
-
-  @query("esphome-remote-build-job-dialog")
-  private _jobDialog!: ESPHomeRemoteBuildJobDialog;
 
   @query("#unpair-confirm")
   private _unpairConfirmDialog!: ESPHomeConfirmDialog;
@@ -145,6 +147,26 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
     `,
   ];
 
+  // Intro copy with "ESPHome Desktop" itself linked to the app's docs, so a
+  // reader learns how to get it inline rather than via a separate CTA. On
+  // Desktop that link is self-referential, so a plain variant renders instead.
+  private _renderPairedServersDesc() {
+    if (this._desktopVersion) {
+      return html`${this._localize("settings.paired_build_servers_desc_desktop")}`;
+    }
+    const [before, after] = splitTemplate(
+      this._localize("settings.paired_build_servers_desc"),
+      "{desktop_link}"
+    );
+    return html`${before}<a
+        class="settings-inline-link"
+        href=${desktopDocsUrl()}
+        target="_blank"
+        rel="noopener noreferrer"
+        >${this._localize("settings.esphome_desktop")}</a
+      >${after}`;
+  }
+
   protected render() {
     return html`
       ${this._renderAlerts()}
@@ -152,9 +174,7 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
       <div class="section-heading">
         ${this._localize("settings.paired_build_servers_heading")}
       </div>
-      <div class="section-intro">
-        ${this._localize("settings.paired_build_servers_desc")}
-      </div>
+      <div class="section-intro">${this._renderPairedServersDesc()}</div>
       ${this._renderPairings()}
 
       <div class="section-heading">
@@ -191,7 +211,6 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
       <esphome-reauth-wizard-dialog
         @reauth-result=${this._onReauthResult}
       ></esphome-reauth-wizard-dialog>
-      <esphome-remote-build-job-dialog></esphome-remote-build-job-dialog>
       <esphome-edit-pairing-endpoint-dialog></esphome-edit-pairing-endpoint-dialog>
       <esphome-confirm-dialog
         id="unpair-confirm"
@@ -247,13 +266,15 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
 
   private _renderAlerts() {
     if (this._alerts === null || this._alerts.size === 0) return nothing;
-    return Array.from(this._alerts.values()).map((alert) =>
-      renderOffloaderAlert(alert, {
+    return Array.from(this._alerts.values()).map((alert) => {
+      const pairing = this._pairings?.get(alert.pin_sha256);
+      return renderOffloaderAlert(alert, {
         localize: this._localize,
+        displayLabel: pairing ? pairingDisplayName(pairing) : undefined,
         onRepair: this._onAlertRepair,
         onUnpair: this._onAlertUnpair,
-      })
-    );
+      });
+    });
   }
 
   private _renderPairings() {
@@ -267,11 +288,9 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
       renderPairingRow(p, {
         localize: this._localize,
         appVersion: this._appVersion,
-        latestJob: latestJobForPin(this._jobs, p.pin_sha256),
         onToggleEnabled: this._onTogglePairingEnabled,
-        onBuildRemote: this._onBuildRemoteClick,
-        onViewBuild: (jobId) => this._jobDialog?.openForJob(jobId),
         onEditEndpoint: this._onEditEndpointClick,
+        onResetBuildEnv: this._onResetBuildEnvRequest,
         onUnpair: this._onUnpairRequest,
       })
     );
@@ -298,8 +317,7 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
           esphome: peer.esphome_version,
         })
       : nothing;
-    // Prefer the friendly_name label; fall back to the instance name.
-    const displayName = trimTrailingDot(peer.friendly_name.trim() || peer.name);
+    const displayName = remoteBuildPeerName(peer);
     return html`
       <div class="row peer-row">
         <div class="row-label">
@@ -357,34 +375,19 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
     if (!_VERSION_MATCH_POLICIES.includes(raw as VersionMatchPolicy)) return;
     const policy = raw as VersionMatchPolicy;
     if (policy === this._versionMatchPolicy) return;
-    this.dispatchEvent(
-      new CustomEvent("set-offloader-version-match-policy", {
-        detail: policy,
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "set-offloader-version-match-policy", policy);
   };
 
   private _onToggleRemoteBuilds = () => {
     if (this._remoteBuildsEnabled === null) return;
-    this.dispatchEvent(
-      new CustomEvent("set-offloader-remote-builds-enabled", {
-        detail: !this._remoteBuildsEnabled,
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "set-offloader-remote-builds-enabled", !this._remoteBuildsEnabled);
   };
 
   private _onTogglePairingEnabled = (pairing: PairingSummary) => {
-    this.dispatchEvent(
-      new CustomEvent("set-offloader-pairing-enabled", {
-        detail: { pin_sha256: pairing.pin_sha256, enabled: !pairing.enabled },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "set-offloader-pairing-enabled", {
+      pin_sha256: pairing.pin_sha256,
+      enabled: !pairing.enabled,
+    });
   };
 
   private _onPairClick = (): void => {
@@ -456,21 +459,35 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
   };
 
   private _onAlertUnpair = (alert: OffloaderAlertSnapshotEntry): void => {
+    // An alert can outlive its pairing, so fall back to the snapshot label.
     this._pendingUnpair = {
       pin_sha256: alert.pin_sha256,
       hostname: alert.receiver_hostname,
       port: alert.receiver_port,
-      label: alert.receiver_label,
+      label: pairingDisplayNameForPin(
+        this._pairings,
+        alert.pin_sha256,
+        alert.receiver_label
+      ),
     };
     this._unpairConfirmDialog?.open();
   };
 
+  private _onResetBuildEnvRequest = (pairing: PairingSummary): void => {
+    // The confirm + enqueue + follow flow lives in the firmware-jobs
+    // dialog (the local reset's home); app-shell routes this event there.
+    requestResetPeerBuildEnv(this, pairing.pin_sha256);
+  };
+
   private _onUnpairRequest = (pairing: PairingSummary): void => {
+    // Bare display name: the confirm-body template already appends
+    // ``({hostname}:{port})``, and the success toast reads "Unpaired
+    // {label}." — either endpoint copy comes from the template, not here.
     this._pendingUnpair = {
       pin_sha256: pairing.pin_sha256,
       hostname: pairing.receiver_hostname,
       port: pairing.receiver_port,
-      label: pairing.label,
+      label: pairingDisplayName(pairing),
     };
     this._unpairConfirmDialog?.open();
   };
@@ -487,13 +504,6 @@ export class ESPHomeSettingsBuildOffload extends LitElement {
       return;
     }
     this._toast("success", "settings.unpair_success", { label: pending.label });
-  };
-
-  private _onBuildRemoteClick = (pairing: PairingSummary): void => {
-    this._jobDialog?.open({
-      pin_sha256: pairing.pin_sha256,
-      receiver_label: pairing.label,
-    });
   };
 
   private _onEditEndpointClick = (pairing: PairingSummary): void => {

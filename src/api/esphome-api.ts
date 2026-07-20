@@ -38,6 +38,7 @@ import type { DesktopUpdateCheck, DesktopUpdateStarted } from "./types/desktop.j
 import type {
   AddComponentResponse,
   ConfiguredDevice,
+  DecodeBacktraceResponse,
   DevicesResponse,
   ImportBundleResponse,
   Label,
@@ -54,7 +55,7 @@ import type {
 import type {
   FirmwareBinary,
   FirmwareJob,
-  RemoteBuildSubmitTarget,
+  FirmwareJobResult,
 } from "./types/firmware-jobs.js";
 import type {
   CommandMessage,
@@ -88,6 +89,10 @@ interface AuthLoginResult {
   token: string;
   expires_at: number;
 }
+
+// The backend caps the decoder subprocess at 60s; the margin covers the
+// esphome import the child pays before addr2line runs, plus WS latency.
+const DECODE_BACKTRACE_TIMEOUT_MS = 90_000;
 
 /** Mask sensitive auth fields when logging — tokens / passwords show
  *  up in support tickets via attached browser console logs. The
@@ -143,11 +148,9 @@ type PendingRequest = {
   reject: (error: Error) => void;
 };
 
-type StreamHandler = {
-  onOutput?: (line: string) => void;
-  onResult?: (data: { success: boolean; code: number }) => void;
-  onError?: (error: string) => void;
-};
+// Type-erased bucket for in-flight streams; each command's real result
+// shape is bound at its sendStreamCommand call site.
+type StreamHandler = StreamCallbacks<unknown>;
 
 export class ESPHomeAPI {
   private _ws: WebSocket | null = null;
@@ -356,7 +359,7 @@ export class ESPHomeAPI {
           stream.onOutput?.(evt.data as string);
         } else if (evt.event === "result") {
           this._streamHandlers.delete(messageId);
-          stream.onResult?.(evt.data as { success: boolean; code: number });
+          stream.onResult?.(evt.data);
         }
       }
       return;
@@ -517,10 +520,10 @@ export class ESPHomeAPI {
    * Send a streaming command (compile, upload, logs, etc.).
    * Returns the message_id for cancellation.
    */
-  sendStreamCommand(
+  sendStreamCommand<TResult = { success: boolean; code: number }>(
     command: string,
     args: Record<string, unknown>,
-    callbacks: StreamCallbacks
+    callbacks: StreamCallbacks<TResult>
   ): string {
     if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
       callbacks.onError?.("WebSocket not connected");
@@ -528,7 +531,7 @@ export class ESPHomeAPI {
     }
 
     const messageId = this._nextMessageId();
-    this._streamHandlers.set(messageId, callbacks);
+    this._streamHandlers.set(messageId, callbacks as StreamHandler);
 
     const msg: CommandMessage = { command, message_id: messageId, args };
     this._ws.send(JSON.stringify(msg));
@@ -909,6 +912,25 @@ export class ESPHomeAPI {
     );
   }
 
+  /** Decode a crash excerpt against the device's local build.
+   *
+   *  For logs captured over Web Serial, where nothing decoded the
+   *  backtrace on the way in. Pass the normalized crash excerpt; each
+   *  returned entry's `index` is its position in `lines`. Decoding needs a
+   *  local build of that exact device, so a populated `unavailable_reason`
+   *  (never an error) is a routine answer.
+   */
+  async decodeBacktrace(
+    configuration: string,
+    lines: string[]
+  ): Promise<DecodeBacktraceResponse> {
+    return this.sendCommand<DecodeBacktraceResponse>(
+      "devices/decode_backtrace",
+      { configuration, lines },
+      DECODE_BACKTRACE_TIMEOUT_MS
+    );
+  }
+
   /** Delete a device and all associated files. */
   async deleteDevice(configuration: string): Promise<void> {
     await this.sendCommand("devices/delete", { configuration });
@@ -1175,7 +1197,10 @@ export class ESPHomeAPI {
   }
 
   /** Follow a job's output: historical lines + live stream until completion. */
-  firmwareFollowJob(jobId: string, callbacks: StreamCallbacks): string {
+  firmwareFollowJob(
+    jobId: string,
+    callbacks: StreamCallbacks<FirmwareJobResult>
+  ): string {
     return this.sendStreamCommand("firmware/follow_job", { job_id: jobId }, callbacks);
   }
 
@@ -2076,6 +2101,8 @@ export class ESPHomeAPI {
     receiver_label: string;
     offloader_label: string;
     pairing_key?: string;
+    offloader_label_auto?: boolean;
+    receiver_label_auto?: boolean;
   }): Promise<PairingSummary> {
     return this.sendCommand<PairingSummary>("remote_build/request_pair", args);
   }
@@ -2152,84 +2179,12 @@ export class ESPHomeAPI {
   }
 
   /**
-   * Dispatch a build to a paired receiver behind pin_sha256.
-   *
-   * Bundles the YAML + every referenced file (includes,
-   * secrets, fonts, images) on the offloader, streams the
-   * tarball over the live peer-link Noise session, and
-   * returns the receiver's submit_job_ack. Live job
-   * lifecycle + per-line stdout / stderr arrive
-   * asynchronously through OFFLOADER_JOB_STATE_CHANGED /
-   * OFFLOADER_JOB_OUTPUT events on the subscribe_events
-   * stream tagged with the same job_id this returns.
-   *
-   * target is one of "compile" (build firmware artefacts on
-   * the receiver, no flash) or "upload" (build then OTA-
-   * upload to the device, like the local Install action).
-   *
-   * Errors from the WS layer:
-   * - INVALID_ARGS: pin / target / configuration shape
-   *   error, or bundle build failed (the receiver's
-   *   validator diagnostic is in the message verbatim).
-   * - NOT_FOUND: no pairing for this pin, or the YAML is
-   *   missing from config_dir.
-   * - PRECONDITION_FAILED: pairing isn't APPROVED, or the
-   *   peer-link session isn't currently live (orphaned,
-   *   unreachable, mid-reconnect).
-   * - UNAVAILABLE: ack timeout, or the session died
-   *   mid-flow.
-   *
-   * On accepted: false the receiver actively rejected the
-   * job (queue full, manifest unsupported, hash mismatch);
-   * reason carries the structured rejection code.
-   *
-   * Phase 5c-3 backend, 5c-4 frontend.
+   * Enqueue a mirror job that resets the whole build environment on
+   * the build server behind ``pin_sha256``; progress streams through
+   * the normal job events. Gated on `reset_build_env_supported`.
    */
-  async submitRemoteBuildJob(args: {
-    pin_sha256: string;
-    configuration: string;
-    target: RemoteBuildSubmitTarget;
-  }): Promise<{ job_id: string; accepted: boolean; reason?: string }> {
-    return this.sendCommand<{
-      job_id: string;
-      accepted: boolean;
-      reason?: string;
-    }>("remote_build/submit_job", args);
-  }
-
-  /**
-   * Send a cooperative cancel for a remote build job (phase 5d).
-   *
-   * Routes through ``remote_build/cancel_job`` to the paired
-   * receiver behind *pin_sha256*; the receiver maps *job_id*
-   * (the offloader-local id ``submitRemoteBuildJob`` returned)
-   * back to its local ``FirmwareJob`` and dispatches the same
-   * cancel primitive an operator-driven cancel uses.
-   *
-   * Fire-and-forget on the wire — the resolved payload's
-   * ``sent`` flag reflects whether the cancel frame made it
-   * onto the peer-link wire (Noise encrypt + WS send
-   * succeeded), not whether the receiver acted on it. A
-   * ``sent: false`` resolve means a same-tick channel failure
-   * on the offloader side; the cancel never reached the
-   * receiver and the caller should treat it as an error.
-   * The actual cancel confirmation rides the existing
-   * ``OFFLOADER_JOB_STATE_CHANGED`` event stream as a
-   * ``status: "cancelled"`` transition, so callers should
-   * watch ``buildOffloadJobsContext`` for the terminal flip
-   * rather than treating ``sent: true`` as completion.
-   *
-   * Errors:
-   * - INVALID_ARGS: bad pin or empty job_id.
-   * - NOT_FOUND: no pairing for the given pin.
-   * - PRECONDITION_FAILED: pairing isn't APPROVED, or the
-   *   peer-link session isn't currently live.
-   */
-  async cancelRemoteBuildJob(args: {
-    pin_sha256: string;
-    job_id: string;
-  }): Promise<{ sent: boolean }> {
-    return this.sendCommand<{ sent: boolean }>("remote_build/cancel_job", args);
+  async remoteBuildResetPeerBuildEnv(args: { pin_sha256: string }): Promise<FirmwareJob> {
+    return this.sendCommand<FirmwareJob>("remote_build/reset_peer_build_env", args);
   }
 
   // ─── Remote build: receiver identity ──────────

@@ -38,11 +38,23 @@ import type { FirmwareJob } from "../../api/types/firmware-jobs.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { labelsContext, localizeContext } from "../../context/index.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import { textStyles } from "../../styles/text.js";
 import { matchesDeviceRow } from "../../util/device-search.js";
-import { showPendingChanges, showUpdateAvailable } from "../../util/device-sync.js";
+import {
+  deployedIdentityTrusted,
+  showPendingChanges,
+  showUpdateAvailable,
+} from "../../util/device-sync.js";
+import { fireEvent } from "../../util/fire-event.js";
 import { labelChipStyles, resolveLabelIds } from "../../util/label-chip-template.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import { TourActivityController } from "../guided-tour/tour-activity-controller.js";
+import { getActiveTourConfiguration } from "../guided-tour/tour-session.js";
 import { renderDeviceTableBody, renderDeviceTableHead } from "./device-table-grid.js";
+import {
+  scrollTableConfigurationIntoView,
+  TourTablePageController,
+} from "./device-table-tour.js";
 import { tableCellStyles } from "./table-cell-styles.js";
 import type { ToggleableColumn } from "./table-column-toggle.js";
 import { createDeviceColumns, type DeviceRow } from "./table-columns.js";
@@ -76,14 +88,11 @@ registerMdiIcons({
   upload: mdiUpload,
 });
 
-// ─── Cached row-model factories (created once, reused forever) ───
-
 const coreRowModel = getCoreRowModel<DeviceRow>();
 const sortedRowModel = getSortedRowModel<DeviceRow>();
 const filteredRowModel = getFilteredRowModel<DeviceRow>();
 const paginatedRowModel = getPaginationRowModel<DeviceRow>();
 
-// Columns hidden by default unless the user explicitly enables them via preferences.
 const DEFAULT_HIDDEN_COLUMNS: VisibilityState = {
   comment: false,
   area: false,
@@ -96,6 +105,8 @@ const DEFAULT_HIDDEN_COLUMNS: VisibilityState = {
 
 @customElement("esphome-device-table")
 export class ESPHomeDeviceTable extends LitElement {
+  private _tourActivity = new TourActivityController(this);
+
   @consume({ context: localizeContext, subscribe: true })
   @state()
   private _localize: LocalizeFunc = (key) => key;
@@ -155,6 +166,10 @@ export class ESPHomeDeviceTable extends LitElement {
   @state()
   private _contextMenuDevice: ConfiguredDevice | null = null;
 
+  private _tourPage = new TourTablePageController((pageIndex) => {
+    this._pageIndex = pageIndex;
+  });
+
   @state()
   private _contextMenuPos: { x: number; y: number } | null = null;
 
@@ -176,13 +191,7 @@ export class ESPHomeDeviceTable extends LitElement {
     updater: SortingState | ((old: SortingState) => SortingState)
   ) => {
     this._sorting = typeof updater === "function" ? updater(this._sorting) : updater;
-    this.dispatchEvent(
-      new CustomEvent("table-sort-change", {
-        detail: this._sorting,
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "table-sort-change", this._sorting);
   };
 
   private _handleVisibilityChange = (
@@ -190,13 +199,7 @@ export class ESPHomeDeviceTable extends LitElement {
   ) => {
     this._columnVisibility =
       typeof updater === "function" ? updater(this._columnVisibility) : updater;
-    this.dispatchEvent(
-      new CustomEvent("table-visibility-change", {
-        detail: this._columnVisibility,
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "table-visibility-change", this._columnVisibility);
   };
 
   private _handlePaginationChange = (
@@ -208,13 +211,7 @@ export class ESPHomeDeviceTable extends LitElement {
     this._pageSize = next.pageSize;
     this._pageIndex = next.pageIndex;
     if (pageSizeChanged) {
-      this.dispatchEvent(
-        new CustomEvent("table-page-size-change", {
-          detail: this._pageSize,
-          bubbles: true,
-          composed: true,
-        })
-      );
+      fireEvent(this, "table-page-size-change", this._pageSize);
     }
   };
 
@@ -223,6 +220,7 @@ export class ESPHomeDeviceTable extends LitElement {
     _columnId: string,
     filterValue: unknown
   ): boolean => {
+    if (row.original.config === getActiveTourConfiguration()) return true;
     // Full-text matching lives in util/device-search.ts so the
     // dashboard's select-all scoping helper matches the same rows
     // this filter makes visible (single source of truth).
@@ -262,48 +260,55 @@ export class ESPHomeDeviceTable extends LitElement {
       changed.has("recentJobs") ||
       changed.has("_labelCatalog")
     ) {
-      this._rows = this.devices.map((d) => ({
-        status: d.state,
-        name: d.name,
-        friendly_name: d.friendly_name,
-        address: d.address || "",
-        ip: d.ip || "",
-        ip_addresses: d.ip_addresses,
-        mac_address: d.mac_address || "",
-        // ``ethernet_mac`` / ``bluetooth_mac`` aren't surfaced in
-        // the device list — those are drawer-only fields. The table
-        // column shows the primary MAC (``mac_address``) since
-        // that's the universally-meaningful identifier; the per-
-        // interface derived values are diagnostic detail that
-        // belongs in the per-device drawer.
-        platform: d.target_platform || "",
-        version: d.deployed_version || "",
-        build_size_bytes: d.build_size_bytes || 0,
-        comment: d.comment || "",
-        area: d.area || "",
-        // Resolve labels here once per render rather than from the
-        // cell renderer — TanStack's sortingFn / filterFn read the
-        // accessor value, so they need the resolved objects rather
-        // than opaque ids.
-        labels: resolveLabelIds(d.labels, this._labelCatalog),
-        config: d.configuration,
-        hasPendingChanges: d.has_pending_changes === true,
-        showModified: showPendingChanges(d),
-        showUpdate: showUpdateAvailable(d),
-        hasQueuedUpdate: d.queued_update === true,
-        api_enabled: d.api_enabled === true,
-        api_encrypted: d.api_encrypted === true,
-        api_encryption_active: d.api_encryption_active ?? null,
-        busy: this.activeJobs.has(d.configuration),
-        recentJob: this.recentJobs.get(d.configuration) ?? null,
-        _device: d,
-      }));
+      this._rows = this.devices.map((d) => {
+        const rt = d.runtime_state;
+        return {
+          status: rt.state,
+          name: d.name,
+          friendly_name: d.friendly_name,
+          address: d.address || "",
+          ip: d.ip || "",
+          ip_addresses: rt.ip_addresses,
+          mac_address: d.mac_address || "",
+          // ``ethernet_mac`` / ``bluetooth_mac`` aren't surfaced in
+          // the device list — those are drawer-only fields. The table
+          // column shows the primary MAC (``mac_address``) since
+          // that's the universally-meaningful identifier; the per-
+          // interface derived values are diagnostic detail that
+          // belongs in the per-device drawer.
+          platform: d.target_platform || "",
+          version: deployedIdentityTrusted(d) ? rt.deployed_version : "",
+          build_size_bytes: d.build_size_bytes || 0,
+          comment: d.comment || "",
+          area: d.area || "",
+          // Resolve labels here once per render rather than from the
+          // cell renderer — TanStack's sortingFn / filterFn read the
+          // accessor value, so they need the resolved objects rather
+          // than opaque ids.
+          labels: resolveLabelIds(d.labels, this._labelCatalog),
+          config: d.configuration,
+          hasPendingChanges: d.has_pending_changes === true,
+          showModified: showPendingChanges(d),
+          showUpdate: showUpdateAvailable(d),
+          hasQueuedUpdate: rt.queued_update,
+          api_enabled: d.api_enabled === true,
+          api_encrypted: d.api_encrypted === true,
+          api_encryption_active: rt.api_encryption_active,
+          busy: this.activeJobs.has(d.configuration),
+          recentJob: this.recentJobs.get(d.configuration) ?? null,
+          _device: d,
+        };
+      });
     }
   }
 
-  static styles = [espHomeStyles, tableCellStyles, tableLayoutStyles, labelChipStyles];
-
-  // ─── Render ───
+  static styles = [
+    espHomeStyles,
+    tableCellStyles,
+    tableLayoutStyles,
+    textStyles,
+    labelChipStyles,
+  ];
 
   protected render() {
     const effectivePageSize = effectiveTablePageSize(this._pageSize, this._rows.length);
@@ -327,6 +332,12 @@ export class ESPHomeDeviceTable extends LitElement {
       globalFilterFn: this._globalFilterFn,
     });
 
+    this._tourPage.ensureTargetPage(
+      table.getSortedRowModel().rows,
+      this._pageSize,
+      effectivePageSize,
+      effectivePageIndex
+    );
     const rows = table.getRowModel().rows;
     this._visibleConfigs = table.getFilteredRowModel().rows.map((r) => r.original.config);
     const pgState = table.getState().pagination;
@@ -384,13 +395,7 @@ export class ESPHomeDeviceTable extends LitElement {
             // The state we feed on the next render drives the slice.
             this._pageSize = e.detail;
             this._pageIndex = 0;
-            this.dispatchEvent(
-              new CustomEvent("table-page-size-change", {
-                detail: e.detail,
-                bubbles: true,
-                composed: true,
-              })
-            );
+            fireEvent(this, "table-page-size-change", e.detail);
             this._scrollToTop();
           }}
         ></esphome-table-pagination>
@@ -428,6 +433,10 @@ export class ESPHomeDeviceTable extends LitElement {
         @install-device=${(e: CustomEvent) => {
           e.stopPropagation();
           this._forwardEvent("install-device", e.detail);
+        }}
+        @show-progress=${(e: CustomEvent) => {
+          e.stopPropagation();
+          this._forwardEvent("show-progress", e.detail);
         }}
         @show-api-key=${(e: CustomEvent) => {
           e.stopPropagation();
@@ -494,38 +503,20 @@ export class ESPHomeDeviceTable extends LitElement {
   }
 
   private _onToggleSelect(config: string) {
-    this.dispatchEvent(
-      new CustomEvent("toggle-select", { detail: config, bubbles: true, composed: true })
-    );
+    fireEvent(this, "toggle-select", config);
   }
 
   private _onToggleAll() {
-    this.dispatchEvent(
-      new CustomEvent(this._allSelected ? "deselect-all" : "select-all", {
-        detail: this._visibleConfigs.slice(),
-        bubbles: true,
-        composed: true,
-      })
+    fireEvent(
+      this,
+      this._allSelected ? "deselect-all" : "select-all",
+      this._visibleConfigs.slice()
     );
   }
 
-  /** Scroll the row matching *configuration* into view.
-   *
-   *  Exposed so the dashboard can highlight a freshly-adopted device
-   *  without reaching across the table's shadow-DOM boundary —
-   *  ``shadowRoot.querySelector`` from the dashboard can't see rows
-   *  rendered in this component's shadow root. No-op when the row
-   *  isn't on the current page. ``behavior: "instant"`` dodges
-   *  Chrome mobile's smooth-scroll abort and lands the row at the
-   *  intended position — the highlight pulse handles transition
-   *  feedback. */
+  /** Scroll a configuration row without crossing its shadow-DOM boundary. */
   public scrollConfigurationIntoView(configuration: string): void {
-    const root = this.shadowRoot;
-    if (!root) return;
-    const row = root.querySelector<HTMLElement>(
-      `tr[data-configuration="${CSS.escape(configuration)}"]`
-    );
-    row?.scrollIntoView({ behavior: "instant", block: "center" });
+    scrollTableConfigurationIntoView(this.shadowRoot, configuration);
   }
 
   private _onRowKeydown(e: KeyboardEvent, device: ConfiguredDevice) {
@@ -564,17 +555,11 @@ export class ESPHomeDeviceTable extends LitElement {
   }
 
   private _forwardEvent(name: string, detail: unknown) {
-    this.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
+    fireEvent(this, name, detail);
   }
 
   private _enterSelectMode(device: ConfiguredDevice) {
-    this.dispatchEvent(
-      new CustomEvent("enter-select-mode", {
-        detail: device.configuration,
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "enter-select-mode", device.configuration);
   }
 
   private _scrollToTop() {
@@ -582,9 +567,7 @@ export class ESPHomeDeviceTable extends LitElement {
   }
 
   private _onRowClick(device: ConfiguredDevice) {
-    this.dispatchEvent(
-      new CustomEvent("row-click", { detail: device, bubbles: true, composed: true })
-    );
+    fireEvent(this, "row-click", device);
   }
 }
 

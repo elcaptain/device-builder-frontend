@@ -24,15 +24,23 @@ import type { FirmwareJob } from "../api/types/firmware-jobs.js";
 import type { LocalizeFunc } from "../common/localize.js";
 import {
   apiContext,
+  buildOffloadPairingsContext,
+  buildServerPeersContext,
   devicesContext,
   firmwareJobsContext,
   localizeContext,
 } from "../context/index.js";
 import { primaryDialogHeaderStyles } from "../styles/dialog-header.js";
 import { espHomeStyles } from "../styles/shared.js";
+import { textStyles } from "../styles/text.js";
 import { DialogOpenController } from "../util/dialog-open-controller.js";
+import { getErrorMessage } from "../util/error-message.js";
+import { fireEvent } from "../util/fire-event.js";
+import { cancelFirmwareJob } from "../util/firmware-job-actions.js";
 import { firmwareJobDisplayName } from "../util/firmware-job-display.js";
-import { isTerminalJob as isTerminal } from "../util/firmware-job-status.js";
+import { notifyError } from "../util/notify.js";
+import { NowTickController } from "../util/now-tick-controller.js";
+import { pairingDisplayName } from "../util/pairing-display-name.js";
 import { postInstallShowLogsHandler } from "../util/post-install-logs.js";
 import { registerMdiIcons } from "../util/register-icons.js";
 import "./base-dialog.js";
@@ -40,12 +48,11 @@ import "./command-dialog.js";
 import type { ESPHomeCommandDialog } from "./command-dialog.js";
 import "./confirm-dialog.js";
 import type { ESPHomeConfirmDialog } from "./confirm-dialog.js";
-import {
-  compareJobs,
-  renderEmpty,
-  renderGroups,
-} from "./firmware-jobs-dialog/renderers.js";
 import { firmwareJobsDialogStyles } from "./firmware-jobs-dialog/styles.js";
+import type { PairingSummary, PeerSummary } from "../api/types/remote-build.js";
+import { canResetBuildEnv } from "./remote-build-hint.js";
+import { bucketJobs, renderEmpty, renderGroups } from "./shared/firmware-jobs-list.js";
+import { firmwareJobsListStyles } from "./shared/firmware-jobs-list-styles.js";
 import "./logs-dialog.js";
 import type { ESPHomeLogsDialog } from "./logs-dialog.js";
 
@@ -77,13 +84,24 @@ export class ESPHomeFirmwareJobsDialog extends LitElement {
   @consume({ context: devicesContext, subscribe: true })
   @state()
   _devices: ConfiguredDevice[] = [];
+  @consume({ context: buildOffloadPairingsContext, subscribe: true })
+  @state()
+  _pairings: Map<string, PairingSummary> | null = null;
+  @consume({ context: buildServerPeersContext, subscribe: true })
+  @state()
+  _buildServerPeers: PeerSummary[] | null = null;
 
   private readonly _dialog = new DialogOpenController(this);
   @query("esphome-command-dialog") private _commandDialog!: ESPHomeCommandDialog;
   // Logs dialog for the post-install hand-off when reattaching from this
   // surface. Without one, request-show-logs-after-install would no-op. (#139)
   @query("esphome-logs-dialog") private _logsDialog!: ESPHomeLogsDialog;
-  @query("esphome-confirm-dialog") private _confirmDialog!: ESPHomeConfirmDialog;
+  @query("#reset-local-confirm") private _confirmDialog!: ESPHomeConfirmDialog;
+  @query("#reset-peer-confirm") private _resetPeerConfirmDialog!: ESPHomeConfirmDialog;
+
+  // The pairing a pending remote-reset confirm targets; null when the
+  // confirm dialog is closed.
+  @state() private _pendingResetPeer: { pin_sha256: string; label: string } | null = null;
 
   private _onPostInstallShowLogs = postInstallShowLogsHandler(
     () => this._logsDialog,
@@ -91,18 +109,20 @@ export class ESPHomeFirmwareJobsDialog extends LitElement {
   );
 
   // Ticker for live relative-time strings ("started 2m ago"). Open-only.
-  @state() _now: number = Date.now();
-  private _tickHandle: ReturnType<typeof setInterval> | null = null;
+  private readonly _ticker = new NowTickController(this);
+
+  get _now(): number {
+    return this._ticker.now;
+  }
 
   open() {
-    this._now = Date.now();
     this._dialog.open = true;
-    this._startTicker();
+    this._ticker.start();
   }
 
   close() {
     this._dialog.open = false;
-    this._stopTicker();
+    this._ticker.stop();
   }
 
   // Open the Reset Build Environment confirm flow without needing this
@@ -111,6 +131,18 @@ export class ESPHomeFirmwareJobsDialog extends LitElement {
   // — surfaces like the header kebab can entry-point the same flow.
   openResetBuildEnv() {
     this._confirmDialog.open();
+  }
+
+  // Same entry-point shape for the REMOTE reset, gated on the pairing
+  // still being reset-capable (a race with disconnect/unpair no-ops).
+  openResetPeerBuildEnv(pin_sha256: string) {
+    const pairing = this._pairings?.get(pin_sha256);
+    if (pairing === undefined || !canResetBuildEnv(pairing)) return;
+    this._pendingResetPeer = {
+      pin_sha256,
+      label: pairingDisplayName(pairing),
+    };
+    this._resetPeerConfirmDialog.open();
   }
 
   // Catch open-reset-build-env from the inner command-dialog so the
@@ -122,26 +154,25 @@ export class ESPHomeFirmwareJobsDialog extends LitElement {
     this.openResetBuildEnv();
   };
 
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    this._stopTicker();
-  }
+  private _onRemoteResetEvent = (e: CustomEvent<{ pin_sha256: string }>) => {
+    e.stopPropagation();
+    this.openResetPeerBuildEnv(e.detail.pin_sha256);
+  };
 
-  static styles = [espHomeStyles, primaryDialogHeaderStyles, firmwareJobsDialogStyles];
+  static styles = [
+    espHomeStyles,
+    primaryDialogHeaderStyles,
+    textStyles,
+    firmwareJobsListStyles,
+    firmwareJobsDialogStyles,
+  ];
 
   /** Bucket the live jobs Map into sorted / active / terminal lists.
    *  Memoised on the upstream Map reference; the context provider
    *  hands out a new Map identity on every job-lifecycle push, so
    *  the cache invalidates exactly when the lists would change. One
    *  sort + two filter passes per push, not per render. */
-  private _bucketJobs = memoizeOne((jobs: Map<string, FirmwareJob>) => {
-    const sorted = [...jobs.values()].sort(compareJobs);
-    return {
-      sorted,
-      active: sorted.filter((j) => !isTerminal(j)),
-      terminal: sorted.filter((j) => isTerminal(j)),
-    };
-  });
+  private _bucketJobs = memoizeOne(bucketJobs);
 
   protected render() {
     const { sorted, active, terminal } = this._bucketJobs(this._jobs);
@@ -183,35 +214,34 @@ export class ESPHomeFirmwareJobsDialog extends LitElement {
       </esphome-base-dialog>
       <esphome-command-dialog
         @open-reset-build-env=${this._onLocalResetEvent}
+        @open-reset-peer-build-env=${this._onRemoteResetEvent}
         @request-show-logs-after-install=${this._onPostInstallShowLogs}
       ></esphome-command-dialog>
       <esphome-logs-dialog></esphome-logs-dialog>
       <esphome-confirm-dialog
+        id="reset-local-confirm"
         heading=${this._localize("firmware_jobs.reset_confirm_title")}
         confirm-label=${this._localize("firmware_jobs.reset_confirm_button")}
         message=${this._localize("firmware_jobs.reset_confirm_message")}
         @confirm=${this._onResetConfirmed}
       ></esphome-confirm-dialog>
+      <esphome-confirm-dialog
+        id="reset-peer-confirm"
+        heading=${this._localize("firmware_jobs.reset_peer_confirm_title", {
+          label: this._pendingResetPeer?.label ?? "",
+        })}
+        confirm-label=${this._localize("firmware_jobs.reset_peer_confirm_button")}
+        message=${this._localize("firmware_jobs.reset_peer_confirm_message", {
+          label: this._pendingResetPeer?.label ?? "",
+        })}
+        @confirm=${this._onResetPeerConfirmed}
+      ></esphome-confirm-dialog>
     `;
   }
 
-  private _startTicker() {
-    if (this._tickHandle !== null) return;
-    this._tickHandle = setInterval(() => {
-      this._now = Date.now();
-    }, 30_000);
-  }
-
-  private _stopTicker = () => {
-    if (this._tickHandle !== null) {
-      clearInterval(this._tickHandle);
-      this._tickHandle = null;
-    }
-  };
-
   private _onAfterHide = (): void => {
     this._dialog.open = false;
-    this._stopTicker();
+    this._ticker.stop();
   };
 
   _jobDisplayName(job: FirmwareJob): string {
@@ -228,11 +258,7 @@ export class ESPHomeFirmwareJobsDialog extends LitElement {
   }
 
   private async _cancel(job: FirmwareJob) {
-    try {
-      await this._api.firmwareCancel(job.job_id);
-    } catch {
-      /* job may have finished — follow_jobs will reconcile */
-    }
+    await cancelFirmwareJob(this._api, this._localize, job.job_id);
   }
 
   private _onResetClick = () => {
@@ -251,6 +277,31 @@ export class ESPHomeFirmwareJobsDialog extends LitElement {
     this._commandDialog.followJob(job, this._jobDisplayName(job));
   };
 
+  private _onResetPeerConfirmed = async () => {
+    // Deliberately not cleared: the closing dialog's heading/message still
+    // bind to it, and the next openResetPeerBuildEnv overwrites it anyway.
+    const pending = this._pendingResetPeer;
+    if (pending === null) return;
+    let job: FirmwareJob;
+    try {
+      job = await this._api.remoteBuildResetPeerBuildEnv({
+        pin_sha256: pending.pin_sha256,
+      });
+    } catch (err) {
+      notifyError(
+        this._localize("firmware_jobs.reset_peer_failed", {
+          label: pending.label,
+          detail: getErrorMessage(err),
+        })
+      );
+      return;
+    }
+    // Same landing as the local reset: watch the server-side wipe live.
+    // A busy refusal surfaces in this job's stream (the mirror fails
+    // with a retry-when-idle message), not as a command error.
+    this._commandDialog.followJob(job, this._jobDisplayName(job));
+  };
+
   private _onClearHistory = async () => {
     try {
       await this._api.firmwareClear();
@@ -259,12 +310,7 @@ export class ESPHomeFirmwareJobsDialog extends LitElement {
       return;
     }
     // firmware/clear has no broadcast event — let app-shell prune local context.
-    this.dispatchEvent(
-      new CustomEvent("firmware-history-cleared", {
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireEvent(this, "firmware-history-cleared");
   };
 }
 

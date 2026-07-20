@@ -2,6 +2,7 @@ import { APIError } from "../../api/api-error.js";
 import { type FirmwareJob, JobStatus, JobType } from "../../api/types/firmware-jobs.js";
 import { ErrorCode } from "../../api/types/protocol.js";
 import { isTerminalJobStatus } from "../../util/firmware-job-status.js";
+import { isNeverFlashed } from "../../util/never-flashed.js";
 import { isValidationFailureLine } from "../../util/validation-log.js";
 import { classifyNoCompatiblePeerReason } from "../../util/version-mismatch.js";
 import type { CommandType, ESPHomeCommandDialog } from "../command-dialog.js";
@@ -23,12 +24,17 @@ export function deriveFollowCommandType(
   jobs: Map<string, FirmwareJob>,
   job: FirmwareJob
 ): CommandType {
+  // COMPILE-gated like firmwareJobTypeLabel: a failed OTA upload converted
+  // offline also carries the flag but reopens as the Install it was.
+  if (job.is_deferred_install && job.job_type === JobType.COMPILE) {
+    return "offline_compile";
+  }
   if (job.job_type === JobType.COMPILE && !isTerminalJobStatus(job.status)) {
     const dependent = [...jobs.values()].find((j) => j.depends_on === job.job_id);
     if (dependent?.job_type === JobType.RENAME) return "rename";
     if (dependent?.job_type === JobType.UPLOAD) return "install";
   }
-  return JOB_TYPE_TO_COMMAND[job.job_type] ?? "install";
+  return JOB_TYPE_TO_COMMAND[job.job_type];
 }
 
 // An install chain is followed via its COMPILE head, but the flash target
@@ -52,8 +58,8 @@ export async function detachStream(host: ESPHomeCommandDialog): Promise<void> {
   host._streamId = "";
   // Flush the rAF batch so teardowns that keep the buffer visible
   // (close, hand-off, force-local) paint every line that arrived.
-  // Restart paths follow up with ``_resetPendingLines``.
-  host._flushPendingLines();
+  // Restart paths follow up with a reset.
+  host._log.flush();
   try {
     await host._api.stopStream(streamId);
   } catch {
@@ -66,8 +72,7 @@ export async function detachStream(host: ESPHomeCommandDialog): Promise<void> {
 // Shared by every entry point that reuses the singleton dialog for a new run.
 export function resetRunState(host: ESPHomeCommandDialog): void {
   host._state = "running";
-  host._lines = [];
-  host._resetPendingLines();
+  host._log.reset();
   host._statusMessage = "";
   host._userStopped = false;
   host._failedDuringValidate = false;
@@ -103,7 +108,7 @@ export function startValidateStream(host: ESPHomeCommandDialog): void {
       },
       onResult: (data) => {
         host._streamId = "";
-        host._flushPendingLines();
+        host._log.flush();
         host._state = data.success ? "success" : "error";
         host._statusMessage = host._localize(
           data.success ? "command.validate_success" : "command.validate_failed"
@@ -111,7 +116,7 @@ export function startValidateStream(host: ESPHomeCommandDialog): void {
       },
       onError: (error) => {
         host._streamId = "";
-        host._flushPendingLines();
+        host._log.flush();
         host._state = "error";
         host._statusMessage = error;
       },
@@ -133,8 +138,7 @@ export async function toggleShowSecrets(host: ESPHomeCommandDialog): Promise<voi
   host._restartInflight = true;
   try {
     await detachStream(host);
-    host._lines = [];
-    host._resetPendingLines();
+    host._log.reset();
     host._state = "running";
     host._statusMessage = "";
     host._resetAnsiLogScroll();
@@ -149,6 +153,7 @@ export async function startFirmwareJob(host: ESPHomeCommandDialog): Promise<void
   let job: FirmwareJob;
   try {
     switch (host._commandType) {
+      case "offline_compile":
       case "install":
         job = await host._api.firmwareInstall(
           host.configuration,
@@ -179,11 +184,19 @@ export async function startFirmwareJob(host: ESPHomeCommandDialog): Promise<void
 // Leaves _commandType to the caller (the install chain relies on it).
 function primeAndFollow(host: ESPHomeCommandDialog, job: FirmwareJob): void {
   host._jobId = job.job_id;
+  // Chaining from the compile head into its dependent flash keeps the timer
+  // on the compile — the build time (clocks + backend stamps) lives there;
+  // the flash tail has neither, so re-pointing would reset the readout
+  // mid-install. Any other (re)prime is a fresh run and takes the new job.
+  if (!host._timerJobId || job.depends_on !== host._timerJobId) {
+    host._timerJobId = job.job_id;
+  }
   host._jobStatus = job.status;
   host._primedSource = {
     source: job.source,
     source_label: job.source_label,
     source_esphome_version: job.source_esphome_version,
+    source_pin_sha256: job.source_pin_sha256,
   };
   followJob(host, job.job_id);
 }
@@ -198,14 +211,28 @@ export function followJob(host: ESPHomeCommandDialog, jobId: string): void {
       host._enqueueLine(line);
       if (isValidationFailureLine(line)) host._failedDuringValidate = true;
     },
-    onResult: (data) => {
+    onResult: (result) => {
       host._streamId = "";
-      host._flushPendingLines();
-      const result = data as unknown as Pick<
-        FirmwareJob,
-        "status" | "exit_code" | "is_deferred_install"
-      >;
+      host._log.flush();
       const success = result.status === JobStatus.COMPLETED;
+
+      // Queued is the outcome regardless of which job carried it; check
+      // before chaining into a dependent flash — a converted chain's
+      // upload is already cancelled.
+      if (result.queued_update_armed) {
+        host._state = "success";
+        // A never-flashed device can't come online by itself, so
+        // "installs when it comes back online" would be a dead promise
+        // — point at the USB first-install instead.
+        const device = host._devices.find((d) => d.configuration === host.configuration);
+        host._statusMessage = host._localize(
+          isNeverFlashed(device)
+            ? "dashboard.queued_first_install"
+            : "dashboard.queued_successfully"
+        );
+        host._jobId = "";
+        return;
+      }
 
       // On a successful install/rename COMPILE, follow the dependent flash —
       // the install's UPLOAD or the rename's flash-and-swap tail — so success
@@ -230,14 +257,6 @@ export function followJob(host: ESPHomeCommandDialog, jobId: string): void {
           // so the remote-builder sub-line doesn't linger on the compile's
           // receiver.
           primeAndFollow(host, flash);
-          return;
-        }
-        // A deferred install compiles now and flashes when the device wakes,
-        // so no dependent flash exists — queued is the success state.
-        if (result.is_deferred_install) {
-          host._state = "success";
-          host._statusMessage = host._localize("dashboard.queued_successfully");
-          host._jobId = "";
           return;
         }
         // No flash step — the device was never flashed, so don't report success.
@@ -269,7 +288,7 @@ export function followJob(host: ESPHomeCommandDialog, jobId: string): void {
     },
     onError: (error) => {
       host._streamId = "";
-      host._flushPendingLines();
+      host._log.flush();
       host._state = "error";
       host._statusMessage = error;
       host._jobId = "";
@@ -351,17 +370,20 @@ export async function onForceLocalClick(host: ESPHomeCommandDialog): Promise<voi
     // Keep _commandType "install": the public followJob would derive "compile"
     // from the returned COMPILE (#1131) and skip the chain. Clear the cancelled
     // attempt and reset the run state (the public followJob did this), then
-    // re-attach via primeAndFollow.
+    // re-attach via primeAndFollow. The timer restarts with the fresh compile —
+    // clear its id so primeAndFollow re-points it, and drop the old clocks.
     await detachStream(host);
     resetRunState(host);
+    host._timerJobId = "";
+    host._timer.reset();
     primeAndFollow(host, job);
   } catch (err) {
     host._state = "error";
     host._statusMessage = host._localize("command.force_local_failed");
     const detail = formatForceLocalError(err);
     if (detail) {
-      host._flushPendingLines();
-      host._lines = [...host._lines, detail];
+      host._log.flush();
+      host._log.append([detail]);
     }
   } finally {
     host._switchingToLocal = false;

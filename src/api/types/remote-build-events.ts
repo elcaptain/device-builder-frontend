@@ -4,7 +4,7 @@
  * Part of the src/api/types.ts barrel split.
  */
 import type { VersionMatchPolicy } from "./event-subscription.js";
-import { JobStatus, JobStream } from "./firmware-jobs.js";
+import { JobStatus } from "./firmware-jobs.js";
 import type {
   PairingSummary,
   PairingWindowState,
@@ -33,6 +33,9 @@ export interface RemoteBuildPairRequestReceivedEventData {
   label: string;
   peer_ip: string;
   paired_at: number;
+  friendly_name: string;
+  ha_addon: boolean;
+  label_auto: boolean;
 }
 
 /**
@@ -161,6 +164,18 @@ export interface ReceiverPeerLinkSessionEventData {
 }
 
 /**
+ * Data payload for receiver_peer_link_session_opened.
+ *
+ * OPENED additionally carries the offloader's display identity —
+ * the stored row's post-refresh values, so an old offloader that
+ * sent nothing surfaces whatever pair time captured.
+ */
+export interface ReceiverPeerLinkSessionOpenedEventData extends ReceiverPeerLinkSessionEventData {
+  friendly_name: string;
+  ha_addon: boolean;
+}
+
+/**
  * Shared identity base for the peer-link session events
  * (OPENED / CLOSED).
  *
@@ -178,13 +193,18 @@ export interface OffloaderPeerLinkSessionEventData {
  * Data payload for offloader_peer_link_opened.
  *
  * The OPENED counterpart of the shared identity base, plus the
- * receiver's freshly-handshaked esphome_version. App-shell merges
- * it into the matching row keyed by pin_sha256 so a receiver
- * upgrade surfaces on the next reconnect without a page reload.
- * Empty until the first handshake fills it in.
+ * receiver's freshly-handshaked esphome_version, provisioning
+ * capability, and display identity. App-shell merges them into
+ * the matching row keyed by pin_sha256 so a receiver upgrade or
+ * rename surfaces on the next reconnect without a page reload.
+ * Empty / false until the first handshake fills them in.
  */
 export interface OffloaderPeerLinkOpenedEventData extends OffloaderPeerLinkSessionEventData {
   esphome_version: string;
+  auto_provision_supported: boolean;
+  friendly_name: string;
+  ha_addon: boolean;
+  reset_build_env_supported: boolean;
 }
 
 /**
@@ -262,27 +282,6 @@ export interface OffloaderJobStateChangedEventData {
   job_id: string;
   status: JobStatus;
   error_message: string;
-}
-
-/**
- * Data payload for offloader_job_output.
- *
- * Fired per inbound job_output frame. line preserves its
- * trailing terminator (\n / \r / \r\n) so the existing
- * ansi-log renderer's carriage-return-overwrite contract
- * works byte-identical to local JOB_OUTPUT events.
- *
- * High-rate path during an active build (one frame per line
- * of compiler / linker output). Subscribers should batch
- * downstream rendering rather than re-render per event.
- */
-export interface OffloaderJobOutputEventData {
-  receiver_hostname: string;
-  receiver_port: number;
-  pin_sha256: string;
-  job_id: string;
-  stream: JobStream;
-  line: string;
 }
 
 /**

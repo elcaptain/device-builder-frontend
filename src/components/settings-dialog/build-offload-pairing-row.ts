@@ -2,9 +2,13 @@ import { html, nothing, type TemplateResult } from "lit";
 
 import type { PairingSummary } from "../../api/types/remote-build.js";
 import type { LocalizeFunc } from "../../common/localize.js";
-import type { RemoteBuildJobState } from "../../context/index.js";
 import { trimTrailingDot } from "../../util/hostname.js";
-import { classifyVersionMismatch } from "../../util/version-mismatch.js";
+import { pairingDisplayName } from "../../util/pairing-display-name.js";
+import { canResetBuildEnv } from "../remote-build-hint.js";
+import {
+  classifyVersionMismatch,
+  isPinnableVersion,
+} from "../../util/version-mismatch.js";
 
 interface PillResult {
   pillClass: string;
@@ -39,11 +43,9 @@ export function pillFor(pairing: PairingSummary, localize: LocalizeFunc): PillRe
 interface PairingRowContext {
   localize: LocalizeFunc;
   appVersion: string;
-  latestJob: RemoteBuildJobState | undefined;
   onToggleEnabled: (pairing: PairingSummary) => void;
-  onBuildRemote: (pairing: PairingSummary) => void;
-  onViewBuild: (jobId: string) => void;
   onEditEndpoint: (pairing: PairingSummary) => void;
+  onResetBuildEnv: (pairing: PairingSummary) => void;
   onUnpair: (pairing: PairingSummary) => void;
 }
 
@@ -54,19 +56,18 @@ export function renderPairingRow(
   const {
     localize,
     appVersion,
-    latestJob,
     onToggleEnabled,
-    onBuildRemote,
-    onViewBuild,
     onEditEndpoint,
+    onResetBuildEnv,
     onUnpair,
   } = ctx;
   const { pillClass, pillLabel } = pillFor(pairing, localize);
+  const displayName = pairingDisplayName(pairing);
   return html`
     <div class="row peer-row row--stacked">
       <div class="row-label">
         <span class="row-title">
-          ${pairing.label}
+          ${displayName}
           <span class=${pillClass}>${pillLabel}</span>
           ${
             pairing.status === "approved"
@@ -75,7 +76,7 @@ export function renderPairingRow(
                     class="toggle pairing-toggle"
                     role="switch"
                     aria-label=${localize("settings.build_offload_pairing_enabled_aria", {
-                      label: pairing.label,
+                      label: displayName,
                     })}
                     aria-checked=${pairing.enabled}
                     title=${localize("settings.build_offload_pairing_enabled_title")}
@@ -105,34 +106,22 @@ export function renderPairingRow(
       </div>
       <div class="pairing-actions">
         ${
-          pairing.status === "approved" && pairing.connected
+          canResetBuildEnv(pairing)
             ? html`
                 <button
                   type="button"
-                  class="btn-build-remote"
-                  aria-label=${localize("settings.remote_build_submit_aria", {
-                    label: pairing.label,
+                  id="btn-reset-${pairing.pin_sha256}"
+                  class="btn-reset-peer-env"
+                  aria-label=${localize("settings.reset_peer_env_aria", {
+                    label: displayName,
                   })}
-                  @click=${() => onBuildRemote(pairing)}
+                  @click=${() => onResetBuildEnv(pairing)}
                 >
-                  ${localize("settings.remote_build_submit_action")}
+                  <wa-icon library="mdi" name="broom"></wa-icon>
                 </button>
-              `
-            : nothing
-        }
-        ${
-          latestJob !== undefined
-            ? html`
-                <button
-                  type="button"
-                  class="btn-view-remote-build"
-                  aria-label=${localize("settings.remote_build_view_aria", {
-                    label: pairing.label,
-                  })}
-                  @click=${() => onViewBuild(latestJob.job_id)}
-                >
-                  ${localize("settings.remote_build_view_action")}
-                </button>
+                <wa-tooltip for="btn-reset-${pairing.pin_sha256}">
+                  ${localize("settings.reset_peer_env_aria", { label: displayName })}
+                </wa-tooltip>
               `
             : nothing
         }
@@ -141,29 +130,35 @@ export function renderPairingRow(
             ? html`
                 <button
                   type="button"
+                  id="btn-edit-${pairing.pin_sha256}"
                   class="btn-edit-endpoint"
                   aria-label=${localize("settings.edit_pairing_endpoint_aria", {
-                    label: pairing.label,
-                  })}
-                  title=${localize("settings.edit_pairing_endpoint_aria", {
-                    label: pairing.label,
+                    label: displayName,
                   })}
                   @click=${() => onEditEndpoint(pairing)}
                 >
                   <wa-icon library="mdi" name="pencil"></wa-icon>
                 </button>
+                <wa-tooltip for="btn-edit-${pairing.pin_sha256}">
+                  ${localize("settings.edit_pairing_endpoint_aria", {
+                    label: displayName,
+                  })}
+                </wa-tooltip>
               `
             : nothing
         }
         <button
           type="button"
+          id="btn-unpair-${pairing.pin_sha256}"
           class="peer-remove"
-          aria-label=${localize("settings.unpair_aria", { label: pairing.label })}
-          title=${localize("settings.unpair_action")}
+          aria-label=${localize("settings.unpair_aria", { label: displayName })}
           @click=${() => onUnpair(pairing)}
         >
           <wa-icon library="mdi" name="delete"></wa-icon>
         </button>
+        <wa-tooltip for="btn-unpair-${pairing.pin_sha256}">
+          ${localize("settings.unpair_aria", { label: displayName })}
+        </wa-tooltip>
       </div>
     </div>
   `;
@@ -179,6 +174,22 @@ function renderPeerVersion(
   // doesn't. Hidden until the first handshake fills in esphome_version.
   if (pairing.status !== "approved" || !pairing.esphome_version) return nothing;
   const kind = classifyVersionMismatch(appVersion, pairing.esphome_version);
+  // A mismatch the receiver can auto-provision isn't a caution: builds
+  // run with this dashboard's own version in a venv on the server.
+  if (
+    kind !== null &&
+    pairing.auto_provision_supported &&
+    isPinnableVersion(appVersion)
+  ) {
+    return html`
+      <span class="row-desc">
+        ${localize("settings.build_offload_pairing_version_auto_provision", {
+          peer: pairing.esphome_version,
+          local: appVersion,
+        })}
+      </span>
+    `;
+  }
   if (kind === null) {
     return html`
       <span class="row-desc">
@@ -200,19 +211,4 @@ function renderPeerVersion(
       ${localize(key, { peer: pairing.esphome_version, local: appVersion })}
     </span>
   `;
-}
-
-export function latestJobForPin(
-  jobs: Map<string, RemoteBuildJobState> | null,
-  pin_sha256: string
-): RemoteBuildJobState | undefined {
-  if (jobs === null) return undefined;
-  let best: RemoteBuildJobState | undefined;
-  for (const job of jobs.values()) {
-    if (job.pin_sha256 !== pin_sha256) continue;
-    if (best === undefined || job.started_at > best.started_at) {
-      best = job;
-    }
-  }
-  return best;
 }

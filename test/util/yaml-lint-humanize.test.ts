@@ -18,7 +18,10 @@ import {
   type BannerError,
   type MappedValidationError,
 } from "../../src/util/yaml-lint-backend.js";
+import { esphomeYaml } from "../../src/util/esphome-yaml-lang.js";
 import { flush } from "../_dom.js";
+import { makeComponentEntry } from "./_make-component-entry.js";
+import { makeConfigEntry } from "./_make-config-entry.js";
 
 // Echo the key + line so a humanized hit is distinguishable from raw text.
 const localize = (key: string, values?: Record<string, string | number>): string =>
@@ -47,6 +50,18 @@ function mountView(
     }),
     parent: document.body,
   });
+}
+
+/** All hover-tooltip actions across the current diagnostics. */
+function collectActions(
+  view: EditorView
+): { name: string; apply: (v: EditorView, a: number, b: number) => void }[] {
+  const actions: {
+    name: string;
+    apply: (v: EditorView, a: number, b: number) => void;
+  }[] = [];
+  forEachDiagnostic(view.state, (d) => actions.push(...(d.actions ?? [])));
+  return actions;
 }
 
 describe("backend linter humanizes + banners a locatable parse error", () => {
@@ -111,11 +126,7 @@ describe("backend linter humanizes + banners a locatable parse error", () => {
       forceLinting(view);
       await flush();
 
-      const actions: {
-        name: string;
-        apply: (v: EditorView, a: number, b: number) => void;
-      }[] = [];
-      forEachDiagnostic(view.state, (d) => actions.push(...(d.actions ?? [])));
+      const actions = collectActions(view);
       expect(actions.map((a) => a.name)).toEqual(["yaml_editor.error_auto_fix"]);
 
       actions[0].apply(view, 0, 0);
@@ -140,9 +151,67 @@ describe("backend linter humanizes + banners a locatable parse error", () => {
     try {
       forceLinting(view);
       await flush();
-      const actions: unknown[] = [];
-      forEachDiagnostic(view.state, (d) => actions.push(...(d.actions ?? [])));
-      expect(actions).toEqual([]);
+      expect(collectActions(view)).toEqual([]);
+    } finally {
+      view.destroy();
+    }
+  });
+
+  // A key whose only child is commented out parses as null; the inline
+  // diagnostic must name the commented-out block, not just echo the bare
+  // "expected a dictionary." the validator sends.
+  it("squiggles the commented-out-block hint onto 'expected a dictionary.'", async () => {
+    const doc = [
+      "esphome:", // 1
+      "  name: x", // 2
+      "esp32:", // 3
+      "  board: esp32dev", // 4
+      "  framework:", // 5
+      "    type: arduino", // 6
+      "    advanced:", // 7
+      '#      minimum_chip_revision: "3.1"', // 8
+      "logger:", // 9
+      "",
+    ].join("\n");
+    const validateYaml = vi.fn(async () => ({
+      yaml_errors: [],
+      validation_errors: [
+        {
+          message: "expected a dictionary.",
+          range: {
+            document: "x.yaml",
+            start_line: 6,
+            start_col: 4,
+            end_line: 6,
+            end_col: 12,
+          },
+        },
+      ],
+    })) as unknown as ESPHomeAPI["validateYaml"];
+
+    const fixes: YamlAutoFix[] = [];
+    const view = mountView(
+      validateYaml,
+      () => {},
+      (fix) => fixes.push(fix),
+      doc
+    );
+    try {
+      forceLinting(view);
+      await flush();
+      const messages: string[] = [];
+      forEachDiagnostic(view.state, (d) => messages.push(d.message));
+      expect(messages).toEqual([
+        "expected a dictionary. yaml_editor.error_commented_block_hint:7",
+      ]);
+
+      // The hint carries the comment-out repair as the tooltip action.
+      const actions = collectActions(view);
+      expect(actions.map((a) => a.name)).toEqual(["yaml_editor.error_auto_fix"]);
+      actions[0].apply(view, 0, 0);
+      expect(fixes).toEqual([
+        { line: 7, indent: 0, key: "advanced", fromIndent: 4, kind: "comment-out" },
+      ]);
     } finally {
       view.destroy();
     }
@@ -242,6 +311,79 @@ describe("backend linter humanizes + banners a locatable parse error", () => {
         fromIndent: 2,
         kind: "dash-space",
       });
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it("squiggles + banners the stray-top-level-key hint with the indent fix", async () => {
+    const doc = "logger:\n  baud_rate: 115200\nid: mylogger\n";
+    // The catalog gate needs a logger body carrying `id`; mountView's api
+    // is validate-only, so this test wires the full surface itself.
+    const api = {
+      validateYaml: vi.fn(async () => ({
+        yaml_errors: [],
+        validation_errors: [
+          {
+            message: "Component not found: id.",
+            range: {
+              document: "x.yaml",
+              start_line: 2,
+              start_col: 0,
+              end_line: 2,
+              end_col: 2,
+            },
+          },
+        ],
+      })),
+      getComponents: async () => ({ components: [makeComponentEntry("logger")] }),
+      getComponentBodies: async () => ({
+        logger: {
+          ...makeComponentEntry("logger"),
+          config_entries: [makeConfigEntry({ key: "id" })],
+        },
+      }),
+    } as unknown as ESPHomeAPI;
+
+    let banner: BannerError[] = [];
+    const fixes: YamlAutoFix[] = [];
+    const view = new EditorView({
+      state: EditorState.create({
+        doc,
+        extensions: [
+          // The analyzer's AST agreement check needs the YAML parse tree
+          // the production editor always carries.
+          esphomeYaml(),
+          createBackendYamlLinter({
+            api,
+            getConfiguration: () => "x.yaml",
+            localize,
+            onResult: (errors) => {
+              banner = errors;
+            },
+            onAutoFix: (fix) => fixes.push(fix),
+          }),
+        ],
+      }),
+      parent: document.body,
+    });
+    try {
+      forceLinting(view);
+      await flush();
+      const messages: string[] = [];
+      forEachDiagnostic(view.state, (d) => messages.push(d.message));
+      expect(messages).toEqual([
+        "Component not found: id. yaml_editor.error_indent_under_section_fix:3",
+      ]);
+
+      const expectedFix = { line: 3, indent: 2, key: "id", fromIndent: 0 };
+      const actions = collectActions(view);
+      expect(actions.map((a) => a.name)).toEqual(["yaml_editor.error_auto_fix"]);
+      actions[0].apply(view, 0, 0);
+      expect(fixes).toEqual([expectedFix]);
+
+      expect(banner).toHaveLength(1);
+      expect(banner[0].fix).toEqual(expectedFix);
     } finally {
       view.destroy();
     }

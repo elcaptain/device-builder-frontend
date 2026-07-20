@@ -1,12 +1,14 @@
 import { consume } from "@lit/context";
 import { mdiCheck, mdiCogOutline } from "@mdi/js";
-import { LitElement, css, html, nothing } from "lit";
+import { css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { localizeContext } from "../../context/index.js";
 import { dropdownMenuStyles } from "../../styles/dropdown-menu.js";
 import { espHomeStyles } from "../../styles/shared.js";
+import { textStyles } from "../../styles/text.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
+import { OverflowMenuElement } from "../overflow-menu-element.js";
 
 import "@home-assistant/webawesome/dist/components/icon/icon.js";
 
@@ -19,7 +21,7 @@ export interface ToggleableColumn {
 }
 
 @customElement("esphome-table-column-toggle")
-export class ESPHomeTableColumnToggle extends LitElement {
+export class ESPHomeTableColumnToggle extends OverflowMenuElement {
   @consume({ context: localizeContext, subscribe: true })
   @state()
   private _localize: LocalizeFunc = (key) => key;
@@ -27,12 +29,10 @@ export class ESPHomeTableColumnToggle extends LitElement {
   @property({ attribute: false })
   columns: ToggleableColumn[] = [];
 
-  @state()
-  private _open = false;
-
   static styles = [
     espHomeStyles,
     dropdownMenuStyles,
+    textStyles,
     css`
       :host {
         display: block;
@@ -79,9 +79,6 @@ export class ESPHomeTableColumnToggle extends LitElement {
          rather than wrapping the row when space is tight (e.g. a long
          translated "Columns" string); the icon stays put. */
       .toggle-btn .label {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
         /* Flex item must allow shrinking below its intrinsic width or
            the ellipsis never triggers on a tight toolbar row. */
         min-width: 0;
@@ -210,7 +207,7 @@ export class ESPHomeTableColumnToggle extends LitElement {
         @click=${this._toggle}
       >
         <wa-icon library="mdi" name="cog-outline"></wa-icon>
-        <span class="label">${this._localize("dashboard.table_columns")}</span>
+        <span class="label truncate">${this._localize("dashboard.table_columns")}</span>
       </button>
       ${
         this._open
@@ -245,34 +242,8 @@ export class ESPHomeTableColumnToggle extends LitElement {
     `;
   }
 
-  private _toggle() {
-    this._open = !this._open;
-  }
-
-  private _close() {
-    this._open = false;
-  }
-
-  /* The menu items are ``<div role="menuitemcheckbox">`` rather than
-     <button>s so they sit flush with the checkbox styling. role +
-     tabindex make them focusable; this maps Enter / Space to the same
-     click the mouse would dispatch, reusing the @click handler bound
-     on the element (mirrors esphome-header-actions). */
-  private _onItemKeydown = (e: KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      (e.currentTarget as HTMLElement).click();
-    }
-  };
-
   private _onToggle(id: string, visible: boolean) {
-    this.dispatchEvent(
-      new CustomEvent("column-visibility-change", {
-        detail: { id, visible },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    this._emit("column-visibility-change", { id, visible });
   }
 }
 

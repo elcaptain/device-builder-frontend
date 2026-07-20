@@ -12,6 +12,7 @@ import {
 } from "../context/index.js";
 import { MOBILE_BREAKPOINT } from "../styles/breakpoints.js";
 import { espHomeStyles } from "../styles/shared.js";
+import { textStyles } from "../styles/text.js";
 import { stripBase, withBase } from "../util/base-path.js";
 import { deviceBuilderChannel } from "../util/device-builder-channel.js";
 import { navigate, runLeaveGuard } from "../util/navigation.js";
@@ -107,6 +108,7 @@ export class ESPHomeLayout extends LitElement {
 
   static styles = [
     espHomeStyles,
+    textStyles,
     css`
       :host {
         display: block;
@@ -184,8 +186,8 @@ export class ESPHomeLayout extends LitElement {
       }
 
       .header-logo {
-        width: 44px;
-        height: 44px;
+        width: var(--esphome-header-logo-box);
+        height: var(--esphome-header-logo-box);
         border-radius: var(--wa-border-radius-l);
         display: flex;
         align-items: center;
@@ -208,9 +210,6 @@ export class ESPHomeLayout extends LitElement {
         font-size: var(--wa-font-size-m);
         font-weight: var(--wa-font-weight-bold);
         color: var(--esphome-on-primary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
         display: flex;
         align-items: center;
         gap: var(--wa-space-xs);
@@ -247,9 +246,6 @@ export class ESPHomeLayout extends LitElement {
         font-size: var(--wa-font-size-xs);
         color: var(--esphome-on-primary);
         opacity: 0.75;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
       }
 
       .header-spacer {
@@ -292,8 +288,8 @@ export class ESPHomeLayout extends LitElement {
            doesn't crowd the 40px bar's edges. box-sizing keeps the
            padding inside the 32px box; the img fills what's left. */
         .header-logo {
-          width: 32px;
-          height: 32px;
+          width: var(--esphome-header-logo-box);
+          height: var(--esphome-header-logo-box);
           padding: 3px 0;
           box-sizing: border-box;
         }
@@ -390,7 +386,7 @@ export class ESPHomeLayout extends LitElement {
           </button>
         </div>
         <div class="header-text">
-          <h1>
+          <h1 class="truncate">
             <span class="header-title-text">${this._localize("dashboard.title")}</span>
             ${
               this._versionBadge
@@ -398,7 +394,7 @@ export class ESPHomeLayout extends LitElement {
                 : nothing
             }
           </h1>
-          <p>${this._localize("dashboard.subtitle")}</p>
+          <p class="truncate">${this._localize("dashboard.subtitle")}</p>
         </div>
         <div class="header-spacer"></div>
         <esphome-header-actions

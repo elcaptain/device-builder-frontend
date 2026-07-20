@@ -17,6 +17,62 @@ export enum DeviceState {
   OFFLINE = "offline",
 }
 
+/** Monitor-observed runtime state, nested under
+ *  ``ConfiguredDevice.runtime_state`` on every device payload
+ *  (initial_state, device_added/updated events, devices/list). */
+export interface DeviceRuntimeState {
+  state: DeviceState;
+  /** Reachability channel currently driving the device's online state
+   *  (``mdns`` > ``mqtt`` > ``ping``). The out-of-sync / update
+   *  indicators consult it only for api: devices, via
+   *  ``deployedIdentityTrusted`` (``src/util/device-sync.ts``), which
+   *  owns the gating rule. ``"unknown"`` means no source has claimed
+   *  the device yet, which reads as "not mDNS". */
+  active_source: ReachabilitySource;
+  /** All resolved addresses from mDNS (IPv4 + IPv6) — empty array until
+   *  the device is seen online. ``ip_addresses[0]`` matches the flat
+   *  ``ip`` when populated. */
+  ip_addresses: string[];
+  deployed_version: string;
+  /**
+   * 8-char hex hash the running firmware reports via the
+   * ``config_hash`` TXT record on its ``_esphomelib._tcp`` mDNS
+   * broadcast — or on ``_http._tcp`` for a device without api:
+   * (ESPHome 2026.7.0+). Drives ``has_pending_changes`` together with
+   * ``expected_config_hash``. Empty string when the device hasn't
+   * announced yet, or runs firmware older than the broadcast
+   * (esphome/esphome#16145) — the dashboard then falls back to
+   * mtime-based change detection.
+   */
+  deployed_config_hash: string;
+  /** Indicates if an offline update has been compiled and is waiting for the device to wake up */
+  queued_update: boolean;
+  /**
+   * Encryption state observed from the device's
+   * ``_esphomelib._tcp.local.`` mDNS broadcast.
+   *
+   * - ``null`` — mDNS not seen yet. Trust ``api_encrypted`` verbatim
+   *   (assume the device matches the YAML).
+   * - ``""`` — mDNS seen, ``api_encryption`` TXT absent. The device
+   *   is broadcasting plaintext API.
+   * - non-empty (e.g. ``"Noise_NNpsk0_25519_ChaChaPoly_SHA256"``) —
+   *   encryption is confirmed live on the device.
+   *
+   * Drives the four-state lock indicator: active / pending-flash /
+   * mismatch / plaintext.
+   */
+  api_encryption_active: string | null;
+  /** Whether fresh first-party evidence backs the deployed identity:
+   *  an unexpired ``_http._tcp`` identity TXT (devices without api:),
+   *  a live Native API device_info connection the backend made (api
+   *  devices mDNS doesn't own, e.g. Docker-bridge), or a flash this
+   *  dashboard performed. Session-only — false on backend cold start
+   *  until evidence arrives. mDNS taking ownership of an api device
+   *  clears it; the announce lifecycle vouches from there, which is
+   *  the other half of ``deployedIdentityTrusted``'s gate. */
+  deployed_identity_live: boolean;
+}
+
 /** A configured ESPHome device. */
 export interface ConfiguredDevice {
   name: string;
@@ -37,17 +93,12 @@ export interface ConfiguredDevice {
    *  Prefers IPv4 when both are available. Used for OTA cache args, and as
    *  the Visit-web-UI fallback when ``address`` (mDNS hostname) is empty. */
   ip: string;
-  /** All resolved addresses from mDNS (IPv4 + IPv6) — empty array until
-   *  the device is seen online. ``ip_addresses[0]`` matches ``ip`` when
-   *  populated. */
-  ip_addresses: string[];
   web_port: number | null;
   /** Resolved `logger: baud_rate` for the Web Serial log port. `null` means
    *  unset (open at the 115200 default); `0` means UART logging is disabled;
    *  a positive value is the baud to open at. */
   logger_baud_rate: number | null;
   current_version: string;
-  deployed_version: string;
   loaded_integrations: string[];
   /**
    * Subset of ``loaded_integrations`` the user directly wrote in
@@ -68,9 +119,10 @@ export interface ConfiguredDevice {
    * accepts ``null`` / ``undefined`` / ``[]`` interchangeably.
    */
   directly_referenced_integrations?: string[];
-  state: DeviceState;
-  /** Indicates if an offline update has been compiled and is waiting for the device to wake up */
-  queued_update?: boolean;
+  /** Monitor-observed live state (reachability, deployed firmware,
+   *  encryption-on-the-wire). Nested so the flat fields stay
+   *  YAML/metadata-derived. */
+  runtime_state: DeviceRuntimeState;
   /** esp32 whose `ota: platform: esphome` sets `allow_partition_access` —
    *  the YAML half of the OTA bootloader-update gate (see
    *  `util/bootloader-flash.ts` for the deployed-firmware half). */
@@ -85,31 +137,14 @@ export interface ConfiguredDevice {
    * compiled — the drawer renders an em-dash for that.
    */
   expected_config_hash: string;
-  /**
-   * 8-char hex hash the running firmware reports via the
-   * ``config_hash`` TXT record on its ``_esphomelib._tcp`` mDNS
-   * broadcast. Drives ``has_pending_changes`` together with
-   * ``expected_config_hash``. Empty string when the device hasn't
-   * announced yet, or runs firmware older than the broadcast
-   * (esphome/esphome#16145) — the dashboard then falls back to
-   * mtime-based change detection.
-   */
-  deployed_config_hash: string;
-  /** Reachability channel currently driving the device's online state
-   *  (``mdns`` > ``mqtt`` > ``ping``). The deployed version / config
-   *  hash come only from the mDNS broadcast, so the out-of-sync /
-   *  update indicators are gated on ``active_source === "mdns"`` (see
-   *  ``src/util/device-sync.ts``): when mDNS is dark those values are
-   *  stale. Optional on the wire — absent / ``"unknown"`` means no
-   *  source has claimed the device yet, which reads as "not mDNS". */
-  active_source?: ReachabilitySource;
   /** True until successfully compiled + deployed */
   has_pending_changes: boolean;
-  /** True when ``has_pending_changes`` came from the mDNS-sourced
+  /** True when ``has_pending_changes`` came from the deployed
    *  config-hash compare (vs the local mtime fallback). The UI gates
-   *  only this case on a live mDNS, so a local YAML edit still cues
-   *  "install" when mDNS is dark. Optional / absent reads as a local
-   *  (non-mDNS-dependent) pending. */
+   *  only this case on a trusted deployed identity (see
+   *  ``deployedIdentityTrusted``), so a local YAML edit still cues
+   *  "install" when the deployed identity can't be trusted. Optional /
+   *  absent reads as a local (mtime-driven) pending. */
   pending_changes_via_hash?: boolean;
   /** True if compiled with older ESPHome version */
   update_available: boolean;
@@ -131,23 +166,9 @@ export interface ConfiguredDevice {
    * ``devices/get_api_key``.
    */
   api_encrypted: boolean;
-  /**
-   * Encryption state observed from the device's
-   * ``_esphomelib._tcp.local.`` mDNS broadcast.
-   *
-   * - ``null`` — mDNS not seen yet. Trust ``api_encrypted`` verbatim
-   *   (assume the device matches the YAML).
-   * - ``""`` — mDNS seen, ``api_encryption`` TXT absent. The device
-   *   is broadcasting plaintext API.
-   * - non-empty (e.g. ``"Noise_NNpsk0_25519_ChaChaPoly_SHA256"``) —
-   *   encryption is confirmed live on the device.
-   *
-   * Drives the four-state lock indicator: active / pending-flash /
-   * mismatch / plaintext.
-   */
-  api_encryption_active: string | null;
-  /** Canonical ``XX:XX:XX:XX:XX:XX`` MAC observed in the device's
-   *  ``_esphomelib._tcp.local.`` ``mac`` TXT record (e.g.
+  /** Canonical ``XX:XX:XX:XX:XX:XX`` MAC observed in the ``mac`` TXT
+   *  record of the device's ``_esphomelib._tcp.local.`` broadcast, or
+   *  of ``_http._tcp.local.`` for a device without api: (e.g.
    *  ``"94:C9:60:1F:8C:F1"``). Empty string when mDNS hasn't surfaced
    *  one yet. The backend normalizes at ingest so this field always
    *  carries the colon-separated uppercase form regardless of which
@@ -258,6 +279,10 @@ export interface YamlSearchHit {
   device_name: string;
   friendly_name: string;
   matches: YamlSearchMatch[];
+  /** Uncapped match count in the file's scanned window; greater than
+   *  `matches.length` when the per-file cap truncated the list. Absent
+   *  on backends that predate it — fall back to `matches.length`. */
+  total_matches?: number;
 }
 
 /** Response from devices/create. */
@@ -301,4 +326,34 @@ export interface UpdateDeviceResponse {
 /** Response from devices/add_component. */
 export interface AddComponentResponse {
   yaml: string;
+}
+
+/** One line of decoder output, tagged with the excerpt line that produced it. */
+export interface DecodedBacktraceLine {
+  index: number;
+  text: string;
+}
+
+/** Response from devices/decode_backtrace. */
+export interface DecodeBacktraceResponse {
+  decoded: DecodedBacktraceLine[];
+  /** The running firmware was built from a different config than the local
+   *  build, so the symbols are confident but wrong. */
+  stale_build: boolean;
+  /** The config hash the local build was compiled from, "" when there is none
+   *  to read. Identifies *which* build the on-disk ELF is, so a client caching
+   *  those bytes can tell a rebuild from a re-crash; `stale_build` can't answer
+   *  that, since it goes false the moment the device catches up with the local
+   *  build, which is exactly when cached bytes are stale. */
+  local_config_hash: string;
+  /** Why nothing was decoded: "no_backtrace" | "no_build" |
+   *  "elf_only" | "unsupported_platform" | "decode_failed" |
+   *  "helper_failed"; "" on success.
+   *
+   *  Never shown: the report states that the backtrace was not decoded without
+   *  naming a cause, because most of these are indistinguishable to a reader
+   *  and a caught timeout reaches the same branch anyway. Read only to tell a
+   *  fact about this region from a fact about the backend, which decides
+   *  whether the verdict is worth remembering. */
+  unavailable_reason: string;
 }

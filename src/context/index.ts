@@ -16,8 +16,10 @@ export {
   experienceLevelContext,
   expertModeContext,
   firmwareJobsContext,
+  hideDeviceBuilderContext,
   importableDevicesContext,
   integrationDocsContext,
+  isHaAddonContext,
   isHaIngressContext,
   labelsContext,
   localizeContext,
@@ -31,7 +33,6 @@ export {
   remoteBuildEnabledContext,
   remoteComputeOnlyContext,
   serverVersionContext,
-  stubRemoteBuildJobState,
   versionContext,
   versionHistoryEnabledContext,
 } from "./contexts.js";

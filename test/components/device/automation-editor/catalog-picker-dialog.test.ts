@@ -75,11 +75,12 @@ describe("catalog-picker-dialog filtering contract", () => {
     expect(body).toMatch(/componentDomain\(item\.domain\)/);
   });
 
-  it("By-target pre-fills the action's id-shaped param with the picked device's id", async () => {
+  it("By-target routes each pick through the shared pre-fill helper", async () => {
+    // The pre-fill behavior itself (declared-id-only, #2208) is pinned by
+    // the pure-function tests in component-targets.test.ts.
     const src = await readSource();
-    const body = methodBody(src, "_preFillFor");
-    expect(body).toMatch(/references_component === domain/);
-    expect(body).toMatch(/\[idEntry\.key\]: device\.id/);
+    const body = methodBody(src, "_renderByTarget");
+    expect(body).toMatch(/preFillIdParam\(item, device\)/);
   });
 });
 

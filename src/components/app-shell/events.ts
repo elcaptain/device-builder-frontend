@@ -11,7 +11,6 @@ import type {
 import { DeviceEventType } from "../../api/types/event-subscription.js";
 import type {
   OffloaderIncludeLocalChangedEventData,
-  OffloaderJobOutputEventData,
   OffloaderJobStateChangedEventData,
   OffloaderPairAlertDismissedEventData,
   OffloaderPairingAddedEventData,
@@ -24,6 +23,7 @@ import type {
   OffloaderRemoteBuildsToggledEventData,
   OffloaderVersionMatchPolicyChangedEventData,
   ReceiverPeerLinkSessionEventData,
+  ReceiverPeerLinkSessionOpenedEventData,
   RemoteBuildHostAddedEventData,
   RemoteBuildHostRemovedEventData,
   RemoteBuildPairingWindowChangedEventData,
@@ -31,13 +31,11 @@ import type {
   RemoteBuildPairStatusChangedEventData,
 } from "../../api/types/remote-build-events.js";
 import type { PairingSummary, PeerSummary } from "../../api/types/remote-build.js";
-import {
-  type RemoteBuildJobState,
-  stubRemoteBuildJobState,
-} from "../../context/index.js";
+import { type RemoteBuildJobState } from "../../context/index.js";
 import { seededMap } from "../../util/snapshot.js";
 import type { ESPHomeApp } from "../app-shell.js";
 import { applyPreferences } from "./data-load.js";
+import { seedJobs } from "./jobs.js";
 
 // Merge a partial diff into the matching offloader pairing row keyed by pin_sha256.
 // _buildOffloadPairings === null = snapshot not seeded; missing row = event raced
@@ -67,6 +65,8 @@ export function handleEvent(host: ESPHomeApp, event: string, data: unknown): voi
         pairings,
         offloader_alerts,
         remote_jobs,
+        remote_build_settings,
+        firmware_jobs,
         remote_builds_enabled,
         version_match_policy,
         include_local_in_pool,
@@ -93,17 +93,15 @@ export function handleEvent(host: ESPHomeApp, event: string, data: unknown): voi
         host._buildOffloadPairings = seededMap(pairings, (p) => p.pin_sha256);
       }
       host._buildOffloadAlerts = seededMap(offloader_alerts, (a) => a.pin_sha256);
-      // remote_jobs: backend snapshot is authoritative for which jobs exist,
-      // but merge onto local entries so a reconnect doesn't wipe display fields
-      // (configuration / target / receiver_label) that submit_job seeded.
-      if (remote_jobs !== undefined) {
+      // remote_jobs: backend snapshot is authoritative for which jobs exist;
+      // every field the slimmed row carries rides the snapshot, so rebuild
+      // straight from it. Omitted means the offloader controller is down —
+      // clear rather than carry stale rows across the reconnect.
+      {
         const seeded = new Map<string, RemoteBuildJobState>();
-        for (const entry of remote_jobs) {
-          const existing = host._buildOffloadJobs.get(entry.job_id);
-          const base =
-            existing ?? stubRemoteBuildJobState(entry.job_id, entry.pin_sha256);
+        for (const entry of remote_jobs ?? []) {
           seeded.set(entry.job_id, {
-            ...base,
+            job_id: entry.job_id,
             pin_sha256: entry.pin_sha256,
             status: entry.status,
             error_message: entry.error_message,
@@ -111,6 +109,14 @@ export function handleEvent(host: ESPHomeApp, event: string, data: unknown): voi
         }
         host._buildOffloadJobs = seeded;
       }
+      // Receiver settings scalars: same skip-while-write guard the
+      // loadRemoteBuildSettings refresh uses, so a reconnect snapshot
+      // can't revert an optimistic toggle mid-write.
+      if (remote_build_settings !== undefined && !host._remoteBuildSetInFlight) {
+        host._remoteBuildEnabled = remote_build_settings.enabled;
+        host._remoteBuildCleanupTtl = remote_build_settings.cleanup_ttl_seconds;
+      }
+      if (firmware_jobs !== undefined) seedJobs(host, firmware_jobs);
       // Skip re-applying offloader settings while a toggle write is in flight,
       // so a reconnect's snapshot can't revert the optimistic value mid-write.
       if (host._offloaderWritesInFlight === 0) {
@@ -148,9 +154,13 @@ export function handleEvent(host: ESPHomeApp, event: string, data: unknown): voi
       break;
     }
     case DeviceEventType.DEVICE_STATE_CHANGED: {
+      // Narrow event stays flat on the wire; fold it into runtime_state.
+      // New runtime_state object so Lit change detection sees the update.
       const { configuration, state } = data as DeviceStateChangedEventData;
       host._devices = host._devices.map((d) =>
-        d.configuration === configuration ? { ...d, state: state as DeviceState } : d
+        d.configuration === configuration
+          ? { ...d, runtime_state: { ...d.runtime_state, state: state as DeviceState } }
+          : d
       );
       break;
     }
@@ -195,7 +205,8 @@ export function handleEvent(host: ESPHomeApp, event: string, data: unknown): voi
       host._labels = host._labels.filter((l) => l.id !== label_id);
       break;
     }
-    case DeviceEventType.REMOTE_BUILD_IDENTITY_ROTATED: {
+    case DeviceEventType.REMOTE_BUILD_IDENTITY_ROTATED:
+    case DeviceEventType.REMOTE_BUILD_LISTENER_CHANGED: {
       host._buildServerIdentityRotationCounter += 1;
       break;
     }
@@ -209,6 +220,9 @@ export function handleEvent(host: ESPHomeApp, event: string, data: unknown): voi
         status: "pending",
         peer_ip: evt.peer_ip,
         connected: false,
+        friendly_name: evt.friendly_name,
+        ha_addon: evt.ha_addon,
+        label_auto: evt.label_auto,
       };
       const current = host._buildServerPeers ?? [];
       const idx = current.findIndex((p) => p.dashboard_id === incoming.dashboard_id);
@@ -232,13 +246,28 @@ export function handleEvent(host: ESPHomeApp, event: string, data: unknown): voi
       }
       break;
     }
-    case DeviceEventType.RECEIVER_PEER_LINK_SESSION_OPENED:
+    case DeviceEventType.RECEIVER_PEER_LINK_SESSION_OPENED: {
+      // OPENED also refreshes the offloader's display identity —
+      // the event carries the stored row's post-refresh values.
+      if (host._buildServerPeers === null) break;
+      const evt = data as ReceiverPeerLinkSessionOpenedEventData;
+      host._buildServerPeers = host._buildServerPeers.map((p) =>
+        p.dashboard_id === evt.dashboard_id
+          ? {
+              ...p,
+              connected: true,
+              ha_addon: evt.ha_addon,
+              ...(evt.friendly_name ? { friendly_name: evt.friendly_name } : {}),
+            }
+          : p
+      );
+      break;
+    }
     case DeviceEventType.RECEIVER_PEER_LINK_SESSION_CLOSED: {
       if (host._buildServerPeers === null) break;
       const evt = data as ReceiverPeerLinkSessionEventData;
-      const connected = event === DeviceEventType.RECEIVER_PEER_LINK_SESSION_OPENED;
       host._buildServerPeers = host._buildServerPeers.map((p) =>
-        p.dashboard_id === evt.dashboard_id ? { ...p, connected } : p
+        p.dashboard_id === evt.dashboard_id ? { ...p, connected: false } : p
       );
       break;
     }
@@ -296,13 +325,19 @@ export function handleEvent(host: ESPHomeApp, event: string, data: unknown): voi
     }
     case DeviceEventType.OFFLOADER_PEER_LINK_OPENED: {
       // OPENED clears the failure record: a successful session-open
-      // invalidates whatever caused the previous close.
+      // invalidates whatever caused the previous close. friendly_name
+      // patches non-empty-only (mirror of the backend persist policy)
+      // so an older receiver can't blank a captured name.
       const evt = data as OffloaderPeerLinkOpenedEventData;
       patchOffloadPairing(host, evt.pin_sha256, {
         connected: true,
         connecting: false,
         last_connect_error: "",
         esphome_version: evt.esphome_version,
+        auto_provision_supported: evt.auto_provision_supported,
+        ha_addon: evt.ha_addon,
+        reset_build_env_supported: evt.reset_build_env_supported,
+        ...(evt.friendly_name ? { friendly_name: evt.friendly_name } : {}),
       });
       break;
     }
@@ -379,24 +414,13 @@ export function handleEvent(host: ESPHomeApp, event: string, data: unknown): voi
     }
     case DeviceEventType.OFFLOADER_JOB_STATE_CHANGED: {
       const evt = data as OffloaderJobStateChangedEventData;
-      const base =
-        host._buildOffloadJobs.get(evt.job_id) ??
-        stubRemoteBuildJobState(evt.job_id, evt.pin_sha256);
+      // The slimmed row is wholly event-derived; building it fresh keeps a
+      // stale entry from ever contributing identity fields.
       host._buildOffloadJobs = new Map(host._buildOffloadJobs).set(evt.job_id, {
-        ...base,
+        job_id: evt.job_id,
+        pin_sha256: evt.pin_sha256,
         status: evt.status,
         error_message: evt.error_message,
-      });
-      break;
-    }
-    case DeviceEventType.OFFLOADER_JOB_OUTPUT: {
-      const evt = data as OffloaderJobOutputEventData;
-      const base =
-        host._buildOffloadJobs.get(evt.job_id) ??
-        stubRemoteBuildJobState(evt.job_id, evt.pin_sha256);
-      host._buildOffloadJobs = new Map(host._buildOffloadJobs).set(evt.job_id, {
-        ...base,
-        output: [...base.output, evt.line],
       });
       break;
     }

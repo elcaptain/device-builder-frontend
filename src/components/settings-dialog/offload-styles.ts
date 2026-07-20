@@ -44,9 +44,20 @@ export const offloaderAlertStyles = css`
 `;
 
 export const pairingRowStyles = css`
+  /* Wraps so a wide button label (German) drops below the helper text
+     instead of squeezing it to a word per line on narrow viewports. */
   .pair-build-server-row {
     align-items: center;
     gap: var(--wa-space-s);
+    flex-wrap: wrap;
+  }
+
+  .pair-build-server-row .row-label {
+    flex: 1 1 240px;
+  }
+
+  .pair-build-server-row .btn-pair-build-server {
+    margin-left: auto;
   }
 
   .btn-pair-build-server {
@@ -114,6 +125,7 @@ export const pairingRowStyles = css`
      its siblings). The pairing row's trash button is the shared
      .peer-remove in shared-styles.ts. */
   .btn-edit-endpoint,
+  .btn-reset-peer-env,
   .btn-build-remote,
   .btn-view-remote-build,
   .offloader-alert-unpair {
@@ -128,16 +140,19 @@ export const pairingRowStyles = css`
     flex-shrink: 0;
   }
 
-  .btn-edit-endpoint {
+  .btn-edit-endpoint,
+  .btn-reset-peer-env {
     width: 32px;
     border-radius: var(--wa-border-radius-s);
   }
 
-  .btn-edit-endpoint wa-icon {
+  .btn-edit-endpoint wa-icon,
+  .btn-reset-peer-env wa-icon {
     font-size: 16px;
   }
 
   /* Destructive actions tint error on hover; edit tints primary. */
+  .btn-reset-peer-env:hover,
   .offloader-alert-unpair:hover {
     background: color-mix(in srgb, var(--esphome-error), white 90%);
     color: var(--esphome-error);
@@ -166,6 +181,7 @@ export const pairingRowStyles = css`
   }
 
   .btn-edit-endpoint:focus-visible,
+  .btn-reset-peer-env:focus-visible,
   .btn-build-remote:focus-visible,
   .btn-view-remote-build:focus-visible,
   .offloader-alert-unpair:focus-visible {

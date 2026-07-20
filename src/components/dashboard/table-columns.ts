@@ -7,9 +7,10 @@ import { JobStatus } from "../../api/types/firmware-jobs.js";
 import type { LocalizeFunc } from "../../common/localize.js";
 import { DEVICE_SORT_COLLATOR, deviceSortKey } from "../../util/device-sort.js";
 import { getCompactEncryptionVisual } from "../../util/encryption-state.js";
+import { fireEvent } from "../../util/fire-event.js";
 import { formatFileSize } from "../../util/format-file-size.js";
 import { renderLabelChips } from "../../util/label-chip-template.js";
-import { updateButtonTitle } from "../../util/update-tooltip.js";
+import { busyActionLabel, updateActionTitle } from "../../util/update-tooltip.js";
 import { renderVisitWebUiLink } from "../../util/visit-web-ui-link.js";
 import { buildWebUiUrl } from "../../util/web-ui-url.js";
 
@@ -73,9 +74,7 @@ const RECENT_LABEL_KEY: Record<JobStatus, string> = {
 
 const dispatchRowEvent = (e: Event, name: string, device: ConfiguredDevice) => {
   e.stopPropagation();
-  (e.currentTarget as HTMLElement).dispatchEvent(
-    new CustomEvent(name, { detail: device, bubbles: true, composed: true })
-  );
+  fireEvent(e.currentTarget as HTMLElement, name, device);
 };
 
 // One "no data" placeholder for every column. Rendered in the muted
@@ -317,6 +316,11 @@ export function createDeviceColumns(localize: LocalizeFunc): ColumnDef<DeviceRow
            free side-effect. Mirrors the legacy dashboard. */
         const showUpdate = row.showUpdate;
         const showInstall = !showUpdate && row.showModified;
+        const installLabel = busyActionLabel(
+          localize,
+          row.busy,
+          "dashboard.table_action_install"
+        );
         const visitUrl = buildWebUiUrl(device);
         const showVisit = visitUrl !== "";
         // Priority order (highest → lowest, last to drop on narrow
@@ -330,7 +334,6 @@ export function createDeviceColumns(localize: LocalizeFunc): ColumnDef<DeviceRow
             class="cell-action-btn cell-action-btn--accent cell-action-btn--edit"
             aria-label=${localize("dashboard.table_action_edit")}
             title=${localize("dashboard.table_action_edit")}
-            ?disabled=${row.busy}
             @click=${(e: Event) => dispatchRowEvent(e, "edit-device", device)}
           >
             <wa-icon library="mdi" name="pencil"></wa-icon>
@@ -339,10 +342,14 @@ export function createDeviceColumns(localize: LocalizeFunc): ColumnDef<DeviceRow
             showInstall
               ? html`<button
                   class="cell-action-btn cell-action-btn--accent cell-action-btn--install"
-                  aria-label=${localize("dashboard.table_action_install")}
-                  title=${localize("dashboard.table_action_install")}
-                  ?disabled=${row.busy}
-                  @click=${(e: Event) => dispatchRowEvent(e, "install-device", device)}
+                  aria-label=${installLabel}
+                  title=${installLabel}
+                  @click=${(e: Event) =>
+                    dispatchRowEvent(
+                      e,
+                      row.busy ? "show-progress" : "install-device",
+                      device
+                    )}
                 >
                   <wa-icon library="mdi" name="upload"></wa-icon>
                 </button>`
@@ -352,15 +359,24 @@ export function createDeviceColumns(localize: LocalizeFunc): ColumnDef<DeviceRow
             showUpdate
               ? html`<button
                   class="cell-action-btn cell-action-btn--accent cell-action-btn--install"
-                  aria-label=${localize("dashboard.table_action_update")}
-                  title=${updateButtonTitle(
+                  aria-label=${busyActionLabel(
                     localize,
-                    device.deployed_version,
+                    row.busy,
+                    "dashboard.table_action_update"
+                  )}
+                  title=${updateActionTitle(
+                    localize,
+                    row.busy,
+                    device.runtime_state.deployed_version,
                     device.current_version,
                     "dashboard.table_action_update"
                   )}
-                  ?disabled=${row.busy}
-                  @click=${(e: Event) => dispatchRowEvent(e, "update-device", device)}
+                  @click=${(e: Event) =>
+                    dispatchRowEvent(
+                      e,
+                      row.busy ? "show-progress" : "update-device",
+                      device
+                    )}
                 >
                   <wa-icon library="mdi" name="upload"></wa-icon>
                 </button>`

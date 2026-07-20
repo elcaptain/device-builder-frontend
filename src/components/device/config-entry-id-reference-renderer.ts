@@ -14,6 +14,7 @@ import {
 } from "../../util/config-entry-yaml-scan.js";
 import { renderInlineError } from "../../util/render-error.js";
 import { resolveSubstitutions } from "../../util/substitutions.js";
+import { parseTopLevelComponents } from "../../util/yaml-serialize.js";
 import {
   effectiveDisabled,
   fieldKeyAttr,
@@ -24,6 +25,7 @@ import {
 } from "./config-entry-renderers-shared.js";
 
 export const ADD_NEW_SENTINEL = "__esphome_add_new__";
+export const AUTO_SENTINEL = "__esphome_auto__";
 
 export function renderIdReferenceField(
   entry: ConfigEntry,
@@ -81,6 +83,16 @@ export function renderIdReferenceField(
     : nothing;
   // Solo "Add new" CTA only when there's genuinely nothing to show.
   const empty = candidates.length === 0 && !hasOrphanValue;
+  // An id-less singleton (plain logger:, wifi:, ...) yields no candidates
+  // even though the domain is configured; ESPHome auto-resolves the
+  // reference, so say that instead of claiming nothing is configured.
+  // Only for an optional reference (same gate as the revert-to-auto
+  // option below): a required one needs an explicit id, so the Add CTA
+  // is the honest empty state. Scanned from the YAML rather than
+  // ctx.presentComponents, which not every form host wires up (the
+  // automation action form doesn't).
+  const emptyButConfigured =
+    empty && !entry.required && parseTopLevelComponents(ctx.yaml).has(domain);
 
   const onChange = (e: Event) => {
     const select = e.target as HTMLSelectElement;
@@ -93,15 +105,31 @@ export function renderIdReferenceField(
       ctx.requestAddComponent(domain);
       return;
     }
-    ctx.emitChange(path, next);
+    // Empty string clears the key on serialization in every form host,
+    // reverting the field to ESPHome's auto-resolved instance.
+    ctx.emitChange(path, next === AUTO_SENTINEL ? "" : next);
   };
+
+  // Revert-to-auto for an optional reference with a committed value — the
+  // only visual-editor way out of a dangling id (e.g. the synthetic
+  // ``logger_id: logger`` older builds pre-filled, #2208). An empty field
+  // already reads as auto via the default-candidate placeholder, so the
+  // option only appears once a value is set.
+  const autoOption =
+    !entry.required && value !== ""
+      ? idOption(
+          AUTO_SENTINEL,
+          ctx.localize("device.id_reference_auto"),
+          ctx.localize("device.id_reference_auto_detail", { domain })
+        )
+      : nothing;
 
   // The "Add new <domain>" option lives at the bottom — same
   // affordance as Home Assistant's entity pickers. When it's the
   // only option (empty state) the dropdown is a single CTA.
   const addOption = html`
     <wa-option
-      class="id-option id-option-add ${empty ? "id-option-add--solo" : ""}"
+      class="id-option id-option-add ${empty && !emptyButConfigured ? "id-option-add--solo" : ""}"
       value=${ADD_NEW_SENTINEL}
     >
       <span class="id-option-stack">
@@ -120,9 +148,23 @@ export function renderIdReferenceField(
         <wa-select
           class=${fieldError ? "invalid" : ""}
           ?disabled=${effectiveDisabled(entry, ctx)}
-          placeholder=${ctx.localize("device.id_reference_empty", { domain })}
+          placeholder=${ctx.localize(
+            emptyButConfigured
+              ? "device.id_reference_auto_configured"
+              : "device.id_reference_empty",
+            { domain }
+          )}
           @change=${onChange}
         >
+          ${
+            emptyButConfigured
+              ? idOption(
+                  AUTO_SENTINEL,
+                  ctx.localize("device.id_reference_auto"),
+                  ctx.localize("device.id_reference_auto_detail", { domain })
+                )
+              : nothing
+          }
           ${addOption}
         </wa-select>
         ${renderFieldError(path, ctx)}
@@ -144,7 +186,7 @@ export function renderIdReferenceField(
         }
         @change=${onChange}
       >
-        ${orphanOption}
+        ${autoOption} ${orphanOption}
         ${candidates.map((c) => {
           const secondary = c.name ? `${c.id} · ${domain}` : domain;
           // The label is display-only; the stored value stays c.id. Resolve

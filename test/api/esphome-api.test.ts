@@ -7,6 +7,7 @@ import {
   installMockWebSocket,
   uninstallMockWebSocket,
 } from "./mock-websocket.js";
+import { stubStorage } from "../_storage.js";
 
 const serverInfo = {
   server_version: "1.0.0",
@@ -21,16 +22,8 @@ const serverInfoAuthRequired = {
   requires_auth: true,
 };
 
-function stubLocalStorage(initial?: Record<string, string>): Map<string, string> {
-  const store = new Map<string, string>(Object.entries(initial ?? {}));
-  vi.stubGlobal("localStorage", {
-    getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => store.set(k, v),
-    removeItem: (k: string) => store.delete(k),
-    clear: () => store.clear(),
-  });
-  return store;
-}
+const stubLocalStorage = (initial?: Record<string, string>) =>
+  stubStorage("localStorage", initial);
 
 async function connect(api: ESPHomeAPI): Promise<MockWebSocket> {
   const pending = api.connect();
@@ -1172,6 +1165,24 @@ describe("ESPHomeAPI — typed command wrappers", () => {
     await expect(pending).resolves.toEqual(result);
   });
 
+  it("remoteBuildResetPeerBuildEnv sends remote_build/reset_peer_build_env and returns the mirror job", async () => {
+    const api = new ESPHomeAPI();
+    const ws = await connect(api);
+    const pending = api.remoteBuildResetPeerBuildEnv({
+      pin_sha256: "a".repeat(64),
+    });
+    const sent = ws.sentAs<{
+      command: string;
+      message_id: string;
+      args: Record<string, unknown>;
+    }>(0);
+    expect(sent.command).toBe("remote_build/reset_peer_build_env");
+    expect(sent.args).toEqual({ pin_sha256: "a".repeat(64) });
+    const result = { job_id: "reset-1", job_type: "reset_build_env", status: "queued" };
+    ws.receive({ message_id: sent.message_id, result });
+    await expect(pending).resolves.toEqual(result);
+  });
+
   it("unpairRemoteBuild sends remote_build/unpair with pin_sha256", async () => {
     const api = new ESPHomeAPI();
     const ws = await connect(api);
@@ -1225,86 +1236,6 @@ describe("ESPHomeAPI — typed command wrappers", () => {
       connecting: true,
       last_connect_error: "",
     };
-    ws.receive({ message_id: sent.message_id, result });
-    await expect(pending).resolves.toEqual(result);
-  });
-
-  it("submitRemoteBuildJob sends remote_build/submit_job with pin + configuration + target", async () => {
-    const api = new ESPHomeAPI();
-    const ws = await connect(api);
-    const pending = api.submitRemoteBuildJob({
-      pin_sha256: "a".repeat(64),
-      configuration: "kitchen.yaml",
-      target: JobType.COMPILE,
-    });
-    const sent = ws.sentAs<{
-      command: string;
-      message_id: string;
-      args: Record<string, unknown>;
-    }>(0);
-    expect(sent.command).toBe("remote_build/submit_job");
-    expect(sent.args).toEqual({
-      pin_sha256: "a".repeat(64),
-      configuration: "kitchen.yaml",
-      target: JobType.COMPILE,
-    });
-    const result = { job_id: "abc123", accepted: true };
-    ws.receive({ message_id: sent.message_id, result });
-    await expect(pending).resolves.toEqual(result);
-  });
-
-  it("submitRemoteBuildJob surfaces a rejection with reason", async () => {
-    const api = new ESPHomeAPI();
-    const ws = await connect(api);
-    const pending = api.submitRemoteBuildJob({
-      pin_sha256: "a".repeat(64),
-      configuration: "kitchen.yaml",
-      target: JobType.UPLOAD,
-    });
-    const sent = ws.sentAs<{ message_id: string }>(0);
-    const result = { job_id: "abc123", accepted: false, reason: "queue_full" };
-    ws.receive({ message_id: sent.message_id, result });
-    await expect(pending).resolves.toEqual(result);
-  });
-
-  it("cancelRemoteBuildJob sends remote_build/cancel_job with pin + job_id", async () => {
-    const api = new ESPHomeAPI();
-    const ws = await connect(api);
-    const pending = api.cancelRemoteBuildJob({
-      pin_sha256: "a".repeat(64),
-      job_id: "abc123",
-    });
-    const sent = ws.sentAs<{
-      command: string;
-      message_id: string;
-      args: Record<string, unknown>;
-    }>(0);
-    expect(sent.command).toBe("remote_build/cancel_job");
-    expect(sent.args).toEqual({
-      pin_sha256: "a".repeat(64),
-      job_id: "abc123",
-    });
-    const result = { sent: true };
-    ws.receive({ message_id: sent.message_id, result });
-    await expect(pending).resolves.toEqual(result);
-  });
-
-  it("cancelRemoteBuildJob surfaces sent=false on a same-tick wire failure", async () => {
-    // ``sent: false`` is the documented signal for a Noise-encrypt
-    // / WS-send failure on the offloader side — the cancel never
-    // reached the wire. The frontend treats it the same as a
-    // typed error toast (the receiver's JOB_CANCELLED-driven
-    // status flip won't fire), but the API client wrapper
-    // itself just returns the literal payload; mapping happens
-    // in the dialog.
-    const api = new ESPHomeAPI();
-    const ws = await connect(api);
-    const pending = api.cancelRemoteBuildJob({
-      pin_sha256: "a".repeat(64),
-      job_id: "abc123",
-    });
-    const sent = ws.sentAs<{ message_id: string }>(0);
-    const result = { sent: false };
     ws.receive({ message_id: sent.message_id, result });
     await expect(pending).resolves.toEqual(result);
   });

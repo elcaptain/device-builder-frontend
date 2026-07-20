@@ -1,8 +1,17 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { type FirmwareJob, JobSource, JobStatus } from "../../api/types/firmware-jobs.js";
+import { activeLocale } from "../../common/localize.js";
 import { firmwareJobDisplayName } from "../../util/firmware-job-display.js";
 import { isTerminalJobStatus } from "../../util/firmware-job-status.js";
+import { pairingDisplayNameForPin } from "../../util/pairing-display-name.js";
+import { canResetBuildEnv } from "../remote-build-hint.js";
+import { formatElapsed } from "../../util/format-job-time.js";
+import { isPinnableVersion } from "../../util/version-mismatch.js";
 import type { ESPHomeCommandDialog } from "../command-dialog.js";
+import {
+  renderOffloadHint,
+  shouldShowOffloadHint,
+} from "../process-terminal/offload-hint.js";
 import {
   renderBuildFailureSuggestion,
   renderValidationFailureSuggestion,
@@ -29,13 +38,27 @@ export function renderRemoteBuilderSubLine(
   if (source !== JobSource.REMOTE || !label) return nothing;
   // source_esphome_version is also a job-creation-time snapshot; empty when
   // the pairing hadn't completed a peer-link session yet. Render "<label>
-  // (<version>)" so the operator can spot version skew vs the offloader.
-  const version =
+  // (<version>)" with the version that actually builds the firmware: a
+  // receiver that auto-provisions a mismatch compiles with this
+  // dashboard's own esphome in a venv, not its installed one.
+  const receiverVersion =
     liveJob?.source_esphome_version ?? host._primedSource?.source_esphome_version ?? "";
-  const display = version ? `${label} (${version})` : label;
-  // Only allow override for in-flight install — switching mid-upload or
-  // mid-compile is a power-user shape without a UI today.
-  const canOverride = host._commandType === "install";
+  const pin = liveJob?.source_pin_sha256 ?? host._primedSource?.source_pin_sha256 ?? "";
+  const buildsLocalVersion =
+    receiverVersion !== "" &&
+    receiverVersion !== host._appVersion &&
+    isPinnableVersion(host._appVersion) &&
+    (host._pairings?.get(pin)?.auto_provision_supported ?? false);
+  const version = buildsLocalVersion ? host._appVersion : receiverVersion;
+  // The live pairing's display name (handshake friendly name, rename-aware)
+  // wins over the job's creation-time source_label snapshot.
+  const name = pairingDisplayNameForPin(host._pairings, pin, label);
+  const display = version ? `${name} (${version})` : name;
+  // Only allow override for an in-flight install chain — a deferred install
+  // (offline_compile) is the same chain head and keeps the link it had when
+  // it derived "install". Switching a plain compile has no UI today.
+  const canOverride =
+    host._commandType === "install" || host._commandType === "offline_compile";
   return html`
     <div class="remote-builder-sub-line" role="status" slot="sub-line">
       <wa-icon library="mdi" name="server-network"></wa-icon>
@@ -49,7 +72,7 @@ export function renderRemoteBuilderSubLine(
           ? html`
               <span class="spacer"></span>
               <button
-                class="force-local-link"
+                class="force-local-link link-button"
                 ?disabled=${host._switchingToLocal}
                 @click=${host._onForceLocalClick}
               >
@@ -116,10 +139,26 @@ export function renderResetSuggestion(
   if (host._commandType === "validate" || host._failedDuringValidate) {
     return renderValidationFailureSuggestion(host);
   }
-  if (host._commandType !== "install" && host._commandType !== "compile") {
+  if (
+    host._commandType !== "install" &&
+    host._commandType !== "compile" &&
+    host._commandType !== "offline_compile"
+  ) {
     return nothing;
   }
-  return renderBuildFailureSuggestion(host, remotePeerLabel(host));
+  return renderBuildFailureSuggestion(host, remotePeerLabel(host), remoteResetPin(host));
+}
+
+// The pin to offer a remote build-env reset against: non-null only when
+// the failed job ran on a pairing that advertises the capability and is
+// still connected.
+function remoteResetPin(host: ESPHomeCommandDialog): string | null {
+  const live = host._jobId ? host._jobs.get(host._jobId) : undefined;
+  const primed = host._primedSource;
+  if ((live?.source ?? primed?.source) !== JobSource.REMOTE) return null;
+  const pin = live?.source_pin_sha256 ?? primed?.source_pin_sha256 ?? "";
+  const pairing = pin ? host._pairings?.get(pin) : undefined;
+  return pairing && canResetBuildEnv(pairing) ? pin : null;
 }
 
 // Resolve the receiver label for a REMOTE-sourced job. Returns null for
@@ -129,7 +168,143 @@ function remotePeerLabel(host: ESPHomeCommandDialog): string | null {
   const live = host._jobId ? host._jobs.get(host._jobId) : undefined;
   const primed = host._primedSource;
   if ((live?.source ?? primed?.source) !== JobSource.REMOTE) return null;
-  return live?.source_label || primed?.source_label || null;
+  const label = live?.source_label || primed?.source_label || null;
+  if (label === null) return null;
+  const pin = live?.source_pin_sha256 ?? primed?.source_pin_sha256 ?? "";
+  return pairingDisplayNameForPin(host._pairings, pin, label);
+}
+
+// Don't show the run timer until it would read at least "1s" — below that it
+// degrades to the streaming dot rather than a bare "0s".
+const MIN_RUN_TIMER_MS = 1000;
+
+// Whether to show the run timer at all. Only the build commands have a
+// meaningful build time (not clean / validate), and only once the run has
+// accrued at least a second — a sub-second or untimed job (e.g. one compiled
+// before this feature existed) degrades to the plain streaming dot.
+export function showRunTimer(host: ESPHomeCommandDialog): boolean {
+  if (
+    host._commandType !== "install" &&
+    host._commandType !== "compile" &&
+    host._commandType !== "offline_compile" &&
+    host._commandType !== "rename"
+  ) {
+    return false;
+  }
+  const total = host._timer.totalRunElapsedMs;
+  return total !== null && total >= MIN_RUN_TIMER_MS;
+}
+
+// Whole-run timer pinned lower-left — the number that matches PlatformIO's
+// "Took N seconds", so it never reads shorter than the log and never
+// disappears once the job has started (it stays through a queued/deferred
+// install too). Pulses while the run is live, freezes at completion. Clicking
+// opens the detail popover with the compile-only breakdown + offload nudge.
+export function renderCompileTimer(
+  host: ESPHomeCommandDialog
+): TemplateResult | typeof nothing {
+  if (!showRunTimer(host)) return nothing;
+  const total = host._timer.totalRunElapsedMs!;
+  const lang = activeLocale();
+  return html`
+    <div class="compile-timer-wrap" slot="toolbar-left">
+      <button
+        class="compile-timer ${host._timer.isRunFrozen ? "" : "compile-timer--live"}"
+        aria-expanded=${host._timerDetailOpen ? "true" : "false"}
+        aria-haspopup="dialog"
+        aria-label="${formatElapsed(total, lang)}. ${host._localize("command.run_elapsed_title")}"
+        title=${host._localize("command.run_elapsed_title")}
+        @click=${host._toggleTimerDetail}
+      >
+        <wa-icon library="mdi" name="timer-outline"></wa-icon>
+        <span>${formatElapsed(total, lang)}</span>
+      </button>
+      ${host._timerDetailOpen ? renderTimerDetail(host, total, lang) : nothing}
+    </div>
+  `;
+}
+
+// The breakdown revealed on click: the compile-only slice of the run, and the
+// offload nudge attached to it (a long local compile is what offloading fixes).
+function renderTimerDetail(
+  host: ESPHomeCommandDialog,
+  totalMs: number,
+  lang: string
+): TemplateResult {
+  const compile = host._timer.compileDetailMs;
+  const showHint =
+    // While the compile is live the inline suggestion already carries this
+    // nudge; only add it here once that's gone, so they never double up.
+    !host._timer.isCompiling &&
+    compile !== null &&
+    shouldShowOffloadHint({
+      elapsedMs: compile,
+      source: resolveJobSource(host),
+      pairings: host._pairings,
+      desktop: Boolean(host._desktopVersion),
+    });
+  return html`
+    <div
+      class="compile-timer-detail"
+      role="dialog"
+      aria-label=${host._localize("command.timer_detail_title")}
+    >
+      ${
+        // An old build from before compile timing existed doesn't know its
+        // compile time — show only the total rather than a bogus "0s".
+        compile === null
+          ? nothing
+          : html`<div class="compile-timer-row">
+              <span>${host._localize("command.compile_time_label")}</span>
+              <span>${formatElapsed(compile, lang)}</span>
+            </div>`
+      }
+      <div class="compile-timer-row">
+        <span>${host._localize("command.total_run_time_label")}</span>
+        <span>${formatElapsed(totalMs, lang)}</span>
+      </div>
+      ${
+        showHint
+          ? html`<div class="compile-timer-hint">
+              ${host._localize("command.timer_offload_hint")}
+              <button
+                class="reset-suggestion-link"
+                @click=${host._tryOpenBuildOffloadSettings}
+              >
+                ${host._localize("command.offload_hint_action")}
+              </button>
+            </div>`
+          : nothing
+      }
+    </div>
+  `;
+}
+
+// Nudge a slow local compile toward "send builds to a faster machine" while it
+// is still running (a finished compile hands the slot to the reset hint on
+// failure). Gated on compile elapsed past the threshold; suppressed for remote
+// builds and when offloading is already set up.
+export function renderOffloadHintSlot(
+  host: ESPHomeCommandDialog
+): TemplateResult | typeof nothing {
+  if (!host._timer.isCompiling) return nothing;
+  const visible = shouldShowOffloadHint({
+    elapsedMs: host._timer.compileElapsedMs ?? 0,
+    source: resolveJobSource(host),
+    pairings: host._pairings,
+    desktop: Boolean(host._desktopVersion),
+  });
+  return visible ? renderOffloadHint(host) : nothing;
+}
+
+// The job's build source (LOCAL / REMOTE / REMOTE_PENDING): the live jobs-context
+// entry wins, then the locally-primed snapshot for the gap before it lands.
+function resolveJobSource(host: ESPHomeCommandDialog): JobSource {
+  return (
+    (host._jobId ? host._jobs.get(host._jobId)?.source : undefined) ??
+    host._primedSource?.source ??
+    JobSource.LOCAL
+  );
 }
 
 // --show-secrets is an `esphome config` flag — hide the toggle on every other
@@ -175,7 +350,7 @@ export function renderToolbar(host: ESPHomeCommandDialog): TemplateResult {
   return html`
     ${renderShowSecretsToggle(host)} ${renderShowLogsAfterInstallToggle(host)}
     ${
-      host._lines.length > 0
+      host._log.lines.length > 0
         ? renderTermButton({
             icon: "download",
             title: host._localize("command.download"),
