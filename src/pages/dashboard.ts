@@ -415,7 +415,6 @@ export class ESPHomePageDashboard extends LitElement {
     const pending = consumePendingHighlight();
     if (pending !== null) {
       this._highlightFreshDevice(pending);
-      this._tryConsumePendingScroll();
     }
     // USB "Set it up" actioned from another route stashes the port and
     // navigates here. Defer to first render so _createDialog (@query)
@@ -769,11 +768,16 @@ export class ESPHomePageDashboard extends LitElement {
     };
   }
 
+  /** Clear the search term and resync YAML mode, without touching focus. */
+  private _resetSearch(): void {
+    this._search = "";
+    this._syncYamlSearch();
+  }
+
   /** Clear just the search box (facets untouched) and refocus it so the
    *  user can retype. Wired to the in-input × control (#1160). */
   _clearSearch = () => {
-    this._search = "";
-    this._syncYamlSearch();
+    this._resetSearch();
     refocusSearchInput(this);
   };
 
@@ -782,13 +786,12 @@ export class ESPHomePageDashboard extends LitElement {
    *  ``_hasActiveFilters`` — so this is always doing something
    *  visible from the user's perspective. */
   _clearAllFilters = () => {
-    this._search = "";
+    this._resetSearch();
     this._selectedLabels = [];
     this._selectedAreas = [];
     this._selectedPlatforms = [];
     this._selectedStates = [];
     this._selectedUpdateStatus = [];
-    this._syncYamlSearch();
   };
 
   /** Apply every active facet filter to the device list. Labels and
@@ -907,10 +910,22 @@ export class ESPHomePageDashboard extends LitElement {
       this._recentlyAdopted = null;
       this._adoptHighlightTimer = null;
     }, 4000);
+    // The device may already be in _devices (an ADDED push beating the
+    // command reply), in which case updated()'s _devices gate never
+    // fires — scroll now; otherwise the pending scroll stays armed.
+    this._tryConsumePendingScroll();
   }
 
   _onAdopted = (e: CustomEvent<{ name: string; friendlyName: string }>) => {
     this._highlightFreshDevice(`${e.detail.name}.yaml`);
+  };
+
+  /** Post-clone reveal (#2246): the search that matched the source would
+   *  hide the fresh clone, so clear it (no refocus — attention belongs on
+   *  the new card; facets stay, adopt parity). */
+  _onCloned = (configuration: string) => {
+    this._resetSearch();
+    this._highlightFreshDevice(configuration);
   };
 
   private _tryConsumePendingScroll(): void {
