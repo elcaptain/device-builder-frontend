@@ -71,11 +71,19 @@ export function onValueChange(
   const errKey = path.join(".");
   const cleared = clearPathErrors(host._fieldErrors, errKey);
   if (cleared) host._fieldErrors = cleared;
-  // Same optimistic clear for the backend error on the edited path — it
-  // reappears on the next lint pass if the value is still invalid.
-  if (host.backendErrors.fields.has(errKey) && !host._clearedBackendPaths.has(errKey)) {
-    host._clearedBackendPaths = new Set(host._clearedBackendPaths).add(errKey);
+  // Same optimistic clear for backend errors on the edited path — per-item
+  // keys under it included (a list edit emits at the field path while the
+  // backend error keys ``field.1``, #1354). They reappear on the next lint
+  // pass if the value is still invalid.
+  const itemPrefix = `${errKey}.`;
+  let nextCleared: Set<string> | null = null;
+  for (const k of host.backendErrors.fields.keys()) {
+    if ((k === errKey || k.startsWith(itemPrefix)) && !host._clearedBackendPaths.has(k)) {
+      nextCleared ??= new Set(host._clearedBackendPaths);
+      nextCleared.add(k);
+    }
   }
+  if (nextCleared) host._clearedBackendPaths = nextCleared;
   host._scheduleDraftFlush();
 }
 

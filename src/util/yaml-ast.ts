@@ -204,10 +204,11 @@ export function getKeyPath(state: EditorState, pos: number): string[] {
 export type YamlPathSegment = string | number;
 
 /**
- * Like ``getKeyPath``, but block-sequence items contribute their
- * numeric index, so a field inside ``esphome: areas: - id:`` yields
- * ``["esphome", "areas", 0, "id"]`` — the shape value paths use for
- * fields nested in list entries.
+ * Like ``getKeyPath``, but sequence items contribute their numeric
+ * index, so a field inside ``esphome: areas: - id:`` yields
+ * ``["esphome", "areas", 0, "id"]`` and an item of ``data: [42, 10]``
+ * yields ``[…, "data", 1]`` — the shape value paths use for fields
+ * nested in list entries.
  */
 export function getKeyPathWithListIndices(
   state: EditorState,
@@ -218,7 +219,7 @@ export function getKeyPathWithListIndices(
     if (node.name === "Pair") {
       const k = getPairKey(state, node);
       if (k) segs.push(k);
-    } else if (node.name === "Item" && node.parent?.name === "BlockSequence") {
+    } else if (isSequenceItem(node)) {
       let idx = 0;
       for (let s = node.prevSibling; s; s = s.prevSibling) {
         if (s.name === "Item") idx++;
@@ -227,6 +228,32 @@ export function getKeyPathWithListIndices(
     }
   }
   return segs.reverse();
+}
+
+// The one definition of "a sequence item" — the index-contributing check in
+// ``getKeyPathWithListIndices`` and the scalar-item probe below must agree,
+// or a keyPath's trailing index and its scalarItemTail flag drift apart.
+function isSequenceItem(node: {
+  name: string;
+  parent: { name: string } | null;
+}): boolean {
+  return (
+    node.name === "Item" &&
+    (node.parent?.name === "BlockSequence" || node.parent?.name === "FlowSequence")
+  );
+}
+
+/**
+ * True when *pos* anchors inside a scalar list item (a ``Literal`` /
+ * ``QuotedLiteral`` directly under a sequence ``Item``) — the one
+ * key-path shape whose trailing index maps to a renderable form row.
+ */
+export function isScalarListItemAt(state: EditorState, pos: number): boolean {
+  const node = resolveAnchoredNode(state, pos);
+  if (!node || (node.name !== "Literal" && node.name !== "QuotedLiteral")) {
+    return false;
+  }
+  return node.parent !== null && isSequenceItem(node.parent);
 }
 
 /**

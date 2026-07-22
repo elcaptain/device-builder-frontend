@@ -124,7 +124,6 @@ export function renderMultiValueField(
   const items: string[] = numeric
     ? raw.map((v) => String(v ?? ""))
     : raw.map((v) => escapeForInput(String(v)));
-  const invalid = ctx.errorAt(path) !== null;
   const disabled = effectiveDisabled(entry, ctx);
   const { addItem, removeAt } = arrayItemHandlers(ctx, path, () => "");
   const updateAt = (idx: number, value: string) => {
@@ -158,11 +157,11 @@ export function renderMultiValueField(
           raw[i] != null &&
           raw[i] !== "" &&
           Number.isFinite(Number(String(raw[i])));
-        // Errors land per item (``field.0``, #1348); flag and explain only
-        // the offending row. The field-level ``invalid`` stays for errors
-        // keyed at the field itself (required-empty).
+        // Errors land per item (``field.0``); flag only the offending row.
+        // A field-keyed error is list-level — rendered once below, not on
+        // every row (#1354).
         const rowPath = [...path, String(i)];
-        const rowInvalid = invalid || ctx.errorAt(rowPath) !== null;
+        const rowInvalid = ctx.errorAt(rowPath) !== null;
         // Edit buffer keeps raw keystrokes on screen while typing;
         // clears on blur.
         const display = intList ? (ctx.getEditingMagnitude(rowPath) ?? item) : item;
