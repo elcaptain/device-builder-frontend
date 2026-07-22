@@ -1,10 +1,11 @@
 /**
  * Targeted tests for renderMultiValueField numeric handling.
  *
- * INTEGER / FLOAT lists (remote_receiver raw codes via the backend,
- * modbus custom_command, lcd user-characters data) must render number
- * inputs and coerce edits back to numbers, so the YAML serializer emits
- * them unquoted; STRING lists keep text inputs and string values.
+ * INTEGER lists render text rows (0x literals, >2^53 decimals, and
+ * ${var} references must display and stay typeable, #1349); FLOAT lists
+ * keep number spinners on finite rows. Edits coerce back to numbers so
+ * the YAML serializer emits them unquoted; STRING lists keep text
+ * inputs and string values.
  */
 import { describe, expect, it } from "vitest";
 import { ConfigEntryType } from "../../../src/api/types/config-entries.js";
@@ -17,16 +18,93 @@ function fireInput(binding: Record<string, unknown>, value: string): void {
 }
 
 describe("renderMultiValueField numeric coercion", () => {
-  it("renders number inputs and emits numbers for an INTEGER list", () => {
+  it("renders text inputs and emits numbers for an INTEGER list", () => {
+    // Text, not number: mirrors renderIntField (#1349) so 0x literals,
+    // >2^53 decimals, and ${var} references display and stay typeable.
     const ctx = makeRenderCtx({ field: [1, 2] });
     const tpl = renderMultiValueField(makeEntry(ConfigEntryType.INTEGER), ["field"], ctx);
     const inputs = findElementBindings(tpl, "input");
 
-    expect(inputs[0].type).toBe("number");
-    expect(inputs[0].step).toBe("1");
+    expect(inputs[0].type).toBe("text");
 
     fireInput(inputs[1], "5");
     expect(ctx.emitChange).toHaveBeenCalledWith(["field"], [1, 5]);
+  });
+
+  it("keeps 0x literals and >2^53 decimals verbatim in INTEGER rows", () => {
+    const ctx = makeRenderCtx({ field: ["0x10", "9007199254740993"] });
+    const tpl = renderMultiValueField(makeEntry(ConfigEntryType.INTEGER), ["field"], ctx);
+    const inputs = findElementBindings(tpl, "input");
+
+    expect(inputs[0][".value"]).toBe("0x10");
+    fireInput(inputs[0], "0x20");
+    expect(ctx.emitChange).toHaveBeenCalledWith(["field"], ["0x20", "9007199254740993"]);
+
+    // Editing the 64-bit row itself commits the string, never a rounded
+    // double (the Number.isSafeInteger guard in coerceIntFieldValue).
+    expect(inputs[1][".value"]).toBe("9007199254740993");
+    fireInput(inputs[1], "18446744073709551615");
+    expect(ctx.emitChange).toHaveBeenCalledWith(
+      ["field"],
+      ["0x10", "18446744073709551615"]
+    );
+  });
+
+  it("routes INTEGER row edits through the editing buffer", () => {
+    const ctx = makeRenderCtx({ field: [42] });
+    const tpl = renderMultiValueField(makeEntry(ConfigEntryType.INTEGER), ["field"], ctx);
+    const inputs = findElementBindings(tpl, "input");
+
+    fireInput(inputs[0], "0042");
+    expect(ctx.setEditingMagnitude).toHaveBeenCalledWith(["field", "0"], "0042");
+    expect(ctx.emitChange).toHaveBeenCalledWith(["field"], [42]);
+
+    (inputs[0]["@blur"] as () => void)();
+    expect(ctx.clearEditingMagnitude).toHaveBeenCalledWith(["field", "0"]);
+  });
+
+  it("shows the edit buffer verbatim while it is set", () => {
+    const ctx = makeRenderCtx(
+      { field: [42] },
+      { overrides: { getEditingMagnitude: () => "0042" } }
+    );
+    const tpl = renderMultiValueField(makeEntry(ConfigEntryType.INTEGER), ["field"], ctx);
+    const inputs = findElementBindings(tpl, "input");
+
+    expect(inputs[0][".value"]).toBe("0042");
+  });
+
+  it("invalidates row edit buffers when a row is removed", () => {
+    const ctx = makeRenderCtx({ field: [1, 2] });
+    const tpl = renderMultiValueField(makeEntry(ConfigEntryType.INTEGER), ["field"], ctx);
+    const removeButtons = findElementBindings(tpl, "button");
+
+    (removeButtons[0]["@click"] as () => void)();
+    expect(ctx.clearEditingMagnitudesUnder).toHaveBeenCalledWith(["field"]);
+    expect(ctx.emitChange).toHaveBeenCalledWith(["field"], [2]);
+  });
+
+  it("keeps FLOAT literal rows on the number spinner, junk rows on text", () => {
+    const ctx = makeRenderCtx({ field: [1.5, "abc"] });
+    const tpl = renderMultiValueField(makeEntry(ConfigEntryType.FLOAT), ["field"], ctx);
+    const inputs = findElementBindings(tpl, "input");
+
+    expect(inputs[0].type).toBe("number");
+    expect(inputs[1].type).toBe("text");
+    expect(inputs[1][".value"]).toBe("abc");
+
+    fireInput(inputs[1], "xyz");
+    expect(ctx.emitChange).toHaveBeenCalledWith(["field"], [1.5, "xyz"]);
+  });
+
+  it("renders a fresh empty FLOAT row as text so a reference is typeable", () => {
+    const ctx = makeRenderCtx({ field: [""] });
+    const tpl = renderMultiValueField(makeEntry(ConfigEntryType.FLOAT), ["field"], ctx);
+    const inputs = findElementBindings(tpl, "input");
+
+    expect(inputs[0].type).toBe("text");
+    fireInput(inputs[0], "${gain}");
+    expect(ctx.emitChange).toHaveBeenCalledWith(["field"], ["${gain}"]);
   });
 
   it("uses step=any for a FLOAT list", () => {
@@ -75,9 +153,9 @@ describe("renderMultiValueField numeric substitution rows", () => {
   // esphome/device-builder-frontend#1346: a ${var} item can't drive a number
   // input (the browser blanks it) and Number() on edit clobbered the
   // reference. The row edits as text and round-trips the string.
-  it("renders the ${var} row as text while sibling literals stay numeric", () => {
+  it("renders a FLOAT ${var} row as text while sibling literals stay numeric", () => {
     const ctx = makeRenderCtx({ field: ["${ch}", 5] });
-    const tpl = renderMultiValueField(makeEntry(ConfigEntryType.INTEGER), ["field"], ctx);
+    const tpl = renderMultiValueField(makeEntry(ConfigEntryType.FLOAT), ["field"], ctx);
     const inputs = findElementBindings(tpl, "input");
 
     expect(inputs[0].type).toBe("text");
