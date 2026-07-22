@@ -3290,3 +3290,105 @@ describe("updateSectionInYaml — mapping-list rows keep comments on edit (#1379
     expect(after).toContain("password: changed");
   });
 });
+
+describe("updateSectionInYaml — comment-only values are empty (#1385)", () => {
+  it("parses a comment-only scalar as null, not the literal string", () => {
+    const yaml = ["wifi:", "  domain: # note", "  ssid: home", ""].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.domain).toBeNull();
+    expect(values.ssid).toBe("home");
+  });
+
+  it("re-appends the comment when the empty field gains a value", () => {
+    const yaml = ["wifi:", "  domain: # note", "  ssid: home", ""].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    values.domain = ".local";
+    const after = updateSectionInYaml(yaml, "wifi", values, 1);
+    expect(after).toContain("  domain: .local # note\n");
+  });
+
+  it("still parses a nested mapping under a commented key line", () => {
+    const yaml = [
+      "wifi:",
+      "  manual_ip: # static below",
+      "    static_ip: 10.0.0.2",
+      "    gateway: 10.0.0.1",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.manual_ip).toEqual({ static_ip: "10.0.0.2", gateway: "10.0.0.1" });
+  });
+
+  it("still parses a list under a commented key line", () => {
+    const yaml = [
+      "wifi:",
+      "  networks: # known nets",
+      "    - homenet",
+      "    - guestnet",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.networks).toEqual(["homenet", "guestnet"]);
+  });
+
+  it("parses a comment-only mapping-item field as null", () => {
+    const yaml = [
+      "wifi:",
+      "  networks:",
+      "    - ssid: # pick later",
+      "      password: hunter2",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.networks).toEqual([{ ssid: null, password: "hunter2" }]);
+  });
+
+  it("coerces a pathological comment-only list item to the empty string", () => {
+    const yaml = [
+      "wifi:",
+      "  networks:",
+      "    - # placeholder",
+      "    - homenet",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.networks).toEqual(["", "homenet"]);
+  });
+
+  it("parses a comment-only value inside a nested mapping as null", () => {
+    const yaml = [
+      "wifi:",
+      "  manual_ip:",
+      "    static_ip: # todo",
+      "    gateway: 10.0.0.1",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.manual_ip).toEqual({ static_ip: null, gateway: "10.0.0.1" });
+  });
+
+  it("parses an all-value-less nested block as an object of nulls", () => {
+    // Deliberate #1385 delta: previously such a block collapsed to null;
+    // per-key nulls match parseFlatMappingField's #941 treatment and the
+    // serializer's null filter keeps re-emits unchanged.
+    const yaml = ["wifi:", "  manual_ip:", "    static_ip:", "    gateway:", ""].join(
+      "\n"
+    );
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.manual_ip).toEqual({ static_ip: null, gateway: null });
+  });
+
+  it("parses the deeper block under a commented nested key instead of dropping it", () => {
+    const yaml = ["wifi:", "  manual_ip:", "    dns1: # note", "      x: 1", ""].join(
+      "\n"
+    );
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.manual_ip).toEqual({ dns1: { x: 1 } });
+  });
+
+  it("keeps a quoted value that merely starts with #", () => {
+    const yaml = ["wifi:", '  ssid: "#lounge"', ""].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.ssid).toBe("#lounge");
+  });
+});

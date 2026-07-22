@@ -3,6 +3,7 @@ import {
   parseFlowList,
   parseScalar,
   splitInlineComment,
+  splitTrimmedInlineComment,
   stripQuotes,
 } from "../../src/util/yaml-scalar.js";
 
@@ -49,6 +50,14 @@ describe("stripQuotes", () => {
 });
 
 describe("splitInlineComment", () => {
+  it("treats a string-opening # as a comment with an empty value (#1385)", () => {
+    expect(splitTrimmedInlineComment("# note")).toEqual({
+      value: "",
+      comment: " # note",
+    });
+    expect(splitInlineComment("# note")).toEqual({ value: "# note", comment: "" });
+  });
+
   it("splits a whitespace-preceded # into value and comment", () => {
     expect(splitInlineComment("true #hides")).toEqual({
       value: "true",

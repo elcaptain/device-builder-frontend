@@ -28,7 +28,8 @@ export const stripQuotes = (s: string): string => {
  * A ``#`` only starts a comment when it's whitespace-preceded and
  * outside quotes — ``Bedroom#2`` and ``"a # b"`` keep the ``#`` in the
  * value. ``comment`` retains its leading whitespace (``""`` when none)
- * so the serializer can re-append it verbatim.
+ * so the serializer can re-append it verbatim. Callers holding
+ * pre-trimmed input use ``splitTrimmedInlineComment`` instead.
  */
 export const splitInlineComment = (raw: string): { value: string; comment: string } => {
   let inSingle = false;
@@ -57,6 +58,15 @@ export const splitInlineComment = (raw: string): { value: string; comment: strin
   }
   return { value: raw, comment: "" };
 };
+
+/** ``splitInlineComment`` for pre-trimmed input, where a string-opening
+ *  ``#`` is a comment over an empty value (``name: # note``, #1385). The
+ *  comment gains a canonical single space so a re-append stays valid —
+ *  the trim ate the source separator. */
+export const splitTrimmedInlineComment = (
+  raw: string
+): { value: string; comment: string } =>
+  raw.startsWith("#") ? { value: "", comment: ` ${raw}` } : splitInlineComment(raw);
 
 // Inline lambda scalar: ``!lambda return x;`` (and the quoted
 // ``!lambda 'return x;'`` form). Recognised as a ``LambdaValue``
