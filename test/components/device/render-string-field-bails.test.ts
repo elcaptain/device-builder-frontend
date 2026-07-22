@@ -24,7 +24,7 @@ import {
 } from "../../../src/components/device/config-entry-renderers/primitives.js";
 import { makeConfigEntry } from "../../../src/util/config-entry-defaults.js";
 import { YamlRawValue } from "../../../src/util/yaml-serialize.js";
-import { makeRenderCtx } from "./_renderer-fixtures.js";
+import { makeEmitCtx, makeRenderCtx } from "./_renderer-fixtures.js";
 
 function makeStringEntry(): ConfigEntry {
   return makeConfigEntry({
@@ -38,12 +38,7 @@ function makeCtx(values: Record<string, unknown>): {
   ctx: RenderCtx;
   emitChange: ReturnType<typeof vi.fn>;
 } {
-  const emitChange = vi.fn();
-  const ctx = makeRenderCtx(values, {
-    board: null,
-    overrides: { emitChange, renderEntry: () => "<rendered>" },
-  });
-  return { ctx, emitChange };
+  return makeEmitCtx(values, { renderEntry: () => "<rendered>" });
 }
 
 /** The bail branch is the only one that emits a ``<p class="field-description">``
@@ -150,6 +145,31 @@ describe("renderTimePeriodField / renderFloatWithUnitField — bail on non-primi
     const tpl = renderTimePeriodField(entry, ["delay"], ctx);
     const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
     expect(rendersBailBranch(json)).toBe(true);
+  });
+
+  it("bails on a boolean under a time-period field", () => {
+    const entry = makeConfigEntry({
+      key: "delay",
+      type: ConfigEntryType.TIME_PERIOD,
+      label: "Delay",
+    });
+    const { ctx } = makeCtx({ delay: true });
+    const tpl = renderTimePeriodField(entry, ["delay"], ctx);
+    const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+    expect(rendersBailBranch(json)).toBe(true);
+  });
+
+  it("keeps a compound duration string editable as text", () => {
+    const entry = makeConfigEntry({
+      key: "delay",
+      type: ConfigEntryType.TIME_PERIOD,
+      label: "Delay",
+    });
+    const { ctx } = makeCtx({ delay: "1h30m" });
+    const tpl = renderTimePeriodField(entry, ["delay"], ctx);
+    const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+    expect(rendersBailBranch(json)).toBe(false);
+    expect(json).toContain("1h30m");
   });
 
   it("renders the editable time-period UI for an actual scalar", () => {
@@ -270,8 +290,20 @@ describe("renderNumberField / renderFloatWithUnitField — bail on unparseable p
     expect(rendersEditableBranch(json)).toBe(true);
   });
 
-  it("bails on a malformed unit string under a float-with-unit field", () => {
+  it("renders editable text for a malformed unit string under a float-with-unit field", () => {
     const { ctx } = makeCtx({ default_target_temperature: "21X" });
+    const tpl = renderFloatWithUnitField(
+      withUnitEntry(),
+      ["default_target_temperature"],
+      ctx
+    );
+    const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+    expect(rendersBailBranch(json)).toBe(false);
+    expect(json).toContain("21X");
+  });
+
+  it("bails on a boolean under a float-with-unit field", () => {
+    const { ctx } = makeCtx({ default_target_temperature: true });
     const tpl = renderFloatWithUnitField(
       withUnitEntry(),
       ["default_target_temperature"],
