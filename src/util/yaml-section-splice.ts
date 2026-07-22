@@ -11,6 +11,7 @@
 import { isPlainObject, isPrimitiveOrNullish } from "./nested-values.js";
 import type { ListItemSource } from "./yaml-section-list.js";
 import {
+  formatYamlFlowList,
   formatYamlScalar,
   serializeYamlValues,
   YamlRawValue,
@@ -43,6 +44,11 @@ export interface ParsedSection {
   // Per-item source fidelity for block scalar list keys, so an edited
   // list splices per item instead of re-emitting every row (#1363).
   listSources: Map<string, ListItemSource>;
+  // Keys whose value was authored as a flow list (``key: [a, b]``), so an
+  // edit re-emits the same single-line style — which also lets the
+  // trailing-comment re-append below fire (#1378). Never overlaps
+  // ``listSources``: the two are set in disjoint parse branches.
+  flowListKeys: Set<string>;
   childIndent: string;
   isListItem: boolean;
   // 0-indexed section header / leading-dash line.
@@ -116,7 +122,9 @@ export function buildSplicedBody(
     // Changed / added key. Keep any standalone-comment run that led the
     // original key — the value line below reformats, the comment stays.
     if (span) bodyLines.push(...lines.slice(span.leadStart, span.start));
-    const fresh = serializeYamlValues({ [key]: val }, childIndent, serializeOptions);
+    const fresh =
+      flowListLine(parsed, key, val, childIndent) ??
+      serializeYamlValues({ [key]: val }, childIndent, serializeOptions);
     // Re-append the field's trailing inline comment when it still
     // serializes to a single scalar line, so an edit keeps it (#1235).
     const comment = parsed.comments.get(key);
@@ -124,6 +132,19 @@ export function buildSplicedBody(
     bodyLines.push(...fresh);
   }
   return bodyLines;
+}
+
+/** A flow-authored key re-emits as the same single flow line (an emptied
+ *  or non-scalar value falls through to the normal re-emit). */
+function flowListLine(
+  parsed: ParsedSection,
+  key: string,
+  val: unknown,
+  childIndent: string
+): string[] | null {
+  if (!parsed.flowListKeys.has(key)) return null;
+  if (!Array.isArray(val) || val.length === 0 || !val.every(isScalarItem)) return null;
+  return [`${childIndent}${key}: ${formatYamlFlowList(val)}`];
 }
 
 // Deliberately stricter than ``isPrimitiveOrNullish``: a nullish item must
