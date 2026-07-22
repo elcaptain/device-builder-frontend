@@ -3392,3 +3392,74 @@ describe("updateSectionInYaml — comment-only values are empty (#1385)", () => 
     expect(values.ssid).toBe("#lounge");
   });
 });
+
+describe("updateSectionInYaml — nested flow lists keep style and comment (#1381)", () => {
+  const yaml = ["display:", "  foo:", "    data: [1, 2] # note", "    size: 20", ""].join(
+    "\n"
+  );
+
+  it("keeps the flow line and comment when a sibling field in the nested mapping changes", () => {
+    const quoted = [
+      "display:",
+      "  foo:",
+      '    data: ["${row}", 2] # note',
+      "    size: 20",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(quoted, "display", 1);
+    (values.foo as Record<string, unknown>).size = 22;
+    const after = updateSectionInYaml(quoted, "display", values, 1);
+    expect(after).toContain('    data: ["${row}", 2] # note\n');
+    expect(after).toContain("size: 22");
+    expect(after).not.toContain("- 2");
+  });
+
+  it("keeps a comment-less nested flow list flow-styled through a sibling edit", () => {
+    const bare = ["display:", "  foo:", "    data: [1, 2]", "    size: 20", ""].join(
+      "\n"
+    );
+    const values = parseYamlSectionValues(bare, "display", 1);
+    (values.foo as Record<string, unknown>).size = 22;
+    const after = updateSectionInYaml(bare, "display", values, 1);
+    expect(after).toContain("    data: [1, 2]\n");
+  });
+
+  it("re-emits canonically when a row is removed via filter (no stale flow/comment)", () => {
+    // ``removeAt`` filters the array; Symbol.species keeps the result a
+    // plain array so the mutation canonicalizes like every other edit.
+    const values = parseYamlSectionValues(yaml, "display", 1);
+    const data = (values.foo as Record<string, unknown>).data as unknown[];
+    (values.foo as Record<string, unknown>).data = data.filter((_, i) => i !== 0);
+    const after = updateSectionInYaml(yaml, "display", values, 1);
+    expect(after).not.toContain("# note");
+    expect(after).not.toContain("[");
+    expect(after).toContain("data:");
+  });
+
+  it("re-emits canonically with no stale comment when the list itself is edited", () => {
+    const values = parseYamlSectionValues(yaml, "display", 1);
+    (values.foo as Record<string, unknown>).data = [1, 3];
+    const after = updateSectionInYaml(yaml, "display", values, 1);
+    expect(after).not.toContain("# note");
+    expect(after).toContain("data:");
+    expect(after).toContain("size: 20");
+  });
+
+  it("keeps a mapping-list item's flow sub-list comment when a sibling field is edited", () => {
+    const items = [
+      "font:",
+      "  extras:",
+      "    - file: a.ttf",
+      "      glyphs: [x, y] # icons",
+      "    - file: b.ttf",
+      "      glyphs: [z]",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(items, "font", 1);
+    (values.extras as Record<string, unknown>[])[0].file = "c.ttf";
+    const after = updateSectionInYaml(items, "font", values, 1);
+    expect(after).toContain("glyphs: [x, y] # icons");
+    expect(after).toContain("file: c.ttf");
+    expect(after).toContain("glyphs: [z]");
+  });
+});
