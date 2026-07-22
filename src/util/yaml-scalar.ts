@@ -71,25 +71,15 @@ const parseInlineLambda = (scalar: string): LambdaValue | null => {
   return m ? { _lambda: stripQuotes(m[1].trim()), _tag: "!lambda" } : null;
 };
 
-// Quoting in YAML is the explicit "treat me as a string" signal —
-// ``key: "on"`` must stay the literal ``"on"`` even though ``on`` is
-// a truthy spelling. Detect the quotes BEFORE stripping so we only
-// run the boolean coercion on plain scalars; otherwise a string
-// field that happens to hold ``"on"`` / ``"yes"`` would silently
-// flip to boolean ``true`` on round-trip.
+// ``isQuotedScalar`` must see the scalar BEFORE ``stripQuotes`` — the
+// quotes are the signal that suppresses coercion.
 export const parseScalar = (raw: string): unknown => {
-  // Strip a trailing inline comment so a boolean coerces and no field
+  // Strip a trailing inline comment so plain scalars coerce and no field
   // value is polluted with `# ...` text (#1235).
   const { value: scalar } = splitInlineComment(raw);
   const lambda = parseInlineLambda(scalar);
   if (lambda !== null) return lambda;
-  const wasQuoted = isQuotedScalar(scalar);
-  const v = stripQuotes(scalar);
-  if (!wasQuoted) {
-    const bool = parseYamlBoolean(v);
-    if (bool !== null) return bool;
-  }
-  return v;
+  return coerceYamlScalar(stripQuotes(scalar), isQuotedScalar(scalar));
 };
 
 // Plain-decimal forms only: unambiguous across YAML versions. Hex stays a
@@ -111,15 +101,15 @@ export const isQuotedScalar = (s: string): boolean =>
   ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")));
 
 /**
- * A list item's parsed value: unquoted plain decimals become numbers and
- * truthy/falsy spellings become booleans (``parseYamlBoolean``, the same
- * rule ``parseScalar`` applies to fields), so the serializer re-emits
- * them bare — string-typed ``10`` would re-quote every sibling when the
- * list re-serializes (#1353), and a string ``on`` would re-emit quoted
- * where the loader had read a boolean. A >2^53 decimal stays a string
- * (Number() would silently rewrite the digits, #378/#944).
+ * A plain scalar's parsed value — fields and list items share this rule.
+ * Unquoted plain decimals become numbers and truthy/falsy spellings
+ * become booleans, so the serializer re-emits them bare — string-typed
+ * ``10`` re-quoted on every re-serialize (#1353/#1360), and a string
+ * ``on`` re-emitted quoted where the loader had read a boolean. A >2^53
+ * decimal stays a string (Number() would silently rewrite the digits,
+ * #378/#944).
  */
-export const coerceListScalar = (
+export const coerceYamlScalar = (
   text: string,
   wasQuoted: boolean
 ): string | number | boolean => {
@@ -158,6 +148,6 @@ export const parseFlowList = (raw: string): (string | number | boolean)[] => {
     if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
       return unescapeYamlDoubleQuoted(t.slice(1, -1));
     }
-    return coerceListScalar(stripQuotes(t), isQuotedScalar(t));
+    return coerceYamlScalar(stripQuotes(t), isQuotedScalar(t));
   });
 };
