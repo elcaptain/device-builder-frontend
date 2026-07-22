@@ -11,6 +11,7 @@ import { LIST_SECTIONS } from "./section-entry-overrides.js";
 import { blockScalarValue } from "./yaml-block-scalar-value.js";
 import { parseFlowList, parseScalar, splitInlineComment } from "./yaml-scalar.js";
 import { parseListBlock, parseNestedBlock } from "./yaml-section-block-reader.js";
+import type { ListItemSource } from "./yaml-section-list.js";
 import {
   _detectSectionChildIndent,
   _leadingIndent,
@@ -91,13 +92,25 @@ export function parseSectionCore(
   const values: Record<string, unknown> = Object.create(null);
   const spans = new Map<string, KeySpan>();
   const comments = new Map<string, string>();
+  const listSources = new Map<string, ListItemSource>();
   // leadStart is finalised by the post-loop pass below.
   const recordSpan = (key: string, start: number, end: number): void => {
     spans.set(key, { start, end, leadStart: start });
+    // A duplicate key re-assigns the value; a stale list source pointing
+    // at the first occurrence's lines must not survive it.
+    listSources.delete(key);
   };
   const startIdx = findSectionStart(lines, sectionKey, fromLine);
   if (startIdx < 0) {
-    return { values, spans, comments, childIndent: "", isListItem: false, startIdx };
+    return {
+      values,
+      spans,
+      comments,
+      listSources,
+      childIndent: "",
+      isListItem: false,
+      startIdx,
+    };
   }
 
   const isListItem = LIST_ITEM_START_RE.test(lines[startIdx]);
@@ -135,7 +148,7 @@ export function parseSectionCore(
       values[sectionKey] = parseListBlock(lines, startIdx + 1, headerIndent).value;
       // No per-key spans — `updateSectionInYaml` re-emits this whole
       // list through its dedicated LIST_SECTIONS branch.
-      return { values, spans, comments, childIndent, isListItem, startIdx };
+      return { values, spans, comments, listSources, childIndent, isListItem, startIdx };
     }
   }
 
@@ -214,7 +227,7 @@ export function parseSectionCore(
     if (raw === "") {
       const peek = _skipBlankAndCommentLines(lines, i + 1);
       if (peek < lines.length && isChildListItemLine(lines[peek], childIndent)) {
-        const { value, endIdx, isEmptyScalarList } = parseListBlock(
+        const { value, endIdx, isEmptyScalarList, listSource } = parseListBlock(
           lines,
           i + 1,
           childIndent
@@ -222,6 +235,7 @@ export function parseSectionCore(
         if (!isEmptyScalarList) {
           values[key] = value;
           recordSpan(key, i, endIdx);
+          if (listSource) listSources.set(key, listSource);
           i = endIdx - 1;
         }
         continue;
@@ -293,5 +307,5 @@ export function parseSectionCore(
     prevEnd = span.end;
   }
 
-  return { values, spans, comments, childIndent, isListItem, startIdx };
+  return { values, spans, comments, listSources, childIndent, isListItem, startIdx };
 }

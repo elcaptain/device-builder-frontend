@@ -23,13 +23,31 @@ import {
   parseBlockScalarHeader,
 } from "./yaml-section-lexer.js";
 
+/** Source fidelity for a block scalar list: each item's 0-indexed source
+ *  line (into the same array the splice writer receives), its trailing
+ *  inline comment (leading whitespace kept, "" when none), and the dash
+ *  column the parse detected — so a per-item splice keeps unchanged rows
+ *  verbatim and re-emits edited rows without re-deriving anything (#1363). */
+export interface ListItemSource {
+  itemLineIdxs: number[];
+  inlineComments: string[];
+  dashIndent: string;
+}
+
 export const collectBlockListItems = (
   lines: string[],
   startIdx: number,
   prefix: string,
   itemRegex: RegExp
-): { items: (string | number | boolean)[]; endIdx: number } => {
+): {
+  items: (string | number | boolean)[];
+  endIdx: number;
+  itemLineIdxs: number[];
+  inlineComments: string[];
+} => {
   const items: (string | number | boolean)[] = [];
+  const itemLineIdxs: number[] = [];
+  const inlineComments: string[] = [];
   let j = startIdx;
   for (; j < lines.length; j++) {
     if (isBlankOrCommentLine(lines[j])) continue;
@@ -38,13 +56,13 @@ export const collectBlockListItems = (
     if (!m) break;
     // Strip a trailing inline comment (``- 10 # note``) so the item
     // coerces and the form value isn't polluted with ``# ...`` text —
-    // same rule as parseScalar (#1235). An edited list re-emits without
-    // the comment; keeping it in the value corrupted it into the string
-    // ``"10 # note"`` instead.
-    const { value: raw } = splitInlineComment(m[1].trim());
+    // same rule as parseScalar (#1235).
+    const { value: raw, comment } = splitInlineComment(m[1].trim());
     items.push(coerceYamlScalar(stripQuotes(raw), isQuotedScalar(raw)));
+    itemLineIdxs.push(j);
+    inlineComments.push(comment);
   }
-  return { items, endIdx: j };
+  return { items, endIdx: j, itemLineIdxs, inlineComments };
 };
 
 /**
