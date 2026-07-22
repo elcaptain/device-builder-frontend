@@ -102,6 +102,10 @@ const parseListBlock = (
         value: mapping.items,
         endIdx: mapping.endIdx,
         isEmptyScalarList: false,
+        listSource:
+          mapping.items.length > 0
+            ? { itemRanges: mapping.itemRanges, dashIndent }
+            : undefined,
       };
     }
     return {
@@ -119,7 +123,7 @@ const parseListBlock = (
   const {
     items,
     endIdx: scalarEndIdx,
-    itemLineIdxs,
+    itemRanges,
     inlineComments,
   } = collectBlockListItems(
     lines,
@@ -131,7 +135,7 @@ const parseListBlock = (
     value: items,
     endIdx: scalarEndIdx,
     isEmptyScalarList: items.length === 0,
-    listSource: { itemLineIdxs, inlineComments, dashIndent },
+    listSource: { itemRanges, inlineComments, dashIndent },
   };
 };
 
@@ -225,7 +229,11 @@ const collectBlockListMappings = (
   startIdx: number,
   dashIndent: string,
   childIndent: string
-): { items: Record<string, unknown>[]; endIdx: number } | null => {
+): {
+  items: Record<string, unknown>[];
+  endIdx: number;
+  itemRanges: [number, number][];
+} | null => {
   const headerRe = new RegExp(`^${dashIndent}-\\s+(${KEY_PATTERN}):\\s*(.*)$`);
   const childRe = new RegExp(`^${childIndent}(${KEY_PATTERN}):\\s*(.*)$`);
 
@@ -325,6 +333,7 @@ const collectBlockListMappings = (
   };
 
   const items: Record<string, unknown>[] = [];
+  const itemRanges: [number, number][] = [];
   let j = startIdx;
   while (j < lines.length) {
     if (isBlankOrCommentLine(lines[j])) {
@@ -335,9 +344,18 @@ const collectBlockListMappings = (
     const parsed = parseItem(j);
     if (!parsed) return null;
     items.push(parsed.item);
+    // The sub-key walk resumes past trailing blank/comment lines; trim the
+    // recorded range back to the last content line so an inter-row comment
+    // belongs to the FOLLOWING row's group (scalar-path semantics) and
+    // survives an edit of the row above it.
+    let contentEnd = parsed.endIdx;
+    while (contentEnd > j + 1 && isBlankOrCommentLine(lines[contentEnd - 1])) {
+      contentEnd--;
+    }
+    itemRanges.push([j, contentEnd]);
     j = parsed.endIdx;
   }
-  return { items, endIdx: j };
+  return { items, endIdx: j, itemRanges };
 };
 
 /** Recursively parse a nested YAML block at the given indent. */
