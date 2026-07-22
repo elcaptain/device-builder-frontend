@@ -14,7 +14,7 @@ import {
   isEditableLambdaBlock,
   lambdaValueFromBlock,
 } from "./yaml-block-scalar-value.js";
-import { parseFlowList, parseScalar } from "./yaml-scalar.js";
+import { parseFlowList, parseScalar, splitInlineComment } from "./yaml-scalar.js";
 import {
   _detectListItemChildIndent,
   _leadingIndent,
@@ -43,8 +43,8 @@ import { YamlRawValue } from "./yaml-serialize.js";
  * Dispatch a YAML list block (``key:\n  - …``) into the right
  * value shape: structured array of mappings for editor-friendly
  * lists (``esphome.devices`` / ``esphome.areas``), ``YamlRawValue``
- * for complex automation triggers, or ``string[]`` for scalar
- * lists. Shared between the top-level and nested-block parsers
+ * for complex automation triggers, or scalar items (numbers,
+ * booleans, strings) for scalar lists. Shared between the top-level and nested-block parsers
  * so both surfaces agree on the dispatch.
  *
  * ``parentIndent`` is the indent of the parent KEY (the one whose
@@ -64,7 +64,7 @@ const parseListBlock = (
   startIdx: number,
   parentIndent: string
 ): {
-  value: YamlRawValue | Record<string, unknown>[] | string[];
+  value: YamlRawValue | Record<string, unknown>[] | (string | number | boolean)[];
   endIdx: number;
   isEmptyScalarList: boolean;
 } => {
@@ -401,8 +401,12 @@ function parseNestedBlock(
       continue;
     }
 
-    if (raw.startsWith("[") && raw.endsWith("]")) {
-      values[key] = parseFlowList(raw);
+    // Strip a trailing line comment before the bracket test — the other
+    // flow-list sites do, and without it ``key: [1, 2] # note`` misses
+    // the flow branch and degrades to the literal string "[1, 2]".
+    const { value: scalar } = splitInlineComment(raw);
+    if (scalar.startsWith("[") && scalar.endsWith("]")) {
+      values[key] = parseFlowList(scalar);
     } else {
       values[key] = parseScalar(raw);
     }

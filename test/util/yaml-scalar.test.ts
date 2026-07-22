@@ -191,3 +191,66 @@ describe("parseFlowList", () => {
     expect(parseFlowList('["\\U000F058F", plain]')).toEqual([MDI, "plain"]);
   });
 });
+
+describe("coerceListScalar via parseFlowList (#1353)", () => {
+  it("coerces unquoted plain decimals and floats to numbers", () => {
+    expect(parseFlowList("[10, -3, 1.5, 0]")).toEqual([10, -3, 1.5, 0]);
+  });
+
+  it("keeps quoted numerics as strings", () => {
+    expect(parseFlowList("['10', \"3\"]")).toEqual(["10", "3"]);
+  });
+
+  it("keeps hex, exponent, and leading-zero forms as strings", () => {
+    // 0x76 round-trips bare through the serializer's hex carve-out; 010 is
+    // octal 8 in YAML 1.1 so Number() would silently rewrite it; 1e3 keeps
+    // the authored form.
+    expect(parseFlowList("[0x76, 1e3, 010]")).toEqual(["0x76", "1e3", "010"]);
+  });
+
+  it("leaves substitution references and words alone", () => {
+    expect(parseFlowList("[${ch}, abc]")).toEqual(["${ch}", "abc"]);
+  });
+
+  it("keeps a >2^53 decimal as a string (no silent digit rewrite)", () => {
+    expect(parseFlowList("[18446744073709551615, 1]")).toEqual([
+      "18446744073709551615",
+      1,
+    ]);
+  });
+
+  it("coerces every YAML boolean spelling; quotes keep strings", () => {
+    // Same rule parseScalar applies to fields: a bare ``on`` is a boolean
+    // to the loader, so keeping it a string re-emits it quoted and
+    // changes the loaded type.
+    expect(parseFlowList("[true, FALSE, on, yes, 'true']")).toEqual([
+      true,
+      false,
+      true,
+      true,
+      "true",
+    ]);
+  });
+
+  it("coerces a leading-dot float and negative floats", () => {
+    expect(parseFlowList("[.5, -1.5]")).toEqual([0.5, -1.5]);
+  });
+
+  it("coerces plus-signed and trailing-dot forms the loader reads as numbers", () => {
+    expect(parseFlowList("[+1, 1., +2.5]")).toEqual([1, 1, 2.5]);
+  });
+
+  it("coerces underscore-separated numerics; words with underscores stay strings", () => {
+    expect(parseFlowList("[1_000, 1_0.5, foo_bar, 1_]")).toEqual([
+      1000,
+      10.5,
+      "foo_bar",
+      "1_",
+    ]);
+  });
+
+  it("keeps an overflowing float mantissa as a string", () => {
+    const huge = `${"9".repeat(400)}.5`;
+    expect(parseFlowList(`[${huge}]`)).toEqual([huge]);
+  });
+});

@@ -6,6 +6,8 @@
  */
 
 import {
+  coerceListScalar,
+  isQuotedScalar,
   parseFlowList,
   parseScalar,
   splitInlineComment,
@@ -26,15 +28,21 @@ export const collectBlockListItems = (
   startIdx: number,
   prefix: string,
   itemRegex: RegExp
-): { items: string[]; endIdx: number } => {
-  const items: string[] = [];
+): { items: (string | number | boolean)[]; endIdx: number } => {
+  const items: (string | number | boolean)[] = [];
   let j = startIdx;
   for (; j < lines.length; j++) {
     if (isBlankOrCommentLine(lines[j])) continue;
     if (!lines[j].startsWith(prefix)) break;
     const m = lines[j].match(itemRegex);
     if (!m) break;
-    items.push(stripQuotes(m[1].trim()));
+    // Strip a trailing inline comment (``- 10 # note``) so the item
+    // coerces and the form value isn't polluted with ``# ...`` text —
+    // same rule as parseScalar (#1235). An edited list re-emits without
+    // the comment; keeping it in the value corrupted it into the string
+    // ``"10 # note"`` instead.
+    const { value: raw } = splitInlineComment(m[1].trim());
+    items.push(coerceListScalar(stripQuotes(raw), isQuotedScalar(raw)));
   }
   return { items, endIdx: j };
 };
