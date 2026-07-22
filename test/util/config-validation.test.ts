@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ConfigValueOption } from "../../src/api/types/config-entries.js";
 import { ConfigEntryType } from "../../src/api/types/config-entries.js";
 import {
+  clearPathErrors,
   getDeviceNameWarning,
   isEntryVisible,
   nearCanonicalOption,
@@ -813,5 +814,97 @@ describe("platformSupported", () => {
   it("keeps a component that lists the target platform", () => {
     expect(platformSupported(["esp32"], "esp32")).toBe(true);
     expect(platformSupported(["esp32", "esp8266"], "esp8266")).toBe(true);
+  });
+});
+
+describe("validateEntries — scalar multi_value lists (#1348)", () => {
+  const intList = (extra: Record<string, unknown> = {}) =>
+    makeEntry({
+      key: "codes",
+      type: ConfigEntryType.INTEGER,
+      multi_value: true,
+      ...extra,
+    });
+
+  it("passes a list of valid integers", () => {
+    expect(validateEntries([intList()], { codes: [3, 5] }).size).toBe(0);
+  });
+
+  it("flags only the offending item, keyed by index", () => {
+    const errors = validateEntries([intList()], { codes: ["abc", 5] });
+    expect(errors.size).toBe(1);
+    expect(errors.get("codes.0")?.code).toBe("validation.not_a_number");
+  });
+
+  it("skips a ${var} item (resolves at build time)", () => {
+    expect(validateEntries([intList()], { codes: ["${ch}", 5] }).size).toBe(0);
+  });
+
+  it("range-checks per item", () => {
+    const errors = validateEntries([intList({ range: [0, 31] })], { codes: [10, 300] });
+    expect(errors.get("codes.1")?.code).toBe("validation.max");
+    expect(errors.has("codes.0")).toBe(false);
+  });
+
+  it("keys a single-item list's error at index 0", () => {
+    const errors = validateEntries([intList()], { codes: ["abc"] });
+    expect(errors.get("codes.0")?.code).toBe("validation.not_a_number");
+  });
+
+  it("keeps required-empty at the field path and skips blank rows", () => {
+    const required = intList({ required: true });
+    expect(validateEntries([required], { codes: [] }).get("codes")?.code).toBe(
+      "validation.required"
+    );
+    expect(validateEntries([required], { codes: [3, ""] }).size).toBe(0);
+  });
+
+  it("walks a required entry's array default per item, not stringified", () => {
+    const entry = intList({ required: true, default_value: [3, 5] });
+    expect(validateEntries([entry], {}).size).toBe(0);
+  });
+
+  it("flags a required list holding only blank rows", () => {
+    const required = intList({ required: true });
+    expect(validateEntries([required], { codes: ["", ""] }).get("codes")?.code).toBe(
+      "validation.required"
+    );
+    expect(validateEntries([intList()], { codes: ["", ""] }).size).toBe(0);
+  });
+
+  it("never blocks on a hidden list of blank rows", () => {
+    const entry = intList({ required: true, hidden: true });
+    expect(validateEntries([entry], { codes: ["", ""] }).size).toBe(0);
+  });
+});
+
+describe("validateEntries — multi_value lists the form can't itemize", () => {
+  it("skips per-item checks for a list of mappings (YAML-only shape)", () => {
+    const entry = makeEntry({
+      key: "segments",
+      type: ConfigEntryType.INTEGER,
+      multi_value: true,
+    });
+    const errors = validateEntries([entry], { segments: [{ from: 1 }, { from: 2 }] });
+    expect(errors.size).toBe(0);
+  });
+});
+
+describe("clearPathErrors", () => {
+  const errs = () =>
+    new Map([
+      ["codes", { key: "codes", code: "validation.required" }],
+      ["codes.0", { key: "codes.0", code: "validation.not_a_number" }],
+      ["codes_extra", { key: "codes_extra", code: "validation.required" }],
+    ]);
+
+  it("clears the key and its per-item descendants, not prefix-string siblings", () => {
+    const next = clearPathErrors(errs(), "codes");
+    expect(next).not.toBeNull();
+    expect([...next!.keys()]).toEqual(["codes_extra"]);
+  });
+
+  it("returns null when nothing matches", () => {
+    expect(clearPathErrors(errs(), "other")).toBeNull();
   });
 });
