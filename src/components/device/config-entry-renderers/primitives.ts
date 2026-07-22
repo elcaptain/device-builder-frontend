@@ -1,7 +1,7 @@
 import { html, nothing } from "lit";
 import type { ConfigEntry } from "../../../api/types/config-entries.js";
 import { chipNameToVariant } from "../../../util/chip-variant.js";
-import { nearCanonicalOption } from "../../../util/config-validation.js";
+import { isValuePresent, nearCanonicalOption } from "../../../util/config-validation.js";
 import { renderOptionStack } from "../../../util/option-stack.js";
 import { parseYamlBoolean, YamlRawValue } from "../../../util/yaml-serialize.js";
 import { coerceValueToEntryType } from "../../../util/coerce-entry-value.js";
@@ -13,6 +13,7 @@ import {
   renderFieldError,
   renderHelpLink,
   renderLabel,
+  renderUnparseableScalarField,
   renderYamlOnlyFallbackIfNonPrimitive,
   type RenderCtx,
 } from "../config-entry-renderers-shared.js";
@@ -53,14 +54,16 @@ export {
 // YAML editor reflects ON in the form view (issue device-builder#923).
 export function renderBooleanField(entry: ConfigEntry, path: string[], ctx: RenderCtx) {
   const raw = ctx.getAt(path);
-  // A list / mapping under a boolean-shaped catalog field renders
-  // unchecked (``parseYamlBoolean`` returns null), but the first
-  // user toggle emits ``true`` and clobbers the YAML structure.
-  // Bail to the YAML-only notice instead.
+  // Anything ``parseYamlBoolean`` can't read renders unchecked and the
+  // first toggle clobbers it: non-primitive shapes get the YAML-only
+  // notice, unparseable primitives stay editable text (#1368).
   const bail = renderYamlOnlyFallbackIfNonPrimitive(entry, path, ctx, raw);
   if (bail) return bail;
-  const effective = raw === undefined || raw === null ? entry.default_value : raw;
-  const checked = parseYamlBoolean(effective) === true;
+  const parsed = parseYamlBoolean(raw);
+  if (parsed === null && isValuePresent(raw)) {
+    return renderUnparseableScalarField(entry, path, ctx, raw);
+  }
+  const checked = (raw == null ? parseYamlBoolean(entry.default_value) : parsed) === true;
   return html`
     <div class="switch-field" data-field-key=${fieldKeyAttr(path)}>
       <div class="field-info">${renderLabel(entry, ctx, { includeHelpLink: false })}</div>
