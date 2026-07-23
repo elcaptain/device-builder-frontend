@@ -13,7 +13,7 @@ import {
   parseFlowList,
   parseScalar,
   splitInlineComment,
-  splitTrimmedInlineComment,
+  splitValueComment,
 } from "./yaml-scalar.js";
 import { parseListBlock, parseNestedBlock } from "./yaml-section-block-reader.js";
 import {
@@ -157,6 +157,10 @@ export function parseSectionCore(
       // ``\s*`` drops it) so ``splitInlineComment`` can tell a real comment
       // (``#`` after whitespace) from a value that merely starts with ``#``
       // (``- file:#fragment``). The first ``:`` after the dash is the key's.
+      // The loader reads a separator-less ``- key:#x`` as a scalar item;
+      // this path still shows it as a field, but the serializer's
+      // ``yamlValueEqual`` guard keeps untouched saves byte-verbatim, so
+      // only a deliberate edit of the field rewrites it.
       const head = lines[startIdx];
       const afterColon = head.slice(head.indexOf(":", head.indexOf("-")) + 1);
       const { value: rawValue, comment } = splitInlineComment(afterColon);
@@ -199,7 +203,8 @@ export function parseSectionCore(
     const match = line.match(childRegex);
     if (!match) continue;
     const key = match[1];
-    const raw = match[2].trim();
+    const hadSeparator = match[2].length > 0;
+    const raw = match[3].trim();
 
     // Direct block scalar: `key: |-` (or `|`, `>`, `>-`, `|+`,
     // `>+`), optionally tagged (`key: !lambda |-`). The header sits
@@ -223,7 +228,7 @@ export function parseSectionCore(
     // comment-only value ``key: # note`` is an empty value to the loader,
     // #1385), the flow-list test (`[a, b] # c` doesn't end with `]`), and
     // scalar parsing — and record it so an edit can re-append it (#1235).
-    const { value: scalar, comment } = splitTrimmedInlineComment(raw);
+    const { value: scalar, comment } = splitValueComment(raw, hadSeparator);
     if (scalar === "") {
       const peek = _skipBlankAndCommentLines(lines, i + 1);
       if (peek < lines.length && isChildListItemLine(lines[peek], childIndent)) {

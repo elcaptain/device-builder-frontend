@@ -3386,6 +3386,55 @@ describe("updateSectionInYaml — comment-only values are empty (#1385)", () => 
     expect(values.manual_ip).toEqual({ dns1: { x: 1 } });
   });
 
+  it("keeps colon-adjacent # as value text when no separator follows the colon (#1388)", () => {
+    // Matches the dash-line ``- file:#fragment`` leniency: with no
+    // whitespace after the colon there was never a comment separator.
+    const yaml = ["wifi:", "  ssid:#fragment", "  domain: .local", ""].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.ssid).toBe("#fragment");
+  });
+
+  it("keeps colon-adjacent # as value text inside a nested mapping", () => {
+    const yaml = [
+      "wifi:",
+      "  manual_ip:",
+      "    static_ip:#odd",
+      "    gateway: 10.0.0.1",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.manual_ip).toEqual({ static_ip: "#odd", gateway: "10.0.0.1" });
+  });
+
+  it("bails a mixed list with a separator-less dash header to YamlRawValue", () => {
+    // ``- ssid:#odd`` is a scalar item to the loader; coercing it into a
+    // mapping field would silently rewrite it on save. The conservative
+    // fallback keeps the block byte-verbatim.
+    const yaml = [
+      "wifi:",
+      "  networks:",
+      "    - ssid: home",
+      "      password: x",
+      "    - ssid:#odd",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    const after = updateSectionInYaml(yaml, "wifi", values, 1);
+    expect(after).toBe(yaml);
+  });
+
+  it("keeps colon-adjacent # as value text in a mapping-item field", () => {
+    const yaml = [
+      "wifi:",
+      "  networks:",
+      "    - ssid: home",
+      "      password:#odd",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.networks).toEqual([{ ssid: "home", password: "#odd" }]);
+  });
+
   it("keeps a quoted value that merely starts with #", () => {
     const yaml = ["wifi:", '  ssid: "#lounge"', ""].join("\n");
     const values = parseYamlSectionValues(yaml, "wifi", 1);

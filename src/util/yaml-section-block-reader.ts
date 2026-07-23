@@ -14,7 +14,7 @@ import {
   isEditableLambdaBlock,
   lambdaValueFromBlock,
 } from "./yaml-block-scalar-value.js";
-import { parseFlowList, parseScalar, splitTrimmedInlineComment } from "./yaml-scalar.js";
+import { parseFlowList, parseScalar, splitValueComment } from "./yaml-scalar.js";
 import {
   _detectListItemChildIndent,
   _leadingIndent,
@@ -234,8 +234,8 @@ const collectBlockListMappings = (
   endIdx: number;
   itemRanges: [number, number][];
 } | null => {
-  const headerRe = new RegExp(`^${dashIndent}-\\s+(${KEY_PATTERN}):\\s*(.*)$`);
-  const childRe = new RegExp(`^${childIndent}(${KEY_PATTERN}):\\s*(.*)$`);
+  const headerRe = new RegExp(`^${dashIndent}-\\s+(${KEY_PATTERN}):(\\s*)(.*)$`);
+  const childRe = new RegExp(`^${childIndent}(${KEY_PATTERN}):(\\s*)(.*)$`);
 
   /**
    * Parse one list item starting at *at* (the dash line). Returns
@@ -262,7 +262,14 @@ const collectBlockListMappings = (
       const headerMatch = lines[at].match(headerRe);
       if (!headerMatch) return null;
       const headerKey = headerMatch[1];
-      const headerRaw = headerMatch[2].trim();
+      const headerHadSep = headerMatch[2].length > 0;
+      const headerRaw = headerMatch[3].trim();
+      // ``- ssid:#odd`` is a VALID scalar item to the loader (no
+      // ``:(?:\s|$)`` mapping signal, cf. LIST_ITEM_DICT_KEY_RE), so
+      // coercing it to a mapping would rewrite a valid doc — bail. Child
+      // lines stay lenient: separator-less there is invalid YAML, so
+      // repair can't misread a valid doc.
+      if (!headerHadSep && headerRaw !== "") return null;
       // ``- multiply: !lambda |-``: the body sits on the following
       // deeper-indented lines, so capture it here rather than letting
       // ``parseFlatMappingField`` mis-read the lone header as a scalar
@@ -294,7 +301,7 @@ const collectBlockListMappings = (
         item[headerKey] = lambdaValueFromBlock(lines.slice(at + 1, endIdx));
         return { item, endIdx };
       }
-      const header = parseFlatMappingField(headerKey, headerRaw);
+      const header = parseFlatMappingField(headerKey, headerRaw, headerHadSep);
       if (!header) return null;
       item[header.key] = header.value;
       // ``- effect_id:`` with no value may be a polymorphic single-
@@ -383,7 +390,8 @@ function parseNestedBlock(
       continue;
     }
     const key = match[1];
-    const raw = match[2].trim();
+    const hadSeparator = match[2].length > 0;
+    const raw = match[3].trim();
 
     // Direct block scalar at nested indent (same shape as the
     // top-level parser's branch — see comment there). A nested
@@ -406,7 +414,7 @@ function parseNestedBlock(
     // ``key: # note`` is an empty value, #1385) and the bracket test —
     // without the latter ``key: [1, 2] # note`` misses the flow branch
     // and degrades to the literal string "[1, 2]".
-    const { value: scalar, comment } = splitTrimmedInlineComment(raw);
+    const { value: scalar, comment } = splitValueComment(raw, hadSeparator);
     if (scalar === "") {
       const peek = _skipBlankAndCommentLines(lines, i + 1);
       // ``key:`` followed by a block list. Accept both the standard
