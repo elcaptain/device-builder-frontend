@@ -8,8 +8,13 @@
  * with this concern.
  */
 
-import { isPlainObject } from "./nested-values.js";
+import { ESPHOME_YAML_INDENT } from "./esphome-yaml-lang.js";
+import { isPlainObject, isPrimitiveOrNullish } from "./nested-values.js";
+import type { ListItemSource } from "./yaml-section-list.js";
 import {
+  formatYamlFlowList,
+  formatYamlScalar,
+  serializeListItem,
   serializeYamlValues,
   YamlRawValue,
   type SerializeYamlOptions,
@@ -28,16 +33,32 @@ export interface KeySpan {
   leadStart: number;
 }
 
+/**
+ * Everything the parser records about one top-level key. One record per
+ * key keeps duplicate-key semantics trivial: re-recording a key replaces
+ * the whole record, so stale side state can't survive a re-assignment.
+ */
+export interface KeyMeta {
+  // Absent only for the inline-on-dash key (list items), whose line the
+  // section header owns — it carries at most a ``comment``.
+  span?: KeySpan;
+  // Trailing inline comment (with its leading whitespace, e.g. ` #hides`)
+  // for a scalar key, re-appended on a single-line re-emit (#1235).
+  comment?: string;
+  // Per-item source fidelity for a block scalar list, so an edited list
+  // splices per item instead of re-emitting every row (#1363).
+  listSource?: ListItemSource;
+  // Authored as a flow list (``key: [a, b]``) — an edit re-emits the same
+  // single-line style (#1378). Never coexists with ``listSource``. The
+  // nested-depth counterpart is the value-carried ``YamlFlowList``, which
+  // deliberately does NOT survive list edits — don't unify the two.
+  flowList?: boolean;
+}
+
 export interface ParsedSection {
   values: Record<string, unknown>;
-  // One span per top-level key, in file order. The inline-on-dash key
-  // (list items) is intentionally absent — it lives on the section
-  // header line, which `updateSectionInYaml` owns directly.
-  spans: Map<string, KeySpan>;
-  // Trailing inline comment (with its leading whitespace, e.g.
-  // ` #hides`) per scalar key that had one, so a re-serialized edit can
-  // re-append it instead of dropping it (#1235).
-  comments: Map<string, string>;
+  // One meta per top-level key, in file order.
+  keys: Map<string, KeyMeta>;
   childIndent: string;
   isListItem: boolean;
   // 0-indexed section header / leading-dash line.
@@ -98,20 +119,142 @@ export function buildSplicedBody(
   const bodyLines: string[] = [];
   for (const [key, val] of Object.entries(values)) {
     if (inlineKeys.has(key)) continue;
-    const span = parsed.spans.get(key);
-    if (span && yamlValueEqual(val, parsed.values[key])) {
+    const meta = parsed.keys.get(key);
+    const span = meta?.span;
+    const old = parsed.values[key];
+    if (span && yamlValueEqual(val, old)) {
       bodyLines.push(...lines.slice(span.leadStart, span.end));
+      continue;
+    }
+    const spliced =
+      meta && spliceListItems(lines, meta, old, val, childIndent, serializeOptions);
+    if (spliced) {
+      bodyLines.push(...spliced);
       continue;
     }
     // Changed / added key. Keep any standalone-comment run that led the
     // original key — the value line below reformats, the comment stays.
     if (span) bodyLines.push(...lines.slice(span.leadStart, span.start));
-    const fresh = serializeYamlValues({ [key]: val }, childIndent, serializeOptions);
+    const fresh =
+      flowListLine(meta, key, val, childIndent) ??
+      serializeYamlValues({ [key]: val }, childIndent, serializeOptions);
     // Re-append the field's trailing inline comment when it still
     // serializes to a single scalar line, so an edit keeps it (#1235).
-    const comment = parsed.comments.get(key);
-    if (comment && fresh.length === 1) fresh[0] += comment;
+    if (meta?.comment && fresh.length === 1) fresh[0] += meta.comment;
     bodyLines.push(...fresh);
   }
   return bodyLines;
+}
+
+/** A flow-authored key re-emits as the same single flow line (an emptied
+ *  or non-scalar value falls through to the normal re-emit). */
+function flowListLine(
+  meta: KeyMeta | undefined,
+  key: string,
+  val: unknown,
+  childIndent: string
+): string[] | null {
+  if (!meta?.flowList) return null;
+  if (!Array.isArray(val) || val.length === 0 || !val.every(isScalarItem)) return null;
+  return [`${childIndent}${key}: ${formatYamlFlowList(val)}`];
+}
+
+// Deliberately stricter than ``isPrimitiveOrNullish``: a nullish item must
+// fall through to the full re-emit, not reach ``formatYamlScalar``.
+const isScalarItem = (v: unknown): v is string | number | boolean =>
+  isPrimitiveOrNullish(v) && v != null;
+
+// Scalars and plain mappings; anything else falls through to the full re-emit.
+const isSpliceableItem = (v: unknown): boolean => isScalarItem(v) || isPlainObject(v);
+
+/**
+ * Per-item splice for a changed block list (#1363/#1379): rows unchanged
+ * at the same position (longest common prefix + suffix) keep their source
+ * lines — inline comments, preceding whole-line comments, exact quoting —
+ * and only the middle re-emits. An in-place edit (equal lengths) keeps each
+ * edited row's preceding whole-line comments, and a scalar row also
+ * re-attaches its own inline comment. Returns ``null`` when the key isn't
+ * a block list of spliceable items on both sides (caller falls through to
+ * the full re-emit), or when the new list is empty (the re-emit path owns
+ * the drop-the-key semantic).
+ */
+function spliceListItems(
+  lines: string[],
+  meta: KeyMeta,
+  old: unknown,
+  val: unknown,
+  childIndent: string,
+  options: SerializeYamlOptions
+): string[] | null {
+  const { span, listSource: src } = meta;
+  if (
+    !span ||
+    !src ||
+    !Array.isArray(old) ||
+    !Array.isArray(val) ||
+    val.length === 0 ||
+    !val.every(isSpliceableItem)
+  ) {
+    return null;
+  }
+  let prefix = 0;
+  while (
+    prefix < old.length &&
+    prefix < val.length &&
+    yamlValueEqual(old[prefix], val[prefix])
+  ) {
+    prefix++;
+  }
+  let suffix = 0;
+  while (
+    suffix < old.length - prefix &&
+    suffix < val.length - prefix &&
+    yamlValueEqual(old[old.length - 1 - suffix], val[val.length - 1 - suffix])
+  ) {
+    suffix++;
+  }
+  const { itemRanges: ranges, dashIndent } = src;
+  // ``serializeListItem`` derives its dash column as indent + step; when the
+  // authored column differs (compact same-column dashes), a re-emitted
+  // mapping row would land misaligned beside verbatim siblings — bail to
+  // the full re-emit, which is consistently canonical.
+  const canonicalDash = `${childIndent}${options.indentStep ?? ESPHOME_YAML_INDENT}`;
+  // Each row's group runs from just past the previous row's last line (the
+  // key line for the first row), carrying the whole-line comments above it.
+  const groupStart = (i: number): number => (i === 0 ? span.start + 1 : ranges[i - 1][1]);
+  const inPlace = old.length === val.length;
+  if (dashIndent !== canonicalDash) {
+    for (let k = prefix; k < val.length - suffix; k++) {
+      const verbatim = inPlace && yamlValueEqual(old[k], val[k]);
+      if (!verbatim && !isScalarItem(val[k])) return null;
+    }
+  }
+  const out: string[] = [];
+  // Groups tile contiguously, so the lead + key line + prefix rows are one
+  // slice, and the suffix rows + whatever the span still owns past the
+  // last row (trailing comments) are another.
+  out.push(...lines.slice(span.leadStart, groupStart(prefix)));
+  for (let k = prefix; k < val.length - suffix; k++) {
+    // A row unchanged between two edits keeps its bytes; an in-place edit
+    // keeps the row's preceding comments and re-attaches a scalar row's
+    // inline comment — deliberately, even when the comment described the
+    // old value: row comments label the row's role far more often than
+    // its literal value. With add/remove the middle alignment is
+    // ambiguous, so new middle rows emit plain.
+    if (inPlace && yamlValueEqual(old[k], val[k])) {
+      out.push(...lines.slice(groupStart(k), ranges[k][1]));
+      continue;
+    }
+    if (inPlace) out.push(...lines.slice(groupStart(k), ranges[k][0]));
+    if (isScalarItem(val[k])) {
+      const comment = inPlace ? (src.inlineComments?.[k] ?? "") : "";
+      out.push(`${dashIndent}- ${formatYamlScalar(val[k])}${comment}`);
+    } else {
+      // A changed mapping row re-emits canonically; its own comments are
+      // unknowable per field.
+      out.push(...serializeListItem(val[k], childIndent, options));
+    }
+  }
+  out.push(...lines.slice(groupStart(old.length - suffix), span.end));
+  return out;
 }

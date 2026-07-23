@@ -28,7 +28,8 @@ export const stripQuotes = (s: string): string => {
  * A ``#`` only starts a comment when it's whitespace-preceded and
  * outside quotes — ``Bedroom#2`` and ``"a # b"`` keep the ``#`` in the
  * value. ``comment`` retains its leading whitespace (``""`` when none)
- * so the serializer can re-append it verbatim.
+ * so the serializer can re-append it verbatim. Callers holding
+ * pre-trimmed input use ``splitTrimmedInlineComment`` instead.
  */
 export const splitInlineComment = (raw: string): { value: string; comment: string } => {
   let inSingle = false;
@@ -58,6 +59,24 @@ export const splitInlineComment = (raw: string): { value: string; comment: strin
   return { value: raw, comment: "" };
 };
 
+/** ``splitInlineComment`` for pre-trimmed input, where a string-opening
+ *  ``#`` is a comment over an empty value (``name: # note``, #1385). The
+ *  comment gains a canonical single space so a re-append stays valid —
+ *  the trim ate the source separator. */
+export const splitTrimmedInlineComment = (
+  raw: string
+): { value: string; comment: string } =>
+  raw.startsWith("#") ? { value: "", comment: ` ${raw}` } : splitInlineComment(raw);
+
+/** The #1385/#1388 rule in one place: a string-opening ``#`` is a comment
+ *  only when the source had separator whitespace after the colon; with no
+ *  separator it stays value text. */
+export const splitValueComment = (
+  raw: string,
+  hadSeparator: boolean
+): { value: string; comment: string } =>
+  hadSeparator ? splitTrimmedInlineComment(raw) : splitInlineComment(raw);
+
 // Inline lambda scalar: ``!lambda return x;`` (and the quoted
 // ``!lambda 'return x;'`` form). Recognised as a ``LambdaValue``
 // so a templatable field shows the lambda editor instead of a
@@ -71,30 +90,71 @@ const parseInlineLambda = (scalar: string): LambdaValue | null => {
   return m ? { _lambda: stripQuotes(m[1].trim()), _tag: "!lambda" } : null;
 };
 
-// Quoting in YAML is the explicit "treat me as a string" signal —
-// ``key: "on"`` must stay the literal ``"on"`` even though ``on`` is
-// a truthy spelling. Detect the quotes BEFORE stripping so we only
-// run the boolean coercion on plain scalars; otherwise a string
-// field that happens to hold ``"on"`` / ``"yes"`` would silently
-// flip to boolean ``true`` on round-trip.
+// ``isQuotedScalar`` must see the scalar BEFORE ``stripQuotes`` — the
+// quotes are the signal that suppresses coercion.
 export const parseScalar = (raw: string): unknown => {
-  // Strip a trailing inline comment so a boolean/number field coerces
-  // and the form value isn't polluted with `# ...` text (#1235).
+  // Strip a trailing inline comment so plain scalars coerce and no field
+  // value is polluted with `# ...` text (#1235).
   const { value: scalar } = splitInlineComment(raw);
   const lambda = parseInlineLambda(scalar);
   if (lambda !== null) return lambda;
-  const wasQuoted =
-    (scalar.startsWith('"') && scalar.endsWith('"')) ||
-    (scalar.startsWith("'") && scalar.endsWith("'"));
-  const v = stripQuotes(scalar);
-  if (!wasQuoted) {
-    const bool = parseYamlBoolean(v);
-    if (bool !== null) return bool;
-  }
-  return v;
+  return coerceYamlScalar(stripQuotes(scalar), isQuotedScalar(scalar));
 };
 
-export const parseFlowList = (raw: string): string[] => {
+// Plain-decimal forms only: unambiguous across YAML versions. Hex stays a
+// string (the i2c-address round-trip keeps ``0x76`` verbatim), and a leading
+// zero (``010``) or exponent stays a string too — YAML 1.1 reads ``010`` as
+// octal 8, so Number() would silently rewrite it. Deliberately narrower
+// than yaml-serialize's YAML_INT/YAML_FLOAT recognition sets (which decide
+// quoting, so must match every form the loader re-types) and int-input's
+// DECIMAL_INT_RE (form input, leading zeros fine): coerce only what
+// Number() provably reads the same as the loader.
+const PLAIN_INT_RE = /^[-+]?(?:0|[1-9]\d*(?:_\d+)*)$/;
+const PLAIN_FLOAT_RE =
+  /^[-+]?(?:(?:0|[1-9]\d*(?:_\d+)*)\.(?:\d+(?:_\d+)*)?|\.\d+(?:_\d+)*)$/;
+
+/** Quoting in YAML is the explicit "treat me as a string" signal; the
+ *  scalar and list-item readers share one definition of "quoted". */
+export const isQuotedScalar = (s: string): boolean =>
+  s.length >= 2 &&
+  ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")));
+
+/**
+ * A plain scalar's parsed value — fields and list items share this rule.
+ * Unquoted plain decimals become numbers and truthy/falsy spellings
+ * become booleans, so the serializer re-emits them bare — string-typed
+ * ``10`` re-quoted on every re-serialize (#1353/#1360), and a string
+ * ``on`` re-emitted quoted where the loader had read a boolean. A >2^53
+ * decimal stays a string (Number() would silently rewrite the digits,
+ * #378/#944).
+ */
+export const coerceYamlScalar = (
+  text: string,
+  wasQuoted: boolean
+): string | number | boolean => {
+  if (wasQuoted) return text;
+  const bool = parseYamlBoolean(text);
+  if (bool !== null) return bool;
+  // Underscore digit separators (``1_000``) are loader numerics; strip
+  // them for Number() once the shape matched (between digits only, a
+  // strict subset of the resolver's grammar).
+  if (PLAIN_INT_RE.test(text)) {
+    const n = Number(text.replace(/_/g, ""));
+    return Number.isSafeInteger(n) ? n : text;
+  }
+  // Floats trade text fidelity for the loader's value: ``1.50`` re-emits
+  // as ``1.5`` and extra precision truncates to the same double PyYAML
+  // hands the backend anyway. An overflowing mantissa stays a string —
+  // the serializer would emit a bare ``Infinity``, which YAML reads as
+  // a plain string anyway.
+  if (PLAIN_FLOAT_RE.test(text)) {
+    const n = Number(text.replace(/_/g, ""));
+    return Number.isFinite(n) ? n : text;
+  }
+  return text;
+};
+
+export const parseFlowList = (raw: string): (string | number | boolean)[] => {
   const inner = raw.slice(1, -1).trim();
   if (inner === "") return [];
   // Quote-aware split: a quoted element may itself contain a comma (the
@@ -104,8 +164,9 @@ export const parseFlowList = (raw: string): string[] => {
   // literal backslash text (device-builder#1232).
   return splitTopLevelCommas(inner).map((p) => {
     const t = p.trim();
-    return t.length >= 2 && t.startsWith('"') && t.endsWith('"')
-      ? unescapeYamlDoubleQuoted(t.slice(1, -1))
-      : stripQuotes(t);
+    if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
+      return unescapeYamlDoubleQuoted(t.slice(1, -1));
+    }
+    return coerceYamlScalar(stripQuotes(t), isQuotedScalar(t));
   });
 };

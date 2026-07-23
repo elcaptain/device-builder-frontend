@@ -6,9 +6,12 @@
  */
 
 import {
+  coerceYamlScalar,
+  isQuotedScalar,
   parseFlowList,
   parseScalar,
-  splitInlineComment,
+  splitTrimmedInlineComment,
+  splitValueComment,
   stripQuotes,
 } from "./yaml-scalar.js";
 import {
@@ -20,23 +23,50 @@ import {
   LIST_ITEM_DICT_KEY_RE,
   parseBlockScalarHeader,
 } from "./yaml-section-lexer.js";
+import { YamlFlowList } from "./yaml-serialize.js";
+
+/** Source fidelity for a block list: each item's half-open 0-indexed
+ *  source-line range (into the same array the splice writer receives),
+ *  its trailing inline comment (scalar rows only; "" otherwise), and the
+ *  dash column the parse detected — so a per-item splice keeps unchanged
+ *  rows verbatim and re-emits edited rows without re-deriving anything
+ *  (#1363/#1379). */
+export interface ListItemSource {
+  itemRanges: [number, number][];
+  // Scalar rows only; mapping-list sources omit it.
+  inlineComments?: string[];
+  dashIndent: string;
+}
 
 export const collectBlockListItems = (
   lines: string[],
   startIdx: number,
   prefix: string,
   itemRegex: RegExp
-): { items: string[]; endIdx: number } => {
-  const items: string[] = [];
+): {
+  items: (string | number | boolean)[];
+  endIdx: number;
+  itemRanges: [number, number][];
+  inlineComments: string[];
+} => {
+  const items: (string | number | boolean)[] = [];
+  const itemRanges: [number, number][] = [];
+  const inlineComments: string[] = [];
   let j = startIdx;
   for (; j < lines.length; j++) {
     if (isBlankOrCommentLine(lines[j])) continue;
     if (!lines[j].startsWith(prefix)) break;
     const m = lines[j].match(itemRegex);
     if (!m) break;
-    items.push(stripQuotes(m[1].trim()));
+    // Strip a trailing inline comment (``- 10 # note``) so the item
+    // coerces and the form value isn't polluted with ``# ...`` text —
+    // same rule as parseScalar (#1235).
+    const { value: raw, comment } = splitTrimmedInlineComment(m[1].trim());
+    items.push(coerceYamlScalar(stripQuotes(raw), isQuotedScalar(raw)));
+    itemRanges.push([j, j + 1]);
+    inlineComments.push(comment);
   }
-  return { items, endIdx: j };
+  return { items, endIdx: j, itemRanges, inlineComments };
 };
 
 /**
@@ -74,7 +104,8 @@ export const _detectFirstDashIndent = (
  */
 export const parseFlatMappingField = (
   key: string,
-  raw: string
+  raw: string,
+  hadSeparator: boolean
 ): { key: string; value: unknown } | null => {
   // Dotted keys (``logger.log:``, ``switch.turn_on:``) are
   // automation-action shorthand — not flat-mapping fields. Bail
@@ -87,21 +118,19 @@ export const parseFlatMappingField = (
   // the caller captures. ``parseScalar("|-")`` would otherwise
   // return the literal string ``"|-"`` (or ``"!lambda |-"``).
   if (parseBlockScalarHeader(raw)) return null;
-  // ``key:`` with no value is structurally ``{key: null}`` in YAML.
-  // Recognising it here is what lets list-of-single-key-mappings
-  // (light ``effects:``, sensor ``filters:``, any registry-shaped
-  // field) round-trip through the section editor instead of
-  // falling back to YamlRawValue. #941.
-  if (raw === "") return { key, value: null };
-  // Flow list inside a list-item mapping (``extras[].glyphs:
-  // ["\U000F058F", ...]``). Strip a trailing comment first so the
-  // ``[...]`` test fires; without this the array reads as a scalar string
-  // and the multi_value field renders empty (device-builder#1232).
-  const { value: scalar } = splitInlineComment(raw);
+  // ``key:`` with no value — bare or comment-only (``ssid: # note``,
+  // #1385) — is structurally ``{key: null}`` in YAML. Recognising it here
+  // is what lets list-of-single-key-mappings (light ``effects:``, sensor
+  // ``filters:``, any registry-shaped field) round-trip through the
+  // section editor instead of falling back to YamlRawValue. #941. The
+  // comment is also stripped before the ``[...]`` test so a flow list
+  // with a trailing comment still reads as an array (device-builder#1232).
+  const { value: scalar, comment } = splitValueComment(raw, hadSeparator);
+  if (scalar === "") return { key, value: null };
   if (scalar.startsWith("[") && scalar.endsWith("]")) {
-    return { key, value: parseFlowList(scalar) };
+    return { key, value: YamlFlowList.wrap(parseFlowList(scalar), comment) };
   }
-  return { key, value: parseScalar(raw) };
+  return { key, value: parseScalar(scalar) };
 };
 
 /**
@@ -119,7 +148,7 @@ export const _matchFlatMappingField = (
   re: RegExp
 ): { key: string; value: unknown } | null => {
   const m = line.match(re);
-  return m ? parseFlatMappingField(m[1], m[2].trim()) : null;
+  return m ? parseFlatMappingField(m[1], m[3].trim(), m[2].length > 0) : null;
 };
 
 /**

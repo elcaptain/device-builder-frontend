@@ -1,4 +1,4 @@
-import { validateEntries } from "../../../util/config-validation.js";
+import { clearPathErrors, validateEntries } from "../../../util/config-validation.js";
 import { fireEvent } from "../../../util/fire-event.js";
 import { formatApiError } from "../../../util/format-api-error.js";
 import { setIn } from "../../../util/nested-values.js";
@@ -69,16 +69,21 @@ export function onValueChange(
   host._values = setIn(host._values, path, value);
   host._setDirty(true);
   const errKey = path.join(".");
-  if (host._fieldErrors.has(errKey)) {
-    const next = new Map(host._fieldErrors);
-    next.delete(errKey);
-    host._fieldErrors = next;
+  const cleared = clearPathErrors(host._fieldErrors, errKey);
+  if (cleared) host._fieldErrors = cleared;
+  // Same optimistic clear for backend errors on the edited path — per-item
+  // keys under it included (a list edit emits at the field path while the
+  // backend error keys ``field.1``, #1354). They reappear on the next lint
+  // pass if the value is still invalid.
+  const itemPrefix = `${errKey}.`;
+  let nextCleared: Set<string> | null = null;
+  for (const k of host.backendErrors.fields.keys()) {
+    if ((k === errKey || k.startsWith(itemPrefix)) && !host._clearedBackendPaths.has(k)) {
+      nextCleared ??= new Set(host._clearedBackendPaths);
+      nextCleared.add(k);
+    }
   }
-  // Same optimistic clear for the backend error on the edited path — it
-  // reappears on the next lint pass if the value is still invalid.
-  if (host.backendErrors.fields.has(errKey) && !host._clearedBackendPaths.has(errKey)) {
-    host._clearedBackendPaths = new Set(host._clearedBackendPaths).add(errKey);
-  }
+  if (nextCleared) host._clearedBackendPaths = nextCleared;
   host._scheduleDraftFlush();
 }
 

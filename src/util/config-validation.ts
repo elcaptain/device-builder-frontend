@@ -11,10 +11,10 @@ import {
 import { parseFloatWithUnit } from "./float-with-unit.js";
 import { parseHexInt } from "./hex-int.js";
 import { parseIntInput } from "./int-input.js";
-import { asMappingList, asRecord } from "./nested-values.js";
+import { asMappingList, asRecord, isPrimitiveOrNullish } from "./nested-values.js";
 import { isSecretRef } from "./secret-ref.js";
-import { looksLikeSubstitution } from "./substitutions.js";
-import { YamlRawValue } from "./yaml-serialize.js";
+import { isSubstitutionString, looksLikeSubstitution } from "./substitutions.js";
+import { parseYamlBoolean, YamlRawValue } from "./yaml-serialize.js";
 
 /**
  * Whether an entry restricted to ``supportedPlatforms`` is allowed on the
@@ -107,14 +107,26 @@ export function isEntryVisible(
     ? values[entry.depends_on]
     : rootValues?.[entry.depends_on];
   depValue ??= siblings?.find((s) => s.key === entry.depends_on)?.default_value;
+  // Type-insensitive across primitives: the parser hands back numbers /
+  // booleans for plain scalars (#1360) while catalog gate values may be
+  // strings. A non-primitive (or nullish) depValue never matches — so
+  // `value` hides and `value_not` shows, and an array can't stringify
+  // into a spurious match. The compare is canonical-form, not lexical —
+  // a string gate "1.0" misses a numeric 1 (fails closed; gate values
+  // are integer or token shaped).
+  const gateMatches = (gate: ConfigPrimitive): boolean =>
+    (typeof depValue === "string" ||
+      typeof depValue === "number" ||
+      typeof depValue === "boolean") &&
+    String(depValue) === String(gate);
   if (entry.depends_on_value !== null && entry.depends_on_value !== undefined) {
-    return depValue === entry.depends_on_value;
+    return gateMatches(entry.depends_on_value);
   }
   if (entry.depends_on_value_not !== null && entry.depends_on_value_not !== undefined) {
-    return depValue !== entry.depends_on_value_not;
+    return !gateMatches(entry.depends_on_value_not);
   }
   if (entry.depends_on_value_any != null) {
-    return entry.depends_on_value_any.includes(depValue as ConfigPrimitive);
+    return entry.depends_on_value_any.some(gateMatches);
   }
   return true;
 }
@@ -123,6 +135,24 @@ export interface ValidationError {
   key: string;
   code: string;
   params?: Record<string, string | number>;
+}
+
+/**
+ * Return a copy of *errors* without *pathKey* and its per-item descendants
+ * (``codes`` also clears ``codes.0`` — a multi_value edit emits at the field
+ * path, #1348), or ``null`` when nothing matched so callers can skip the
+ * state write.
+ */
+export function clearPathErrors(
+  errors: ReadonlyMap<string, ValidationError>,
+  pathKey: string
+): Map<string, ValidationError> | null {
+  const prefix = `${pathKey}.`;
+  const stale = [...errors.keys()].filter((k) => k === pathKey || k.startsWith(prefix));
+  if (stale.length === 0) return null;
+  const next = new Map(errors);
+  for (const k of stale) next.delete(k);
+  return next;
 }
 
 /* Mirrors esphome's ``ALLOWED_NAME_CHARS`` (const.py) — what
@@ -225,7 +255,7 @@ export function validateEntry(entry: ConfigEntry, raw: unknown): ValidationError
   // A ${var} reference resolves at build time, so its value is unknowable
   // here; skip all validation (range, options, not-a-number) for the literal
   // or a mid-edit partial (#1391).
-  if (typeof raw === "string" && looksLikeSubstitution(raw)) return null;
+  if (isSubstitutionString(raw)) return null;
 
   if (entry.type === ConfigEntryType.INTEGER && entry.display_format === "hex") {
     // BigInt-route the hex-typed integer check so cv.hex_uint64_t
@@ -278,7 +308,9 @@ export function validateEntry(entry: ConfigEntry, raw: unknown): ValidationError
     }
   } else if (entry.type === ConfigEntryType.FLOAT) {
     const num = typeof raw === "number" ? raw : Number(String(raw));
-    if (Number.isNaN(num)) {
+    // isFinite, not just NaN: a stored "1e309"/"Infinity" is no float the
+    // backend accepts, and the text field it renders in needs the error.
+    if (!Number.isFinite(num)) {
       return { key: entry.key, code: "validation.not_a_number" };
     }
     if (entry.range) {
@@ -289,6 +321,10 @@ export function validateEntry(entry: ConfigEntry, raw: unknown): ValidationError
       if (num > max) {
         return { key: entry.key, code: "validation.max", params: { max } };
       }
+    }
+  } else if (entry.type === ConfigEntryType.BOOLEAN) {
+    if (parseYamlBoolean(raw) === null) {
+      return { key: entry.key, code: "validation.not_a_boolean" };
     }
   }
 
@@ -487,6 +523,42 @@ function _validateEntriesRecursive(
     const raw = entry.required
       ? (values[entry.key] ?? entry.default_value)
       : values[entry.key];
+
+    // A scalar multi_value list validates per item with array-index path
+    // segments, so one bad row doesn't paint its siblings — the whole array
+    // must never reach validateEntry, where it stringifies ("3,5" →
+    // not_a_number on every multi-item numeric list, #1348). A blank row
+    // beside a real value is mid-edit, not an error. Non-array values (a
+    // bare scalar cv.ensure_list accepts, an unset field, a YamlRawValue
+    // block) keep the generic field-level path below.
+    if (entry.multi_value && Array.isArray(raw)) {
+      if (!raw.some(isValuePresent)) {
+        // Empty, or only blank rows: required-and-unsatisfied either way.
+        // An unset hidden field isn't rendered, so never block on it
+        // (validateEntry's rule).
+        if (entry.required && !entry.hidden) {
+          const fullPath = [...pathPrefix, entry.key].join(".");
+          errors.set(fullPath, { key: fullPath, code: "validation.required" });
+        }
+        continue;
+      }
+      // A list-of-dicts the schema bundle couldn't type as nested renders
+      // YAML-only (the renderer's whole-field bail); per-item scalar
+      // checks would flag rows the form never shows. ESPHome's own
+      // validate_yaml owns those, same as MAP values.
+      if (raw.every(isPrimitiveOrNullish)) {
+        raw.forEach((item, idx) => {
+          if (!isValuePresent(item)) return;
+          const err = validateEntry(entry, item);
+          if (err) {
+            const fullPath = [...pathPrefix, entry.key, String(idx)].join(".");
+            errors.set(fullPath, { ...err, key: fullPath });
+          }
+        });
+      }
+      continue;
+    }
+
     const err = validateEntry(entry, raw);
     if (err) {
       const fullPath = [...pathPrefix, entry.key].join(".");

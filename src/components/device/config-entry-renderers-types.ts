@@ -92,17 +92,20 @@ export interface RenderCtx {
   getPendingUnit: (path: string[]) => string | undefined;
   setPendingUnit: (path: string[], unit: string) => void;
   /**
-   * FLOAT_WITH_UNIT-only: transient editing buffer for the numeric
-   * input. `<input type="number">` reads `""` from `.value` while
-   * the user is typing intermediate states (`"-"`, `"1e"`, `"1."`),
-   * which would round-trip through serialize and reset the field
-   * mid-typing. Renderers stash the raw text here and read it on
-   * the next paint so partial input survives until the user types a
-   * parseable value (or blurs the field).
+   * Transient editing buffer for numeric inputs (float-with-unit, int,
+   * hex, and INTEGER list rows). Committing an intermediate typing state
+   * (`"-"`, `"1e"`, `"0042"`) would round-trip through serialize and
+   * reset or reformat the field mid-typing. Renderers stash the raw text
+   * here and read it on the next paint so partial input survives until
+   * the user types a parseable value (or blurs the field).
    */
   getEditingMagnitude: (path: string[]) => string | undefined;
   setEditingMagnitude: (path: string[], text: string) => void;
   clearEditingMagnitude: (path: string[]) => void;
+  /** Drop every edit buffer at or under *path*. List-row buffers embed the
+   *  row index, so removing a row must invalidate them — the indices shift
+   *  and an un-blurred buffer would paint (and commit) over the wrong row. */
+  clearEditingMagnitudesUnder: (path: string[]) => void;
   /**
    * Either/or constraint cluster (radio chooser) UI state, off-config like
    * the unit/magnitude stashes above. ``ClusterChoice`` is the selected

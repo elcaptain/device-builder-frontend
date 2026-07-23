@@ -27,7 +27,7 @@ import {
 } from "../../util/api-encryption-key.js";
 import { stripConstraintProse } from "../../util/constraint-groups.js";
 import { resolveEntryLabel } from "../../util/entry-label.js";
-import { coerceIntFieldValue } from "../../util/int-input.js";
+import { coerceValueToEntryType } from "../../util/coerce-entry-value.js";
 import { renderMarkdown } from "../../util/markdown.js";
 import { isPrimitiveOrNullish } from "../../util/nested-values.js";
 import { registerMdiIcons } from "../../util/register-icons.js";
@@ -95,23 +95,6 @@ registerMdiIcons({
  */
 export function effectiveDisabled(entry: ConfigEntry, ctx: RenderCtx): boolean {
   return ctx.disabled || entry.locked;
-}
-
-/**
- * Coerce a control's string value back to the entry's declared numeric
- * type before emitting. A wa-select / combo box always hands back a
- * string, but an INTEGER/FLOAT field's YAML must be a number or downstream
- * validation (and the backend's locked-value compare) rejects it. INTEGER
- * goes through ``coerceIntFieldValue`` so a >2^53 decimal stays a string
- * (64-bit precision, #378/#944) and a ``0x…`` literal isn't truncated.
- * Non-numeric entries, an empty string, and unparseable input pass through
- * unchanged so the inline validator can flag them.
- */
-export function coerceValueToEntryType(entry: ConfigEntry, raw: string): string | number {
-  if (entry.type === ConfigEntryType.INTEGER) return coerceIntFieldValue(raw);
-  if (entry.type !== ConfigEntryType.FLOAT || raw === "") return raw;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : raw;
 }
 
 /** Serialize a field path into the ``data-field-key`` attribute. JSON
@@ -313,6 +296,20 @@ export function renderYamlOnlyFallbackIfNonPrimitive(
   return renderYamlOnlyField(entry, path, ctx);
 }
 
+/** Fallback for a primitive a typed widget can't represent: a string (a
+ *  ${substitution}, junk, a stored "1e309") stays editable as text with its
+ *  validation error in place; any other primitive gets the YAML-only shell. */
+export function renderUnparseableScalarField(
+  entry: ConfigEntry,
+  path: string[],
+  ctx: RenderCtx,
+  raw: unknown
+) {
+  return typeof raw === "string"
+    ? renderStringField(entry, "text", path, ctx)
+    : renderYamlOnlyField(entry, path, ctx);
+}
+
 /** The "this value can only be edited in YAML" field shell — shown when a
  *  value's shape (a mapping, or a list whose items are mappings) can't be
  *  driven by the scalar/multi-value inputs. */
@@ -456,7 +453,11 @@ export function renderStringField(
     placeholder=${placeholder}
     @input=${(e: Event) => {
       const raw = (e.target as HTMLInputElement).value;
-      ctx.emitChange(path, escapeMode ? unescapeControlForInput(raw) : raw);
+      // Numeric entries land here when the stored value is a substitution
+      // or junk (the FLOAT bail); a corrected plain number must go back
+      // as a number or the YAML re-emits it quoted (#1361).
+      const text = escapeMode ? unescapeControlForInput(raw) : raw;
+      ctx.emitChange(path, coerceValueToEntryType(entry, text));
     }}
   />`;
   return html`
@@ -469,12 +470,11 @@ export function renderStringField(
 
 /**
  * Render a closed `<wa-select>` for entries carrying a `suggestions`
- * list (featured components only). Mirrors the strict-select branch of
- * `renderSelectField` in `config-entry-renderers.ts` but lives in the
- * shared module so the simple-field renderer can reuse it without
+ * list (featured components only). Lives in the shared module so the
+ * simple-field renderer and `renderSelectField` can both use it without
  * importing the barrel.
  */
-function renderSuggestionSelect(
+export function renderSuggestionSelect(
   entry: ConfigEntry,
   path: string[],
   value: string,

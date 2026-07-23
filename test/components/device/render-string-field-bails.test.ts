@@ -17,6 +17,7 @@ import { renderStringField } from "../../../src/components/device/config-entry-r
 import { renderMultiValueField } from "../../../src/components/device/config-entry-renderers/lists.js";
 import {
   renderBooleanField,
+  renderColorField,
   renderFloatWithUnitField,
   renderNumberField,
   renderTextareaField,
@@ -24,7 +25,7 @@ import {
 } from "../../../src/components/device/config-entry-renderers/primitives.js";
 import { makeConfigEntry } from "../../../src/util/config-entry-defaults.js";
 import { YamlRawValue } from "../../../src/util/yaml-serialize.js";
-import { makeRenderCtx } from "./_renderer-fixtures.js";
+import { findElementBindings, makeEmitCtx, makeRenderCtx } from "./_renderer-fixtures.js";
 
 function makeStringEntry(): ConfigEntry {
   return makeConfigEntry({
@@ -38,12 +39,7 @@ function makeCtx(values: Record<string, unknown>): {
   ctx: RenderCtx;
   emitChange: ReturnType<typeof vi.fn>;
 } {
-  const emitChange = vi.fn();
-  const ctx = makeRenderCtx(values, {
-    board: null,
-    overrides: { emitChange, renderEntry: () => "<rendered>" },
-  });
-  return { ctx, emitChange };
+  return makeEmitCtx(values, { renderEntry: () => "<rendered>" });
 }
 
 /** The bail branch is the only one that emits a ``<p class="field-description">``
@@ -152,6 +148,31 @@ describe("renderTimePeriodField / renderFloatWithUnitField — bail on non-primi
     expect(rendersBailBranch(json)).toBe(true);
   });
 
+  it("bails on a boolean under a time-period field", () => {
+    const entry = makeConfigEntry({
+      key: "delay",
+      type: ConfigEntryType.TIME_PERIOD,
+      label: "Delay",
+    });
+    const { ctx } = makeCtx({ delay: true });
+    const tpl = renderTimePeriodField(entry, ["delay"], ctx);
+    const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+    expect(rendersBailBranch(json)).toBe(true);
+  });
+
+  it("keeps a compound duration string editable as text", () => {
+    const entry = makeConfigEntry({
+      key: "delay",
+      type: ConfigEntryType.TIME_PERIOD,
+      label: "Delay",
+    });
+    const { ctx } = makeCtx({ delay: "1h30m" });
+    const tpl = renderTimePeriodField(entry, ["delay"], ctx);
+    const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+    expect(rendersBailBranch(json)).toBe(false);
+    expect(json).toContain("1h30m");
+  });
+
   it("renders the editable time-period UI for an actual scalar", () => {
     const entry = makeConfigEntry({
       key: "delay",
@@ -227,11 +248,22 @@ describe("renderNumberField / renderFloatWithUnitField — bail on unparseable p
       unit_options: ["°C", "°F", "K"],
     });
 
-  it("bails on a unit-suffixed string under a FLOAT field", () => {
+  it("renders editable text for a unit-suffixed string under a FLOAT field", () => {
+    // A junk string edits in place with its validation error rather than
+    // locking behind the YAML-only shell (#1352's call for list rows).
     const { ctx } = makeCtx({ max_speed: "250 steps/s" });
     const tpl = renderNumberField(floatEntry(), ["max_speed"], ctx);
     const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
-    expect(rendersBailBranch(json)).toBe(true);
+    expect(rendersBailBranch(json)).toBe(false);
+    expect(json).toContain("250 steps/s");
+  });
+
+  it("renders editable text for a stored non-finite string under a FLOAT field", () => {
+    const { ctx } = makeCtx({ max_speed: "1e309" });
+    const tpl = renderNumberField(floatEntry(), ["max_speed"], ctx);
+    const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+    expect(rendersBailBranch(json)).toBe(false);
+    expect(json).toContain("1e309");
   });
 
   it("bails on a boolean under a FLOAT field", () => {
@@ -259,8 +291,20 @@ describe("renderNumberField / renderFloatWithUnitField — bail on unparseable p
     expect(rendersEditableBranch(json)).toBe(true);
   });
 
-  it("bails on a malformed unit string under a float-with-unit field", () => {
+  it("renders editable text for a malformed unit string under a float-with-unit field", () => {
     const { ctx } = makeCtx({ default_target_temperature: "21X" });
+    const tpl = renderFloatWithUnitField(
+      withUnitEntry(),
+      ["default_target_temperature"],
+      ctx
+    );
+    const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+    expect(rendersBailBranch(json)).toBe(false);
+    expect(json).toContain("21X");
+  });
+
+  it("bails on a boolean under a float-with-unit field", () => {
+    const { ctx } = makeCtx({ default_target_temperature: true });
     const tpl = renderFloatWithUnitField(
       withUnitEntry(),
       ["default_target_temperature"],
@@ -371,11 +415,12 @@ describe("renderMultiValueField — bail when items are mappings", () => {
   });
 });
 
-// ``parseYamlBoolean`` returns null for non-boolean/non-string inputs,
-// so a list / mapping under a boolean field renders unchecked. The
-// first user toggle would then write ``true`` back and clobber the
-// YAML structure. Pin both halves.
-describe("renderBooleanField — bail on non-primitive", () => {
+// ``parseYamlBoolean`` returns null for anything but a boolean or a
+// boolean spelling, and the first toggle of an unchecked switch would
+// write ``true`` over the stored value. Pin every bail branch: lists /
+// mappings and stray numbers to the YAML-only notice, substitution and
+// junk strings to editable text (#1368).
+describe("renderBooleanField — bail branches", () => {
   const entry = (): ConfigEntry =>
     makeConfigEntry({ key: "enabled", type: ConfigEntryType.BOOLEAN, label: "Enabled" });
 
@@ -393,5 +438,89 @@ describe("renderBooleanField — bail on non-primitive", () => {
     const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
     expect(rendersBailBranch(json)).toBe(false);
     expect(json).toContain("wa-switch");
+  });
+
+  it("renders editable text for a substitution or junk string (no switch to clobber it)", () => {
+    for (const value of ["${my_mode}", "maybe"]) {
+      const { ctx } = makeCtx({ enabled: value });
+      const tpl = renderBooleanField(entry(), ["enabled"], ctx);
+      const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+      expect(rendersBailBranch(json)).toBe(false);
+      expect(json).not.toContain("wa-switch");
+      expect(json).toContain(value);
+    }
+  });
+
+  it("bails on a stray number under a boolean field", () => {
+    const { ctx } = makeCtx({ enabled: 1 });
+    const tpl = renderBooleanField(entry(), ["enabled"], ctx);
+    const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+    expect(rendersBailBranch(json)).toBe(true);
+    expect(json).not.toContain("wa-switch");
+  });
+
+  it("coerces a corrected boolean spelling back to a real boolean on emit", () => {
+    const { ctx, emitChange } = makeCtx({ enabled: "${my_mode}" });
+    const tpl = renderBooleanField(entry(), ["enabled"], ctx);
+    const handler = findElementBindings(tpl, "input")[0]["@input"] as (
+      e: unknown
+    ) => void;
+    handler({ target: { value: "false" } });
+    expect(emitChange).toHaveBeenCalledWith(["enabled"], false);
+    handler({ target: { value: "maybe" } });
+    expect(emitChange).toHaveBeenCalledWith(["enabled"], "maybe");
+    handler({ target: { value: " off " } });
+    expect(emitChange).toHaveBeenCalledWith(["enabled"], false);
+    handler({ target: { value: "  " } });
+    expect(emitChange).toHaveBeenCalledWith(["enabled"], "");
+  });
+
+  it("renders the switch for a whitespace-padded spelling", () => {
+    const { ctx } = makeCtx({ enabled: " yes " });
+    const tpl = renderBooleanField(entry(), ["enabled"], ctx);
+    const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+    expect(json).toContain("wa-switch");
+  });
+
+  it("keeps the switch for quoted boolean spellings and empty placeholder", () => {
+    for (const value of ["off", ""]) {
+      const { ctx } = makeCtx({ enabled: value });
+      const tpl = renderBooleanField(entry(), ["enabled"], ctx);
+      const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+      expect(json).toContain("wa-switch");
+    }
+  });
+});
+
+describe("renderColorField — bail on values a color input can't show", () => {
+  const entry = (): ConfigEntry =>
+    makeConfigEntry({ key: "color", type: ConfigEntryType.COLOR, label: "Color" });
+
+  it("renders editable text for named colors and substitutions", () => {
+    for (const value of ["red", "${accent}"]) {
+      const { ctx } = makeCtx({ color: value });
+      const tpl = renderColorField(entry(), ["color"], ctx);
+      const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+      expect(rendersBailBranch(json)).toBe(false);
+      expect(findElementBindings(tpl, "input")[0].type).toBe("text");
+      expect(json).toContain(value);
+    }
+  });
+
+  it("keeps the color input for #rrggbb and for unset/empty", () => {
+    for (const values of [{ color: "#ff0000" }, { color: "" }, {}]) {
+      const { ctx } = makeCtx(values);
+      const tpl = renderColorField(entry(), ["color"], ctx);
+      const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+      expect(rendersBailBranch(json)).toBe(false);
+      expect(findElementBindings(tpl, "input")[0].type).toBe("color");
+    }
+  });
+
+  it("bails to the YAML-only shell for a non-string value", () => {
+    const { ctx } = makeCtx({ color: [255, 0, 0] });
+    const tpl = renderColorField(entry(), ["color"], ctx);
+    const json = JSON.stringify(tpl, (k, v) => (k === "_$litType$" ? 0 : v));
+    expect(rendersBailBranch(json)).toBe(true);
   });
 });

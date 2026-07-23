@@ -14,7 +14,7 @@ import {
   isEditableLambdaBlock,
   lambdaValueFromBlock,
 } from "./yaml-block-scalar-value.js";
-import { parseFlowList, parseScalar } from "./yaml-scalar.js";
+import { parseFlowList, parseScalar, splitValueComment } from "./yaml-scalar.js";
 import {
   _detectListItemChildIndent,
   _leadingIndent,
@@ -35,16 +35,17 @@ import {
   _matchFlatMappingField,
   _scanValueBlock,
   collectBlockListItems,
+  type ListItemSource,
   parseFlatMappingField,
 } from "./yaml-section-list.js";
-import { YamlRawValue } from "./yaml-serialize.js";
+import { YamlFlowList, YamlRawValue } from "./yaml-serialize.js";
 
 /**
  * Dispatch a YAML list block (``key:\n  - …``) into the right
  * value shape: structured array of mappings for editor-friendly
  * lists (``esphome.devices`` / ``esphome.areas``), ``YamlRawValue``
- * for complex automation triggers, or ``string[]`` for scalar
- * lists. Shared between the top-level and nested-block parsers
+ * for complex automation triggers, or scalar items (numbers,
+ * booleans, strings) for scalar lists. Shared between the top-level and nested-block parsers
  * so both surfaces agree on the dispatch.
  *
  * ``parentIndent`` is the indent of the parent KEY (the one whose
@@ -64,9 +65,10 @@ const parseListBlock = (
   startIdx: number,
   parentIndent: string
 ): {
-  value: YamlRawValue | Record<string, unknown>[] | string[];
+  value: YamlRawValue | Record<string, unknown>[] | (string | number | boolean)[];
   endIdx: number;
   isEmptyScalarList: boolean;
+  listSource?: ListItemSource;
 } => {
   const canonicalDashIndent = `${parentIndent}${ESPHOME_YAML_INDENT}`;
   const { dashIndent, firstDashIdx } = _detectFirstDashIndent(
@@ -100,6 +102,10 @@ const parseListBlock = (
         value: mapping.items,
         endIdx: mapping.endIdx,
         isEmptyScalarList: false,
+        listSource:
+          mapping.items.length > 0
+            ? { itemRanges: mapping.itemRanges, dashIndent }
+            : undefined,
       };
     }
     return {
@@ -114,7 +120,12 @@ const parseListBlock = (
   // ``dashIndent`` so 4-space user YAMLs round-trip — the older
   // ``listItemRegexFor(parentIndent)`` hardcoded the canonical
   // 2-space step and silently dropped scalar lists otherwise.
-  const { items, endIdx: scalarEndIdx } = collectBlockListItems(
+  const {
+    items,
+    endIdx: scalarEndIdx,
+    itemRanges,
+    inlineComments,
+  } = collectBlockListItems(
     lines,
     startIdx,
     `${dashIndent}- `,
@@ -124,6 +135,7 @@ const parseListBlock = (
     value: items,
     endIdx: scalarEndIdx,
     isEmptyScalarList: items.length === 0,
+    listSource: { itemRanges, inlineComments, dashIndent },
   };
 };
 
@@ -217,9 +229,13 @@ const collectBlockListMappings = (
   startIdx: number,
   dashIndent: string,
   childIndent: string
-): { items: Record<string, unknown>[]; endIdx: number } | null => {
-  const headerRe = new RegExp(`^${dashIndent}-\\s+(${KEY_PATTERN}):\\s*(.*)$`);
-  const childRe = new RegExp(`^${childIndent}(${KEY_PATTERN}):\\s*(.*)$`);
+): {
+  items: Record<string, unknown>[];
+  endIdx: number;
+  itemRanges: [number, number][];
+} | null => {
+  const headerRe = new RegExp(`^${dashIndent}-\\s+(${KEY_PATTERN}):(\\s*)(.*)$`);
+  const childRe = new RegExp(`^${childIndent}(${KEY_PATTERN}):(\\s*)(.*)$`);
 
   /**
    * Parse one list item starting at *at* (the dash line). Returns
@@ -246,7 +262,14 @@ const collectBlockListMappings = (
       const headerMatch = lines[at].match(headerRe);
       if (!headerMatch) return null;
       const headerKey = headerMatch[1];
-      const headerRaw = headerMatch[2].trim();
+      const headerHadSep = headerMatch[2].length > 0;
+      const headerRaw = headerMatch[3].trim();
+      // ``- ssid:#odd`` is a VALID scalar item to the loader (no
+      // ``:(?:\s|$)`` mapping signal, cf. LIST_ITEM_DICT_KEY_RE), so
+      // coercing it to a mapping would rewrite a valid doc — bail. Child
+      // lines stay lenient: separator-less there is invalid YAML, so
+      // repair can't misread a valid doc.
+      if (!headerHadSep && headerRaw !== "") return null;
       // ``- multiply: !lambda |-``: the body sits on the following
       // deeper-indented lines, so capture it here rather than letting
       // ``parseFlatMappingField`` mis-read the lone header as a scalar
@@ -278,7 +301,7 @@ const collectBlockListMappings = (
         item[headerKey] = lambdaValueFromBlock(lines.slice(at + 1, endIdx));
         return { item, endIdx };
       }
-      const header = parseFlatMappingField(headerKey, headerRaw);
+      const header = parseFlatMappingField(headerKey, headerRaw, headerHadSep);
       if (!header) return null;
       item[header.key] = header.value;
       // ``- effect_id:`` with no value may be a polymorphic single-
@@ -317,6 +340,7 @@ const collectBlockListMappings = (
   };
 
   const items: Record<string, unknown>[] = [];
+  const itemRanges: [number, number][] = [];
   let j = startIdx;
   while (j < lines.length) {
     if (isBlankOrCommentLine(lines[j])) {
@@ -327,9 +351,18 @@ const collectBlockListMappings = (
     const parsed = parseItem(j);
     if (!parsed) return null;
     items.push(parsed.item);
+    // The sub-key walk resumes past trailing blank/comment lines; trim the
+    // recorded range back to the last content line so an inter-row comment
+    // belongs to the FOLLOWING row's group (scalar-path semantics) and
+    // survives an edit of the row above it.
+    let contentEnd = parsed.endIdx;
+    while (contentEnd > j + 1 && isBlankOrCommentLine(lines[contentEnd - 1])) {
+      contentEnd--;
+    }
+    itemRanges.push([j, contentEnd]);
     j = parsed.endIdx;
   }
-  return { items, endIdx: j };
+  return { items, endIdx: j, itemRanges };
 };
 
 /** Recursively parse a nested YAML block at the given indent. */
@@ -357,7 +390,8 @@ function parseNestedBlock(
       continue;
     }
     const key = match[1];
-    const raw = match[2].trim();
+    const hadSeparator = match[2].length > 0;
+    const raw = match[3].trim();
 
     // Direct block scalar at nested indent (same shape as the
     // top-level parser's branch — see comment there). A nested
@@ -376,7 +410,12 @@ function parseNestedBlock(
       continue;
     }
 
-    if (raw === "") {
+    // Strip a trailing line comment before the empty test (a comment-only
+    // ``key: # note`` is an empty value, #1385) and the bracket test —
+    // without the latter ``key: [1, 2] # note`` misses the flow branch
+    // and degrades to the literal string "[1, 2]".
+    const { value: scalar, comment } = splitValueComment(raw, hadSeparator);
+    if (scalar === "") {
       const peek = _skipBlankAndCommentLines(lines, i + 1);
       // ``key:`` followed by a block list. Accept both the standard
       // (deeper-indent) and compact (same-indent) forms; the compact
@@ -397,14 +436,18 @@ function parseNestedBlock(
           continue;
         }
       }
+      // Value-less key: structurally ``{key: null}``, same as the
+      // top-level reader; the serializer's null filter keeps it out of
+      // re-emits either way.
+      values[key] = null;
       i++;
       continue;
     }
 
-    if (raw.startsWith("[") && raw.endsWith("]")) {
-      values[key] = parseFlowList(raw);
+    if (scalar.startsWith("[") && scalar.endsWith("]")) {
+      values[key] = YamlFlowList.wrap(parseFlowList(scalar), comment);
     } else {
-      values[key] = parseScalar(raw);
+      values[key] = parseScalar(scalar);
     }
     i++;
   }

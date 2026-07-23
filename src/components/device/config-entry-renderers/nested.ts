@@ -37,9 +37,12 @@ function _enableStash(ctx: RenderCtx): Map<string, Record<string, unknown>> {
 export function renderNestedField(entry: ConfigEntry, path: string[], ctx: RenderCtx) {
   // A scalar at a NESTED key (an unmodellable shorthand the user set in
   // YAML) renders read-only with its value, not as an empty flag group.
+  // Only a scalar that actually serializes gets the notice — a cleared ""
+  // never lands in YAML, so it falls through to the flag-group editor.
   const raw = ctx.getAt(path);
   if (
     !entry.multi_value &&
+    hasSerializableValue(raw) &&
     (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean")
   ) {
     return html`
@@ -66,7 +69,7 @@ export function renderNestedField(entry: ConfigEntry, path: string[], ctx: Rende
   // an explicit enable switch; plain nested forms (platform_type === null)
   // and required groups keep the bare collapsible header.
   const isOptionalEntity = entry.platform_type != null && !entry.required;
-  const enabled = isOptionalEntity && hasSerializableValue(ctx.getAt(path));
+  const enabled = isOptionalEntity && hasSerializableValue(raw);
   const label = labelFor(entry, ctx);
   const enableLabel = ctx.localize("device.enable_entity", { name: label });
   return html`

@@ -9,7 +9,12 @@
 
 import { LIST_SECTIONS } from "./section-entry-overrides.js";
 import { blockScalarValue } from "./yaml-block-scalar-value.js";
-import { parseFlowList, parseScalar, splitInlineComment } from "./yaml-scalar.js";
+import {
+  parseFlowList,
+  parseScalar,
+  splitInlineComment,
+  splitValueComment,
+} from "./yaml-scalar.js";
 import { parseListBlock, parseNestedBlock } from "./yaml-section-block-reader.js";
 import {
   _detectSectionChildIndent,
@@ -25,7 +30,7 @@ import {
   TOP_LEVEL_KEY_START_RE,
 } from "./yaml-section-lexer.js";
 import { _blockScalarBodyEnd } from "./yaml-section-list.js";
-import { type KeySpan, type ParsedSection } from "./yaml-section-splice.js";
+import { type KeyMeta, type ParsedSection } from "./yaml-section-splice.js";
 
 /**
  * Find the 0-indexed line where the named section begins.
@@ -89,15 +94,18 @@ export function parseSectionCore(
   // would now throw. Use `Object.prototype.hasOwnProperty.call` if
   // you need that check on a downstream consumer.
   const values: Record<string, unknown> = Object.create(null);
-  const spans = new Map<string, KeySpan>();
-  const comments = new Map<string, string>();
-  // leadStart is finalised by the post-loop pass below.
-  const recordSpan = (key: string, start: number, end: number): void => {
-    spans.set(key, { start, end, leadStart: start });
+  const keys = new Map<string, KeyMeta>();
+  // leadStart is finalised by the post-loop pass below. A fresh record per
+  // occurrence: a duplicate key re-assigns the value, and stale comment /
+  // list / flow metadata must not survive it.
+  const recordKey = (key: string, start: number, end: number): KeyMeta => {
+    const meta: KeyMeta = { span: { start, end, leadStart: start } };
+    keys.set(key, meta);
+    return meta;
   };
   const startIdx = findSectionStart(lines, sectionKey, fromLine);
   if (startIdx < 0) {
-    return { values, spans, comments, childIndent: "", isListItem: false, startIdx };
+    return { values, keys, childIndent: "", isListItem: false, startIdx };
   }
 
   const isListItem = LIST_ITEM_START_RE.test(lines[startIdx]);
@@ -135,7 +143,7 @@ export function parseSectionCore(
       values[sectionKey] = parseListBlock(lines, startIdx + 1, headerIndent).value;
       // No per-key spans — `updateSectionInYaml` re-emits this whole
       // list through its dedicated LIST_SECTIONS branch.
-      return { values, spans, comments, childIndent, isListItem, startIdx };
+      return { values, keys, childIndent, isListItem, startIdx };
     }
   }
 
@@ -149,12 +157,16 @@ export function parseSectionCore(
       // ``\s*`` drops it) so ``splitInlineComment`` can tell a real comment
       // (``#`` after whitespace) from a value that merely starts with ``#``
       // (``- file:#fragment``). The first ``:`` after the dash is the key's.
+      // The loader reads a separator-less ``- key:#x`` as a scalar item;
+      // this path still shows it as a field, but the serializer's
+      // ``yamlValueEqual`` guard keeps untouched saves byte-verbatim, so
+      // only a deliberate edit of the field rewrites it.
       const head = lines[startIdx];
       const afterColon = head.slice(head.indexOf(":", head.indexOf("-")) + 1);
       const { value: rawValue, comment } = splitInlineComment(afterColon);
       const scalar = rawValue.trim();
       if (scalar !== "") {
-        if (comment) comments.set(firstMatch[1], comment);
+        if (comment) keys.set(firstMatch[1], { comment });
         values[firstMatch[1]] = parseScalar(scalar);
       } else {
         // No scalar: the key's value is the nested mapping below. It rides on
@@ -191,7 +203,8 @@ export function parseSectionCore(
     const match = line.match(childRegex);
     if (!match) continue;
     const key = match[1];
-    const raw = match[2].trim();
+    const hadSeparator = match[2].length > 0;
+    const raw = match[3].trim();
 
     // Direct block scalar: `key: |-` (or `|`, `>`, `>-`, `|+`,
     // `>+`), optionally tagged (`key: !lambda |-`). The header sits
@@ -205,56 +218,62 @@ export function parseSectionCore(
     if (blockHeader) {
       const endIdx = _blockScalarBodyEnd(lines, i + 1, childIndent.length);
       values[key] = blockScalarValue(blockHeader, raw, lines.slice(i + 1, endIdx));
-      recordSpan(key, i, endIdx);
+      recordKey(key, i, endIdx);
       // Auto-increment ``for`` loop: resume so the next ``i++`` lands on endIdx.
       i = endIdx - 1;
       continue;
     }
 
-    if (raw === "") {
+    // Split a trailing inline comment off before the empty test (a
+    // comment-only value ``key: # note`` is an empty value to the loader,
+    // #1385), the flow-list test (`[a, b] # c` doesn't end with `]`), and
+    // scalar parsing — and record it so an edit can re-append it (#1235).
+    const { value: scalar, comment } = splitValueComment(raw, hadSeparator);
+    if (scalar === "") {
       const peek = _skipBlankAndCommentLines(lines, i + 1);
-      if (peek >= lines.length) continue;
-      const peekLine = lines[peek];
-
-      if (isChildListItemLine(peekLine, childIndent)) {
-        const { value, endIdx, isEmptyScalarList } = parseListBlock(
+      if (peek < lines.length && isChildListItemLine(lines[peek], childIndent)) {
+        const { value, endIdx, isEmptyScalarList, listSource } = parseListBlock(
           lines,
           i + 1,
           childIndent
         );
         if (!isEmptyScalarList) {
           values[key] = value;
-          recordSpan(key, i, endIdx);
+          const meta = recordKey(key, i, endIdx);
+          if (listSource) meta.listSource = listSource;
+          if (comment) meta.comment = comment;
           i = endIdx - 1;
         }
         continue;
       }
 
       // Nested mapping under ``key:`` (deeper indent read from the block
-      // itself so a user-typed 4-space file recurses correctly).
+      // itself so a user-typed 4-space file recurses correctly). No block
+      // — or a comment-only one — parses to null but is still recorded
+      // WITH a span. If the bare key were dropped instead, its source
+      // line would be invisible to the splice writer, which would then
+      // append a second ``key:`` when the form supplies the value while
+      // the original line — outside every span — survives the splice.
       const result = readNestedMappingAfter(i + 1);
-      if (result) {
-        if (Object.keys(result.values).length > 0) {
-          values[key] = result.values;
-          recordSpan(key, i, result.endIdx);
-        }
-        i = result.endIdx - 1;
-      }
+      const endIdx = result?.endIdx ?? i + 1;
+      values[key] =
+        result && Object.keys(result.values).length > 0 ? result.values : null;
+      const meta = recordKey(key, i, endIdx);
+      if (comment) meta.comment = comment;
+      i = endIdx - 1;
       continue;
     }
 
-    // Split a trailing inline comment off before the flow-list test
-    // (`[a, b] # c` doesn't end with `]`) and before scalar parsing,
-    // and record it so an edit can re-append it (#1235).
-    const { value: scalar, comment } = splitInlineComment(raw);
-    if (comment) comments.set(key, comment);
     if (scalar.startsWith("[") && scalar.endsWith("]")) {
       values[key] = parseFlowList(scalar);
-      recordSpan(key, i, i + 1);
+      const meta = recordKey(key, i, i + 1);
+      meta.flowList = true;
+      if (comment) meta.comment = comment;
       continue;
     }
     values[key] = parseScalar(scalar);
-    recordSpan(key, i, i + 1);
+    const meta = recordKey(key, i, i + 1);
+    if (comment) meta.comment = comment;
   }
 
   // A multi-line value's scanners skip trailing blank / sibling-level
@@ -266,7 +285,8 @@ export function parseSectionCore(
   // with the value so byte-identical no-op saves don't lose it. The
   // indent guard keeps deeper block-scalar literal text in the value
   // (#1227).
-  for (const span of spans.values()) {
+  for (const { span } of keys.values()) {
+    if (!span) continue;
     const low = span.start + 1;
     let runStart = span.end;
     let hasComment = false;
@@ -286,12 +306,13 @@ export function parseSectionCore(
   // partition the body — a verbatim copy then neither drops nor
   // double-counts an inter-key comment.
   let prevEnd = startIdx + 1;
-  for (const span of spans.values()) {
+  for (const { span } of keys.values()) {
+    if (!span) continue;
     let lead = span.start;
     while (lead > prevEnd && isBlankOrCommentLine(lines[lead - 1])) lead--;
     span.leadStart = lead;
     prevEnd = span.end;
   }
 
-  return { values, spans, comments, childIndent, isListItem, startIdx };
+  return { values, keys, childIndent, isListItem, startIdx };
 }

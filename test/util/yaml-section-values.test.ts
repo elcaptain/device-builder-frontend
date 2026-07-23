@@ -1326,6 +1326,121 @@ describe("updateSectionInYaml — preserves untouched field byte layout (#1227)"
     expect(after).toContain("ssid: office");
   });
 
+  it("keeps other items' comments when one list row is edited in place (#1363)", () => {
+    const before = [
+      "wifi:",
+      "  networks:",
+      "    - homenet #primary",
+      "    # fallback network",
+      "    - guestnet #open",
+      "    - iot",
+      "  ssid: home",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(before, "wifi", 1);
+    (values.networks as unknown[])[2] = "iot2";
+    const after = updateSectionInYaml(before, "wifi", values, 1);
+    expect(after).toContain(
+      "  networks:\n    - homenet #primary\n    # fallback network\n    - guestnet #open\n    - iot2\n"
+    );
+  });
+
+  it("re-attaches the edited row's own inline comment on an in-place edit", () => {
+    const before = ["display:", "  glyphs:", "    - 10 #ten", "    - 12", ""].join("\n");
+    const values = parseYamlSectionValues(before, "display", 1);
+    (values.glyphs as unknown[])[0] = 11;
+    const after = updateSectionInYaml(before, "display", values, 1);
+    expect(after).toContain("  glyphs:\n    - 11 #ten\n    - 12\n");
+  });
+
+  it("keeps remaining rows' comments when a middle row is removed", () => {
+    const before = [
+      "wifi:",
+      "  networks:",
+      "    - homenet #primary",
+      "    - dead",
+      "    - guestnet #open",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(before, "wifi", 1);
+    values.networks = ["homenet", "guestnet"];
+    const after = updateSectionInYaml(before, "wifi", values, 1);
+    expect(after).toContain(
+      "  networks:\n    - homenet #primary\n    - guestnet #open\n"
+    );
+    expect(after).not.toContain("- dead");
+  });
+
+  it("keeps existing rows verbatim when a row is appended", () => {
+    const before = ["wifi:", "  networks:", "    - homenet #primary", ""].join("\n");
+    const values = parseYamlSectionValues(before, "wifi", 1);
+    values.networks = ["homenet", "extra"];
+    const after = updateSectionInYaml(before, "wifi", values, 1);
+    expect(after).toContain("  networks:\n    - homenet #primary\n    - extra\n");
+  });
+
+  it("keeps a trailing comment after the last row through an edit", () => {
+    const before = [
+      "wifi:",
+      "  networks:",
+      "    - homenet",
+      "    - guestnet #open",
+      "    # end of networks",
+      "  ssid: home",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(before, "wifi", 1);
+    (values.networks as unknown[])[0] = "homenet2";
+    const after = updateSectionInYaml(before, "wifi", values, 1);
+    expect(after).toContain(
+      "  networks:\n    - homenet2\n    - guestnet #open\n    # end of networks\n  ssid: home"
+    );
+  });
+
+  it("keeps a sandwiched unchanged row byte-identical between two edited rows", () => {
+    const before = [
+      "display:",
+      "  glyphs:",
+      "    - 1 #a",
+      '    - "${glyph_row}" #keep',
+      "    - 3 #c",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(before, "display", 1);
+    (values.glyphs as unknown[])[0] = 10;
+    (values.glyphs as unknown[])[2] = 30;
+    const after = updateSectionInYaml(before, "display", values, 1);
+    expect(after).toContain(
+      '  glyphs:\n    - 10 #a\n    - "${glyph_row}" #keep\n    - 30 #c\n'
+    );
+  });
+
+  it("re-emits plain on a wholesale list replacement (no stale comments)", () => {
+    const before = ["wifi:", "  networks:", "    - a #one", "    - b #two", ""].join(
+      "\n"
+    );
+    const values = parseYamlSectionValues(before, "wifi", 1);
+    values.networks = ["x", "y", "z"];
+    const after = updateSectionInYaml(before, "wifi", values, 1);
+    expect(after).toContain("  networks:\n    - x\n    - y\n    - z\n");
+    expect(after).not.toContain("#one");
+    expect(after).not.toContain("#two");
+  });
+
+  it("keeps protective quoting on an untouched substitution row through a sibling edit", () => {
+    const before = [
+      "display:",
+      "  glyphs:",
+      '    - "${glyph_row}" #from subst',
+      "    - 10",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(before, "display", 1);
+    (values.glyphs as unknown[])[1] = 12;
+    const after = updateSectionInYaml(before, "display", values, 1);
+    expect(after).toContain('    - "${glyph_row}" #from subst\n    - 12\n');
+  });
+
   it("keeps an inter-key comment when editing the multi-line value above it", () => {
     // Copilot review: a block scalar's span absorbs the trailing
     // sibling-level comment the scanner skipped, so editing that key
@@ -1621,7 +1736,7 @@ describe("parseYamlSectionValues — list-of-mappings (multi_value=true)", () =>
       {
         to_ntc_resistance: {
           calibration: ["10.0kOhm -> 25°C", "27.219kOhm -> 0°C"],
-          b_constant: "3950",
+          b_constant: 3950,
         },
       },
     ]);
@@ -1755,7 +1870,7 @@ describe("parseYamlSectionValues — list-of-mappings (multi_value=true)", () =>
           delta: 0.5
 `;
     const values = parseYamlSectionValues(yaml, "sensor.template", 2);
-    expect(values.triggers).toEqual([{ id: "my_trigger", filters: { delta: "0.5" } }]);
+    expect(values.triggers).toEqual([{ id: "my_trigger", filters: { delta: 0.5 } }]);
     expect(updateSectionInYaml(yaml, "sensor.template", values, 2)).toBe(yaml);
   });
 
@@ -1818,7 +1933,7 @@ sensor:
     const sensorLine =
       yaml.split("\n").findIndex((l) => l.startsWith("  - platform: template")) + 1;
     const sensorValues = parseYamlSectionValues(yaml, "sensor.template", sensorLine);
-    expect(sensorValues.filters).toEqual([{ delta: "0.1" }, { multiply: "2.0" }]);
+    expect(sensorValues.filters).toEqual([{ delta: 0.1 }, { multiply: 2 }]);
   });
 
   it("parses light effects (single-key empty mappings) as an array (#941)", () => {
@@ -1912,11 +2027,12 @@ sensor:
     const devices = values.devices as Record<string, unknown>[];
     devices[0].name = "Front Entry";
     const after = updateSectionInYaml(yaml, "esphome", values);
-    // Both items survive; only the first item's name changed.
+    // Both items survive; only the first item's name changed. The
+    // unchanged item keeps its authored quoting byte-for-byte (#1379).
     expect(after).toContain("- id: front_door");
     expect(after).toContain("name: Front Entry");
     expect(after).toContain("- id: kitchen");
-    expect(after).toContain("name: Kitchen");
+    expect(after).toContain('name: "Kitchen"');
     // No double-quoted dotted-key corruption.
     expect(after).not.toMatch(/"id":/);
   });
@@ -2703,5 +2819,696 @@ describe("parseYamlSectionValues — flow list with comma-containing items", () 
     const yaml = 'x:\n  items: ["a", "b"] # keep these\n';
     const values = parseYamlSectionValues(yaml, "x");
     expect(values.items).toEqual(["a", "b"]);
+  });
+});
+
+describe("numeric list items parse as numbers (#1353)", () => {
+  it("parses unquoted plain decimals in flow and block lists as numbers", () => {
+    const flow = `display:
+  data: [10, 1.5, 0x76, "3", \${glyph_row}]
+`;
+    expect(parseYamlSectionValues(flow, "display").data).toEqual([
+      10,
+      1.5,
+      "0x76",
+      "3",
+      "${glyph_row}",
+    ]);
+
+    const block = `wifi:
+  channels:
+    - 1
+    - "6"
+    - 11
+`;
+    expect(parseYamlSectionValues(block, "wifi").channels).toEqual([1, "6", 11]);
+
+    const single = `wifi:
+  channels:
+    - '10'
+    - 11
+`;
+    expect(parseYamlSectionValues(single, "wifi").channels).toEqual(["10", 11]);
+
+    const commented = `wifi:
+  channels:
+    - 10 # primary
+    - "6" # quoted
+`;
+    expect(parseYamlSectionValues(commented, "wifi").channels).toEqual([10, "6"]);
+
+    // Nested-block flow lists strip the trailing line comment before the
+    // bracket test — without it the value degraded to the string "[1, 2]".
+    const nestedFlow = `mysect:
+  sub:
+    vals: [1, 2] # note
+`;
+    expect(parseYamlSectionValues(nestedFlow, "mysect").sub).toEqual({
+      vals: [1, 2],
+    });
+  });
+
+  it("re-emits sibling numerics bare when one flow-list item changes", () => {
+    // The #1353 repro shape: a flow list inside a list-item mapping
+    // (lcd_pcf8574 user_characters.data). Numeric siblings must come back
+    // bare; only the substitution keeps the protective quoting.
+    const yaml = `display:
+  - platform: lcd_pcf8574
+    user_characters:
+      - position: 0
+        data: [\${glyph_row}, 10, 10]
+`;
+    const from = firstListItemLine(yaml, "display");
+    const values = parseYamlSectionValues(yaml, "display", from);
+    const chars = values.user_characters as { data: (string | number)[] }[];
+    expect(chars[0].data).toEqual(["${glyph_row}", 10, 10]);
+    chars[0].data[1] = 11;
+    const after = updateSectionInYaml(yaml, "display", values, from);
+    expect(after).toContain('data: ["${glyph_row}", 11, 10]');
+    // The sibling scalar field re-emits bare too (#1360) — it parsed as a
+    // number, so the re-serialized item can't re-quote it.
+    expect(after).toContain("position: 0");
+    expect(after).not.toContain('position: "0"');
+  });
+});
+
+describe("bare child keys — hand-typed `key:` with no value", () => {
+  // The device-builder#2271 repro shape: the user types a bare
+  // `rotation:` under a platform item, then fills the field in the
+  // structured editor. The parser must surface the key (as null, with
+  // a span) or the splice writer appends a second `rotation:` while
+  // the original line, outside every span, survives the splice.
+  const before =
+    "display:\n" +
+    "  - platform: mipi_rgb\n" +
+    "    model: GUITION-4848S040\n" +
+    "    rotation:\n";
+  const from = firstListItemLine(before, "display");
+
+  it("parses a bare trailing child key as null", () => {
+    expect(parseYamlSectionValues(before, "display", from)).toEqual({
+      platform: "mipi_rgb",
+      model: "GUITION-4848S040",
+      rotation: null,
+    });
+  });
+
+  it("fills the bare key in place instead of appending a duplicate", () => {
+    const values = parseYamlSectionValues(before, "display", from);
+    values.rotation = 90;
+    const after = updateSectionInYaml(before, "display", values, from);
+    expect(after.match(/rotation:/g)).toHaveLength(1);
+    expect(after).toContain("rotation: 90");
+  });
+
+  it("keeps the bare key line verbatim when a sibling field changes", () => {
+    const values = parseYamlSectionValues(before, "display", from);
+    values.model = "OTHER";
+    const after = updateSectionInYaml(before, "display", values, from);
+    expect(after).toContain("model: OTHER");
+    expect(after.match(/rotation:/g)).toHaveLength(1);
+    expect(after).toContain("\n    rotation:\n");
+  });
+
+  it("parses a bare key followed by a sibling key as null", () => {
+    const yaml = "wifi:\n  ssid:\n  password: x\n";
+    expect(parseYamlSectionValues(yaml, "wifi")).toEqual({
+      ssid: null,
+      password: "x",
+    });
+  });
+
+  it("keeps a comment under a bare key when a sibling changes", () => {
+    // The comment is not a nested block (the peek skips it), so the
+    // bare key parses through the no-block arm; the comment folds into
+    // the next key's lead run and must ride through the splice.
+    const yaml = "wifi:\n  ssid:\n    # fill me in later\n  password: x\n";
+    const values = parseYamlSectionValues(yaml, "wifi");
+    expect(values).toEqual({ ssid: null, password: "x" });
+    values.password = "y";
+    const after = updateSectionInYaml(yaml, "wifi", values);
+    expect(after).toContain("  ssid:\n    # fill me in later\n");
+    expect(after).toContain("password: y");
+  });
+
+  it("keeps a comment under a bare key when the key itself is filled", () => {
+    // The deeper comment is not part of the bare key's span (the
+    // nested-block peek skips comment lines), so filling the key
+    // rewrites only the key line and the note survives.
+    const yaml = "wifi:\n  ssid:\n    # note\n  password: x\n";
+    const values = parseYamlSectionValues(yaml, "wifi");
+    expect(values).toEqual({ ssid: null, password: "x" });
+    values.ssid = 1;
+    const after = updateSectionInYaml(yaml, "wifi", values);
+    expect(after.match(/ssid:/g)).toHaveLength(1);
+    expect(after).toContain("ssid: 1");
+    expect(after).toContain("# note");
+  });
+
+  it("keeps a trailing comment under a bare key filled at section end", () => {
+    const yaml = "wifi:\n  ssid:\n    # note\n";
+    const values = parseYamlSectionValues(yaml, "wifi");
+    expect(values).toEqual({ ssid: null });
+    values.ssid = 1;
+    const after = updateSectionInYaml(yaml, "wifi", values);
+    expect(after.match(/ssid:/g)).toHaveLength(1);
+    expect(after).toContain("ssid: 1");
+    expect(after).toContain("# note");
+  });
+
+  it("parses a bare key over an unreadable deeper block as null", () => {
+    // A deeper line the child regex can't read (quoted key) parses to a
+    // zero-key nested block; the key records null with a span over the
+    // run, so an unrelated edit keeps both lines byte-for-byte.
+    const yaml = 'mysect:\n  wrapper:\n    "quoted key": x\n  other: y\n';
+    const values = parseYamlSectionValues(yaml, "mysect");
+    expect(values).toEqual({ wrapper: null, other: "y" });
+    values.other = "z";
+    const after = updateSectionInYaml(yaml, "mysect", values);
+    expect(after).toContain('  wrapper:\n    "quoted key": x\n');
+    expect(after).toContain("other: z");
+  });
+
+  it("fills a bare sole inline key through the dash rewrite", () => {
+    // A bare key riding the dash line (`- rotation:`) deliberately does
+    // NOT get the null-with-span treatment: the dash line has no span
+    // by design and the form is authoritative there, so the writer
+    // rewrites the dash in place (a null form value would instead
+    // collapse the dash and drop the key on a no-op save).
+    const yaml = "display:\n  - rotation:\n";
+    const from = firstListItemLine(yaml, "display");
+    expect(parseYamlSectionValues(yaml, "display", from)).toEqual({});
+    const after = updateSectionInYaml(yaml, "display", { rotation: 90 }, from);
+    expect(after.match(/rotation:/g)).toHaveLength(1);
+    expect(after).toContain("- rotation: 90");
+  });
+
+  it("keeps a bare sole inline key verbatim on an untouched save", () => {
+    const yaml = "display:\n  - rotation:\n";
+    const from = firstListItemLine(yaml, "display");
+    const values = parseYamlSectionValues(yaml, "display", from);
+    const after = updateSectionInYaml(yaml, "display", values, from);
+    expect(after).toContain("- rotation:");
+  });
+
+  it("fills a bare key that a sibling list item follows", () => {
+    const yaml =
+      "display:\n" +
+      "  - platform: mipi_rgb\n" +
+      "    rotation:\n" +
+      "  - platform: ili9xxx\n";
+    const from = firstListItemLine(yaml, "display");
+    const values = parseYamlSectionValues(yaml, "display", from);
+    expect(values).toEqual({ platform: "mipi_rgb", rotation: null });
+    values.rotation = 180;
+    const after = updateSectionInYaml(yaml, "display", values, from);
+    expect(after.match(/rotation:/g)).toHaveLength(1);
+    expect(after).toContain("rotation: 180");
+    // The second platform item is untouched and still follows the first.
+    expect(after.indexOf("rotation: 180")).toBeLessThan(after.indexOf("ili9xxx"));
+  });
+});
+
+describe("updateSectionInYaml — flow list edits keep flow style (#1378)", () => {
+  it("keeps flow style and the trailing comment when a flow list is edited (#1378)", () => {
+    const before = ["display:", "  data: [10, 12] # note", "  size: 20", ""].join("\n");
+    const values = parseYamlSectionValues(before, "display", 1);
+    (values.data as unknown[])[1] = 13;
+    const after = updateSectionInYaml(before, "display", values, 1);
+    expect(after).toContain("  data: [10, 13] # note\n");
+    expect(after).not.toContain("- 10");
+  });
+
+  it("keeps flow-indicator quoting on substitution items through a flow edit", () => {
+    const before = ["display:", '  data: ["${glyph_row}", 10] # glyphs', ""].join("\n");
+    const values = parseYamlSectionValues(before, "display", 1);
+    (values.data as unknown[])[1] = 11;
+    const after = updateSectionInYaml(before, "display", values, 1);
+    expect(after).toContain('  data: ["${glyph_row}", 11] # glyphs\n');
+  });
+
+  it("drops the key when a flow list is emptied", () => {
+    const before = ["display:", "  data: [10, 12] # note", "  size: 20", ""].join("\n");
+    const values = parseYamlSectionValues(before, "display", 1);
+    values.data = [];
+    const after = updateSectionInYaml(before, "display", values, 1);
+    expect(after).not.toContain("data:");
+    expect(after).toContain("size: 20");
+  });
+});
+
+describe("updateSectionInYaml — mapping-list rows keep comments on edit (#1379)", () => {
+  const yaml = [
+    "wifi:",
+    "  networks:",
+    "    - ssid: homenet #primary",
+    "      password: hunter2",
+    "    # guest network below",
+    "    - ssid: guestnet",
+    "      password: opensesame",
+    "  domain: .local",
+    "",
+  ].join("\n");
+
+  it("keeps an untouched row's inline and whole-line comments through a sibling row edit", () => {
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    (values.networks as Record<string, unknown>[])[1].password = "changed";
+    const after = updateSectionInYaml(yaml, "wifi", values, 1);
+    expect(after).toContain("    - ssid: homenet #primary\n      password: hunter2\n");
+    expect(after).toContain("    # guest network below\n");
+    expect(after).toContain("password: changed");
+  });
+
+  it("keeps an inter-row comment when the row ABOVE it is edited", () => {
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    (values.networks as Record<string, unknown>[])[0].password = "changed";
+    const after = updateSectionInYaml(yaml, "wifi", values, 1);
+    expect(after).toContain("    # guest network below\n    - ssid: guestnet\n");
+    expect(after).toContain("password: changed");
+    expect(after).toContain("password: opensesame");
+  });
+
+  it("keeps the remaining multi-line row verbatim when the first row is removed", () => {
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    values.networks = [(values.networks as Record<string, unknown>[])[1]];
+    const after = updateSectionInYaml(yaml, "wifi", values, 1);
+    expect(after).toContain("    - ssid: guestnet\n      password: opensesame\n");
+    expect(after).not.toContain("homenet");
+  });
+
+  it("keeps existing rows verbatim when a row is appended", () => {
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    (values.networks as Record<string, unknown>[]).push({ ssid: "iot" });
+    const after = updateSectionInYaml(yaml, "wifi", values, 1);
+    expect(after).toContain("    - ssid: homenet #primary\n");
+    expect(after).toContain("    # guest network below\n    - ssid: guestnet\n");
+    expect(after).toContain("    - ssid: iot\n");
+  });
+
+  it("keeps a sandwiched unchanged mapping row byte-identical between two edited rows", () => {
+    const three = [
+      "wifi:",
+      "  networks:",
+      "    - ssid: alpha",
+      "      password: aaa",
+      "    # beta stays",
+      "    - ssid: beta #vip",
+      "      password: bbb",
+      "    - ssid: gamma",
+      "      password: ccc",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(three, "wifi", 1);
+    const nets = values.networks as Record<string, unknown>[];
+    nets[0].password = "aaa2";
+    nets[2].password = "ccc2";
+    const after = updateSectionInYaml(three, "wifi", values, 1);
+    expect(after).toContain(
+      "    # beta stays\n    - ssid: beta #vip\n      password: bbb\n"
+    );
+    expect(after).toContain("password: aaa2");
+    expect(after).toContain("password: ccc2");
+  });
+
+  it("keeps a comment between the key line and the first row through a first-row edit", () => {
+    const led = [
+      "wifi:",
+      "  networks:",
+      "    # primary first",
+      "    - ssid: homenet",
+      "      password: hunter2",
+      "    - ssid: guestnet",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(led, "wifi", 1);
+    (values.networks as Record<string, unknown>[])[0].password = "changed";
+    const after = updateSectionInYaml(led, "wifi", values, 1);
+    expect(after).toContain("  networks:\n    # primary first\n");
+    expect(after).toContain("password: changed");
+    expect(after).toContain("- ssid: guestnet");
+  });
+
+  it("keeps a trailing comment after the last row through a last-row edit", () => {
+    const trail = [
+      "wifi:",
+      "  networks:",
+      "    - ssid: homenet",
+      "      password: hunter2",
+      "    - ssid: guestnet",
+      "      password: opensesame",
+      "    # end of networks",
+      "  domain: .local",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(trail, "wifi", 1);
+    (values.networks as Record<string, unknown>[])[1].password = "changed";
+    const after = updateSectionInYaml(trail, "wifi", values, 1);
+    expect(after).toContain("password: changed");
+    expect(after).toContain("    # end of networks\n  domain: .local");
+    expect(after).toContain("- ssid: homenet\n      password: hunter2");
+  });
+
+  it("keeps a blank line between rows through a sibling edit", () => {
+    const blanky = [
+      "wifi:",
+      "  networks:",
+      "    - ssid: homenet",
+      "",
+      "    - ssid: guestnet #open",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(blanky, "wifi", 1);
+    (values.networks as Record<string, unknown>[])[0].ssid = "homenet2";
+    const after = updateSectionInYaml(blanky, "wifi", values, 1);
+    expect(after).toContain("- ssid: homenet2\n\n    - ssid: guestnet #open\n");
+  });
+
+  it("keeps an unchanged row with a lambda field verbatim through a sibling edit", () => {
+    const lam = [
+      "sensor:",
+      "  filters:",
+      "    - offset: 1.5 #cal",
+      "    - lambda: !lambda |-",
+      "        return x * 2;",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(lam, "sensor", 1);
+    (values.filters as Record<string, unknown>[])[0].offset = 2.5;
+    const after = updateSectionInYaml(lam, "sensor", values, 1);
+    expect(after).toContain("offset: 2.5");
+    expect(after).toContain("    - lambda: !lambda |-\n        return x * 2;\n");
+  });
+
+  it("keeps outer rows verbatim when the middle row of three is removed", () => {
+    const three = [
+      "wifi:",
+      "  networks:",
+      "    - ssid: alpha #one",
+      "      password: aaa",
+      "    - ssid: beta",
+      "      password: bbb",
+      "    - ssid: gamma #three",
+      "      password: ccc",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(three, "wifi", 1);
+    const nets = values.networks as Record<string, unknown>[];
+    values.networks = [nets[0], nets[2]];
+    const after = updateSectionInYaml(three, "wifi", values, 1);
+    expect(after).toContain("    - ssid: alpha #one\n      password: aaa\n");
+    expect(after).toContain("    - ssid: gamma #three\n      password: ccc\n");
+    expect(after).not.toContain("beta");
+  });
+
+  it("re-emits a row replaced in place by a scalar without touching siblings", () => {
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    (values.networks as unknown[])[1] = "guest-preset";
+    const after = updateSectionInYaml(yaml, "wifi", values, 1);
+    expect(after).toContain("    - ssid: homenet #primary\n      password: hunter2\n");
+    expect(after).toContain("- guest-preset");
+  });
+
+  it("falls back to a consistent full re-emit when the dash column is non-canonical", () => {
+    // Compact same-column dashes: a spliced mapping row would land two
+    // columns deeper than its verbatim siblings, so the splice bails.
+    const compact = [
+      "wifi:",
+      "  networks:",
+      "  - ssid: homenet #primary",
+      "    password: hunter2",
+      "  - ssid: guestnet",
+      "    password: opensesame",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(compact, "wifi", 1);
+    (values.networks as Record<string, unknown>[])[1].password = "changed";
+    const after = updateSectionInYaml(compact, "wifi", values, 1);
+    // Every dash lands at one column — no mixed-column corruption.
+    const dashCols = [...after.matchAll(/^( *)- ssid/gm)].map((m) => m[1].length);
+    expect(new Set(dashCols).size).toBe(1);
+    expect(after).toContain("password: changed");
+    expect(after).toContain("ssid: homenet");
+  });
+
+  it("still splices a non-canonical dash list when no mapping row re-emits", () => {
+    // A pure removal re-emits nothing: the remaining rows are verbatim
+    // copies, so the compact dash column can't be corrupted and the bail
+    // must not fire (it would needlessly drop the surviving comments).
+    const compact = [
+      "wifi:",
+      "  networks:",
+      "  - ssid: homenet #primary",
+      "    password: hunter2",
+      "  - ssid: guestnet",
+      "    password: opensesame",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(compact, "wifi", 1);
+    values.networks = [(values.networks as Record<string, unknown>[])[1]];
+    const after = updateSectionInYaml(compact, "wifi", values, 1);
+    expect(after).toContain("  - ssid: guestnet\n    password: opensesame\n");
+    expect(after).not.toContain("homenet");
+  });
+
+  it("keeps a 4-space source's unchanged rows verbatim while the edited row canonicalizes", () => {
+    const wide = [
+      "wifi:",
+      "    networks:",
+      "        - ssid: homenet #primary",
+      "          password: hunter2",
+      "        - ssid: guestnet",
+      "          password: opensesame",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(wide, "wifi", 1);
+    (values.networks as Record<string, unknown>[])[1].password = "changed";
+    const after = updateSectionInYaml(wide, "wifi", values, 1);
+    expect(after).toContain(
+      "        - ssid: homenet #primary\n          password: hunter2\n"
+    );
+    expect(after).toContain("ssid: guestnet");
+    expect(after).toContain("password: changed");
+  });
+});
+
+describe("updateSectionInYaml — comment-only values are empty (#1385)", () => {
+  it("parses a comment-only scalar as null, not the literal string", () => {
+    const yaml = ["wifi:", "  domain: # note", "  ssid: home", ""].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.domain).toBeNull();
+    expect(values.ssid).toBe("home");
+  });
+
+  it("re-appends the comment when the empty field gains a value", () => {
+    const yaml = ["wifi:", "  domain: # note", "  ssid: home", ""].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    values.domain = ".local";
+    const after = updateSectionInYaml(yaml, "wifi", values, 1);
+    expect(after).toContain("  domain: .local # note\n");
+  });
+
+  it("still parses a nested mapping under a commented key line", () => {
+    const yaml = [
+      "wifi:",
+      "  manual_ip: # static below",
+      "    static_ip: 10.0.0.2",
+      "    gateway: 10.0.0.1",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.manual_ip).toEqual({ static_ip: "10.0.0.2", gateway: "10.0.0.1" });
+  });
+
+  it("still parses a list under a commented key line", () => {
+    const yaml = [
+      "wifi:",
+      "  networks: # known nets",
+      "    - homenet",
+      "    - guestnet",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.networks).toEqual(["homenet", "guestnet"]);
+  });
+
+  it("parses a comment-only mapping-item field as null", () => {
+    const yaml = [
+      "wifi:",
+      "  networks:",
+      "    - ssid: # pick later",
+      "      password: hunter2",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.networks).toEqual([{ ssid: null, password: "hunter2" }]);
+  });
+
+  it("coerces a pathological comment-only list item to the empty string", () => {
+    const yaml = [
+      "wifi:",
+      "  networks:",
+      "    - # placeholder",
+      "    - homenet",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.networks).toEqual(["", "homenet"]);
+  });
+
+  it("parses a comment-only value inside a nested mapping as null", () => {
+    const yaml = [
+      "wifi:",
+      "  manual_ip:",
+      "    static_ip: # todo",
+      "    gateway: 10.0.0.1",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.manual_ip).toEqual({ static_ip: null, gateway: "10.0.0.1" });
+  });
+
+  it("parses an all-value-less nested block as an object of nulls", () => {
+    // Deliberate #1385 delta: previously such a block collapsed to null;
+    // per-key nulls match parseFlatMappingField's #941 treatment and the
+    // serializer's null filter keeps re-emits unchanged.
+    const yaml = ["wifi:", "  manual_ip:", "    static_ip:", "    gateway:", ""].join(
+      "\n"
+    );
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.manual_ip).toEqual({ static_ip: null, gateway: null });
+  });
+
+  it("parses the deeper block under a commented nested key instead of dropping it", () => {
+    const yaml = ["wifi:", "  manual_ip:", "    dns1: # note", "      x: 1", ""].join(
+      "\n"
+    );
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.manual_ip).toEqual({ dns1: { x: 1 } });
+  });
+
+  it("keeps colon-adjacent # as value text when no separator follows the colon (#1388)", () => {
+    // Matches the dash-line ``- file:#fragment`` leniency: with no
+    // whitespace after the colon there was never a comment separator.
+    const yaml = ["wifi:", "  ssid:#fragment", "  domain: .local", ""].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.ssid).toBe("#fragment");
+  });
+
+  it("keeps colon-adjacent # as value text inside a nested mapping", () => {
+    const yaml = [
+      "wifi:",
+      "  manual_ip:",
+      "    static_ip:#odd",
+      "    gateway: 10.0.0.1",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.manual_ip).toEqual({ static_ip: "#odd", gateway: "10.0.0.1" });
+  });
+
+  it("bails a mixed list with a separator-less dash header to YamlRawValue", () => {
+    // ``- ssid:#odd`` is a scalar item to the loader; coercing it into a
+    // mapping field would silently rewrite it on save. The conservative
+    // fallback keeps the block byte-verbatim.
+    const yaml = [
+      "wifi:",
+      "  networks:",
+      "    - ssid: home",
+      "      password: x",
+      "    - ssid:#odd",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    const after = updateSectionInYaml(yaml, "wifi", values, 1);
+    expect(after).toBe(yaml);
+  });
+
+  it("keeps colon-adjacent # as value text in a mapping-item field", () => {
+    const yaml = [
+      "wifi:",
+      "  networks:",
+      "    - ssid: home",
+      "      password:#odd",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.networks).toEqual([{ ssid: "home", password: "#odd" }]);
+  });
+
+  it("keeps a quoted value that merely starts with #", () => {
+    const yaml = ["wifi:", '  ssid: "#lounge"', ""].join("\n");
+    const values = parseYamlSectionValues(yaml, "wifi", 1);
+    expect(values.ssid).toBe("#lounge");
+  });
+});
+
+describe("updateSectionInYaml — nested flow lists keep style and comment (#1381)", () => {
+  const yaml = ["display:", "  foo:", "    data: [1, 2] # note", "    size: 20", ""].join(
+    "\n"
+  );
+
+  it("keeps the flow line and comment when a sibling field in the nested mapping changes", () => {
+    const quoted = [
+      "display:",
+      "  foo:",
+      '    data: ["${row}", 2] # note',
+      "    size: 20",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(quoted, "display", 1);
+    (values.foo as Record<string, unknown>).size = 22;
+    const after = updateSectionInYaml(quoted, "display", values, 1);
+    expect(after).toContain('    data: ["${row}", 2] # note\n');
+    expect(after).toContain("size: 22");
+    expect(after).not.toContain("- 2");
+  });
+
+  it("keeps a comment-less nested flow list flow-styled through a sibling edit", () => {
+    const bare = ["display:", "  foo:", "    data: [1, 2]", "    size: 20", ""].join(
+      "\n"
+    );
+    const values = parseYamlSectionValues(bare, "display", 1);
+    (values.foo as Record<string, unknown>).size = 22;
+    const after = updateSectionInYaml(bare, "display", values, 1);
+    expect(after).toContain("    data: [1, 2]\n");
+  });
+
+  it("re-emits canonically when a row is removed via filter (no stale flow/comment)", () => {
+    // ``removeAt`` filters the array; Symbol.species keeps the result a
+    // plain array so the mutation canonicalizes like every other edit.
+    const values = parseYamlSectionValues(yaml, "display", 1);
+    const data = (values.foo as Record<string, unknown>).data as unknown[];
+    (values.foo as Record<string, unknown>).data = data.filter((_, i) => i !== 0);
+    const after = updateSectionInYaml(yaml, "display", values, 1);
+    expect(after).not.toContain("# note");
+    expect(after).not.toContain("[");
+    expect(after).toContain("data:");
+  });
+
+  it("re-emits canonically with no stale comment when the list itself is edited", () => {
+    const values = parseYamlSectionValues(yaml, "display", 1);
+    (values.foo as Record<string, unknown>).data = [1, 3];
+    const after = updateSectionInYaml(yaml, "display", values, 1);
+    expect(after).not.toContain("# note");
+    expect(after).toContain("data:");
+    expect(after).toContain("size: 20");
+  });
+
+  it("keeps a mapping-list item's flow sub-list comment when a sibling field is edited", () => {
+    const items = [
+      "font:",
+      "  extras:",
+      "    - file: a.ttf",
+      "      glyphs: [x, y] # icons",
+      "    - file: b.ttf",
+      "      glyphs: [z]",
+      "",
+    ].join("\n");
+    const values = parseYamlSectionValues(items, "font", 1);
+    (values.extras as Record<string, unknown>[])[0].file = "c.ttf";
+    const after = updateSectionInYaml(items, "font", values, 1);
+    expect(after).toContain("glyphs: [x, y] # icons");
+    expect(after).toContain("file: c.ttf");
+    expect(after).toContain("glyphs: [z]");
   });
 });

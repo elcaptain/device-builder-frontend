@@ -52,7 +52,7 @@ import {
 import { registerMdiIcons } from "../../util/register-icons.js";
 import { nearestScrollContainer } from "../../util/scroll-container.js";
 import { SessionBlobCacheController } from "../../util/session-blob-cache-controller.js";
-import { looksLikeSubstitution, parseSubstitutions } from "../../util/substitutions.js";
+import { isSubstitutionString, parseSubstitutions } from "../../util/substitutions.js";
 import {
   _isStructuralType,
   filterRenderable,
@@ -94,6 +94,7 @@ import {
   renderMultiValueField,
   renderNestedField,
   renderNestedListField,
+  renderColorField,
   renderNumberField,
   renderPinField,
   renderRegistryListField,
@@ -906,7 +907,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
     // text so the token round-trips and stays editable mid-keystroke;
     // SECURE_STRING stays masked (#1391).
     const raw = ctx.getAt(path);
-    if (typeof raw === "string" && looksLikeSubstitution(raw)) {
+    if (isSubstitutionString(raw)) {
       const inputType =
         entry.type === ConfigEntryType.SECURE_STRING ? "password" : "text";
       return renderStringField(entry, inputType, path, ctx);
@@ -966,7 +967,7 @@ export class ESPHomeConfigEntryForm extends LitElement {
       case ConfigEntryType.PIN:
         return renderPinField(entry, path, ctx);
       case ConfigEntryType.COLOR:
-        return renderStringField(entry, "color", path, ctx);
+        return renderColorField(entry, path, ctx);
       case ConfigEntryType.MAC_ADDRESS:
         return renderStringField(entry, "text", path, ctx);
       case ConfigEntryType.LAMBDA:
@@ -1065,6 +1066,13 @@ export class ESPHomeConfigEntryForm extends LitElement {
       },
       clearEditingMagnitude: (path) => {
         this._editingMagnitudes.delete(path.join("."));
+      },
+      clearEditingMagnitudesUnder: (path) => {
+        const key = path.join(".");
+        const prefix = `${key}.`;
+        for (const k of [...this._editingMagnitudes.keys()]) {
+          if (k === key || k.startsWith(prefix)) this._editingMagnitudes.delete(k);
+        }
       },
       getClusterChoice: (clusterId) => this._constraintClusters.getChoice(clusterId),
       setClusterChoice: (clusterId, altId) =>

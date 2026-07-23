@@ -14,7 +14,11 @@ import { dialogActionButtonStyles } from "../../styles/dialog-action-buttons.js"
 import { inputStyles } from "../../styles/inputs.js";
 import { espHomeStyles } from "../../styles/shared.js";
 import { ComponentNameResolverController } from "../../util/component-name-resolver-controller.js";
-import { validateEntries, type ValidationError } from "../../util/config-validation.js";
+import {
+  clearPathErrors,
+  validateEntries,
+  type ValidationError,
+} from "../../util/config-validation.js";
 import { resolveFeaturedComponentId } from "../../util/featured-id.js";
 import { fireEvent } from "../../util/fire-event.js";
 import { renderMarkdown } from "../../util/markdown.js";
@@ -461,17 +465,13 @@ export class ESPHomeAddComponentForm extends LitElement {
   private _onValueChange(e: CustomEvent<ConfigEntryValueChange>) {
     const { path, value } = e.detail;
     this._values = setIn(this._values, path, value);
-    // Clear any error on the path the user just edited so the
-    // red ring disappears as they type. Same for the
-    // hidden-validation block message: any user input is a fresh
-    // signal that supersedes the previous bail; the next submit
-    // attempt re-evaluates from scratch.
-    const errKey = path.join(".");
-    if (this._errors.has(errKey)) {
-      const next = new Map(this._errors);
-      next.delete(errKey);
-      this._errors = next;
-    }
+    // Clear any error on the path the user just edited — including
+    // per-item keys under it, or the offending row's error sticks until
+    // the next submit. Same for the hidden-validation block message: any
+    // user input is a fresh signal that supersedes the previous bail;
+    // the next submit attempt re-evaluates from scratch.
+    const cleared = clearPathErrors(this._errors, path.join("."));
+    if (cleared) this._errors = cleared;
     if (this._localBlockMessage) this._localBlockMessage = "";
   }
 

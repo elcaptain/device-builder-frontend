@@ -112,3 +112,64 @@ describe("coerceFields multi_value nested list (usb_uart channels)", () => {
     expect(coerceFields([channels], { channels: [{}] })).toEqual({});
   });
 });
+
+describe("FLOAT coercion", () => {
+  const gain = makeConfigEntry({ key: "gain", type: ConfigEntryType.FLOAT });
+
+  test("coerces a finite string to a number and passes numbers through", () => {
+    expect(coerceFields([gain], { gain: "1.5" })).toEqual({ gain: 1.5 });
+    expect(coerceFields([gain], { gain: 2.5 })).toEqual({ gain: 2.5 });
+  });
+
+  test("ships a ${var} reference verbatim instead of dropping the field", () => {
+    expect(coerceFields([gain], { gain: "${mic_gain}" })).toEqual({
+      gain: "${mic_gain}",
+    });
+  });
+
+  test("ships junk verbatim instead of prefix-parsing it", () => {
+    // parseFloat("50Hz") is 50 — a silent rewrite; the backend should see
+    // and flag the real value.
+    expect(coerceFields([gain], { gain: "50Hz" })).toEqual({ gain: "50Hz" });
+  });
+
+  test("ships non-finite input verbatim instead of a JSON-null Infinity", () => {
+    expect(coerceFields([gain], { gain: "Infinity" })).toEqual({ gain: "Infinity" });
+    // A number input accepts 1e309, so the stored value can be a numeric
+    // Infinity/NaN — those must stringify too, not JSON-serialize to null.
+    expect(coerceFields([gain], { gain: Number.POSITIVE_INFINITY })).toEqual({
+      gain: "Infinity",
+    });
+    expect(coerceFields([gain], { gain: Number.NaN })).toEqual({ gain: "NaN" });
+  });
+
+  test("coerces a 0x literal through strict Number, not parseFloat's 0", () => {
+    expect(coerceFields([gain], { gain: "0x10" })).toEqual({ gain: 16 });
+  });
+});
+
+describe("BOOLEAN coercion", () => {
+  const enabled = makeConfigEntry({ key: "enabled", type: ConfigEntryType.BOOLEAN });
+
+  test("passes booleans through and coerces YAML spellings", () => {
+    expect(coerceFields([enabled], { enabled: true })).toEqual({ enabled: true });
+    expect(coerceFields([enabled], { enabled: "yes" })).toEqual({ enabled: true });
+    expect(coerceFields([enabled], { enabled: "off" })).toEqual({ enabled: false });
+  });
+
+  test("ships a ${var} reference verbatim instead of false", () => {
+    expect(coerceFields([enabled], { enabled: "${enable_foo}" })).toEqual({
+      enabled: "${enable_foo}",
+    });
+  });
+
+  test("ships junk verbatim instead of false", () => {
+    expect(coerceFields([enabled], { enabled: "maybe" })).toEqual({
+      enabled: "maybe",
+    });
+  });
+
+  test("ships a non-string primitive verbatim without stringifying", () => {
+    expect(coerceFields([enabled], { enabled: 1 })).toEqual({ enabled: 1 });
+  });
+});

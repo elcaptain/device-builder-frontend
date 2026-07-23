@@ -1,18 +1,22 @@
 import { html, nothing } from "lit";
 import type { ConfigEntry } from "../../../api/types/config-entries.js";
 import { chipNameToVariant } from "../../../util/chip-variant.js";
-import { nearCanonicalOption } from "../../../util/config-validation.js";
+import { isValuePresent, nearCanonicalOption } from "../../../util/config-validation.js";
+import { isHexColor } from "../../../util/label-style.js";
 import { renderOptionStack } from "../../../util/option-stack.js";
 import { parseYamlBoolean, YamlRawValue } from "../../../util/yaml-serialize.js";
+import { coerceValueToEntryType } from "../../../util/coerce-entry-value.js";
 import type { OptionsComboboxValueChange } from "../../options-combobox-event.js";
 import {
-  coerceValueToEntryType,
   effectiveDisabled,
   fieldKeyAttr,
   labelFor,
   renderFieldError,
   renderHelpLink,
   renderLabel,
+  renderStringField,
+  renderSuggestionSelect,
+  renderUnparseableScalarField,
   renderYamlOnlyFallbackIfNonPrimitive,
   type RenderCtx,
 } from "../config-entry-renderers-shared.js";
@@ -53,14 +57,16 @@ export {
 // YAML editor reflects ON in the form view (issue device-builder#923).
 export function renderBooleanField(entry: ConfigEntry, path: string[], ctx: RenderCtx) {
   const raw = ctx.getAt(path);
-  // A list / mapping under a boolean-shaped catalog field renders
-  // unchecked (``parseYamlBoolean`` returns null), but the first
-  // user toggle emits ``true`` and clobbers the YAML structure.
-  // Bail to the YAML-only notice instead.
+  // Anything ``parseYamlBoolean`` can't read renders unchecked and the
+  // first toggle clobbers it: non-primitive shapes get the YAML-only
+  // notice, unparseable primitives stay editable text (#1368).
   const bail = renderYamlOnlyFallbackIfNonPrimitive(entry, path, ctx, raw);
   if (bail) return bail;
-  const effective = raw === undefined || raw === null ? entry.default_value : raw;
-  const checked = parseYamlBoolean(effective) === true;
+  const parsed = parseYamlBoolean(raw);
+  if (parsed === null && isValuePresent(raw)) {
+    return renderUnparseableScalarField(entry, path, ctx, raw);
+  }
+  const checked = (raw == null ? parseYamlBoolean(entry.default_value) : parsed) === true;
   return html`
     <div class="switch-field" data-field-key=${fieldKeyAttr(path)}>
       <div class="field-info">${renderLabel(entry, ctx, { includeHelpLink: false })}</div>
@@ -124,37 +130,33 @@ function boardDerivedVariantDefault(
     : undefined;
 }
 
+// <input type="color"> represents only #rrggbb; the browser normalizes any
+// other value to #000000, so a named color or ${substitution} would render
+// as a plausible black swatch and the first pick would clobber it (#1371).
+export function renderColorField(entry: ConfigEntry, path: string[], ctx: RenderCtx) {
+  const raw = ctx.getAt(path);
+  if (isValuePresent(raw) && !isHexColor(String(raw))) {
+    return renderUnparseableScalarField(entry, path, ctx, raw);
+  }
+  return renderStringField(entry, "color", path, ctx);
+}
+
 export function renderSelectField(entry: ConfigEntry, path: string[], ctx: RenderCtx) {
   const raw = ctx.getAt(path);
   const bail = renderYamlOnlyFallbackIfNonPrimitive(entry, path, ctx, raw);
   if (bail) return bail;
   const value = String(raw ?? "");
+  const onSelectChange = (e: Event) =>
+    ctx.emitChange(
+      path,
+      coerceValueToEntryType(entry, (e.target as unknown as { value: string }).value)
+    );
   const invalid = ctx.errorAt(path) !== null;
   const disabled = effectiveDisabled(entry, ctx);
   // Featured suggestions override options — board author narrowed the choice.
   // Always strict select; suggestions are a closed set.
   if (entry.suggestions && entry.suggestions.length > 0) {
-    const valueLower = value.toLowerCase();
-    return html`
-      <div class="field" data-field-key=${fieldKeyAttr(path)}>
-        ${renderLabel(entry, ctx)}
-        <wa-select
-          class=${invalid ? "invalid" : ""}
-          ?disabled=${disabled}
-          placeholder=${String(entry.default_value ?? "")}
-          @change=${(e: Event) =>
-            ctx.emitChange(path, (e.target as unknown as { value: string }).value)}
-        >
-          ${entry.suggestions.map((s) => {
-            const v = String(s);
-            return html`<wa-option value=${v} ?selected=${v.toLowerCase() === valueLower}
-              >${v}</wa-option
-            >`;
-          })}
-        </wa-select>
-        ${renderFieldError(path, ctx)}
-      </div>
-    `;
+    return renderSuggestionSelect(entry, path, value, invalid, disabled, ctx);
   }
   // The device's ESP32 variant, used to filter per-variant options (and derive
   // the esp32 variant default below); resolved once per render.
@@ -216,8 +218,7 @@ export function renderSelectField(entry: ConfigEntry, path: string[], ctx: Rende
         ?disabled=${disabled}
         .withClear=${clearable}
         placeholder=${placeholder}
-        @change=${(e: Event) =>
-          ctx.emitChange(path, (e.target as unknown as { value: string }).value)}
+        @change=${onSelectChange}
       >
         ${
           clearable

@@ -1,8 +1,8 @@
 import type { ConfigEntry } from "../../api/types/config-entries.js";
 import { ConfigEntryType } from "../../api/types/config-entries.js";
+import { coerceValueToEntryType } from "../../util/coerce-entry-value.js";
 import { coerceIntFieldValue } from "../../util/int-input.js";
 import { asMappingList, asRecord } from "../../util/nested-values.js";
-import { parseYamlBoolean } from "../../util/yaml-serialize.js";
 
 /**
  * Coerce raw form values for the WS payload: numbers / booleans to
@@ -51,10 +51,22 @@ export function coerceFields(
     if (entry.type === ConfigEntryType.INTEGER && entry.display_format !== "hex") {
       out[entry.key] = coerceIntFieldValue(raw);
     } else if (entry.type === ConfigEntryType.FLOAT) {
-      const n = typeof raw === "number" ? raw : Number.parseFloat(String(raw));
-      if (!Number.isNaN(n)) out[entry.key] = n;
+      // Strict coercion: unparseable input (a ${var} reference, junk like
+      // "50Hz") ships verbatim so the backend flags it — parseFloat's
+      // prefix parsing silently rewrote "50Hz" to 50, and the NaN branch
+      // silently dropped the field from the payload (#1350). Non-finite
+      // numbers (a typed 1e309 becomes Infinity) stringify too: JSON has
+      // no Infinity/NaN and they'd ship as null.
+      out[entry.key] =
+        typeof raw === "number" && Number.isFinite(raw)
+          ? raw
+          : coerceValueToEntryType(entry, String(raw));
     } else if (entry.type === ConfigEntryType.BOOLEAN) {
-      out[entry.key] = parseYamlBoolean(raw) === true;
+      // Junk and ${var} references ship verbatim so the backend resolves
+      // or rejects the real value — `=== true` flattened it to false (#1356).
+      // Non-string primitives (a stored `1`) also ship verbatim; String()
+      // would change their YAML type.
+      out[entry.key] = typeof raw === "string" ? coerceValueToEntryType(entry, raw) : raw;
     } else {
       out[entry.key] = raw;
     }

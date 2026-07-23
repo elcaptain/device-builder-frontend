@@ -171,6 +171,41 @@ export class YamlRawValue {
   }
 }
 
+/**
+ * A flow-authored scalar list inside a nested mapping or list-item field
+ * (``data: [1, 2] # note``), so a sibling-field edit re-emits the same
+ * single flow line with its trailing comment (#1381). An ``Array``
+ * subclass so every array consumer works unchanged; a form edit of the
+ * list itself writes a plain array back, which re-emits canonically.
+ * Top-level flow keys use ``KeyMeta.flowList`` instead (key-sticky:
+ * style survives list edits there) — don't unify the two.
+ */
+export class YamlFlowList extends Array<string | number | boolean> {
+  // Derived arrays (filter/map/slice) come back plain, keeping the
+  // "form edits write plain arrays back" contract uniform — without this
+  // a removeAt filter minted a comment-less wrapper that kept flow style
+  // but silently dropped the comment.
+  static get [Symbol.species](): ArrayConstructor {
+    return Array;
+  }
+
+  // Non-enumerable (set in ``wrap``) so deep-equality, JSON, and spreads
+  // see a plain array of items; only the serializer reads it.
+  declare comment: string | undefined;
+
+  /** ``new Array(n)`` semantics make the constructor a trap; build via
+   *  push instead. */
+  static wrap(
+    items: readonly (string | number | boolean)[],
+    comment: string
+  ): YamlFlowList {
+    const list = new YamlFlowList();
+    list.push(...items);
+    Object.defineProperty(list, "comment", { value: comment, enumerable: false });
+    return list;
+  }
+}
+
 /** Options for ``serializeYamlValues``. */
 export interface SerializeYamlOptions {
   /**
@@ -217,7 +252,7 @@ export interface SerializeYamlOptions {
  * ``YamlRawValue`` values inside an item are emitted with the
  * same inline-header / body shape as the top-level branch.
  */
-function serializeListItem(
+export function serializeListItem(
   item: unknown,
   indent: string,
   options: SerializeYamlOptions
@@ -274,7 +309,8 @@ function serializeListItem(
           (it) => !isPlainObject(it) && !Array.isArray(it) && !isLambdaValue(it)
         );
         if (scalarItems) {
-          lines.push(`${prefix}${k}: [${v.map(formatYamlFlowScalar).join(", ")}]`);
+          const comment = v instanceof YamlFlowList ? (v.comment ?? "") : "";
+          lines.push(`${prefix}${k}: ${formatYamlFlowList(v)}${comment}`);
           return;
         }
         lines.push(`${prefix}${k}:`);
@@ -358,6 +394,10 @@ export function serializeYamlValues(
     }
     if (Array.isArray(val)) {
       if (val.length === 0) continue;
+      if (val instanceof YamlFlowList) {
+        lines.push(`${indent}${key}: ${formatYamlFlowList(val)}${val.comment ?? ""}`);
+        continue;
+      }
       lines.push(`${indent}${key}:`);
       for (const item of val) {
         const itemLines = serializeListItem(item, indent, options);
@@ -528,6 +568,11 @@ function formatYamlFlowScalar(v: unknown): string {
   return formatYamlScalar(v);
 }
 
+/** The ``[a, b]`` body of a flow list — the one owner of flow-list grammar. */
+export function formatYamlFlowList(items: readonly unknown[]): string {
+  return `[${items.map(formatYamlFlowScalar).join(", ")}]`;
+}
+
 // ESPHome's YAML loader accepts the YAML 1.1 truthy/falsy spellings
 // plus ``enable`` / ``disable``, all case-insensitive
 // (https://esphome.io/guides/yaml#scalars). The minimal scalar parser
@@ -547,7 +592,9 @@ const YAML_FALSE_VALUES = new Set(["false", "no", "off", "disable"]);
 export function parseYamlBoolean(v: unknown): boolean | null {
   if (typeof v === "boolean") return v;
   if (typeof v === "string") {
-    const lower = v.toLowerCase();
+    // Trim like the int/float coercers: YAML plain scalars never carry
+    // surrounding whitespace, but form input can.
+    const lower = v.trim().toLowerCase();
     if (YAML_TRUE_VALUES.has(lower)) return true;
     if (YAML_FALSE_VALUES.has(lower)) return false;
   }

@@ -5,14 +5,12 @@ export const onboardingWizardStyles = css`
     --width: min(520px, calc(100vw - 24px));
   }
 
-  /* Let the longer step titles wrap instead of truncating (the base dialog
-     ellipsizes by default), so nothing is chopped on a narrow / mobile sheet. */
-  esphome-base-dialog::part(title-text) {
-    white-space: normal;
+  esphome-base-dialog::part(close-button) {
+    display: none;
   }
 
-  esphome-base-dialog.mandatory::part(close-button) {
-    display: none;
+  esphome-base-dialog::part(body) {
+    padding-top: var(--wa-space-s);
   }
 
   .body {
@@ -20,8 +18,15 @@ export const onboardingWizardStyles = css`
     flex-direction: column;
     gap: var(--wa-space-m);
     box-sizing: border-box;
-    height: 380px;
+    min-height: 260px;
     overflow-y: auto;
+  }
+
+  /* The desktop flow's tallest screen is the usage question (two cards
+     with multi-line copy), so every step of that flow shares its height.
+     Non-desktop flows never show it and keep the shorter base above. */
+  .body--usage-flow {
+    min-height: 320px;
   }
 
   /* The existing-server step carries the toggle plus the always-visible
@@ -45,9 +50,52 @@ export const onboardingWizardStyles = css`
     color: var(--esphome-primary);
   }
 
+  .choices {
+    margin-top: var(--wa-space-xs);
+  }
+
+  /* Banner atop the experience screen when the user picked a standalone
+     setup while another Device Builder was discovered on the network. */
+  .existing-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--wa-space-s);
+    padding: var(--wa-space-s) var(--wa-space-m);
+    background: color-mix(in srgb, var(--esphome-warning, #f59e0b), transparent 90%);
+    border: 1px solid color-mix(in srgb, var(--esphome-warning, #f59e0b), transparent 65%);
+    border-radius: var(--wa-border-radius-m);
+    font-size: var(--wa-font-size-s);
+    line-height: 1.5;
+    color: var(--wa-color-text-normal);
+    text-align: left;
+  }
+
+  .existing-notice wa-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-size: 18px;
+    color: var(--esphome-warning, #f59e0b);
+  }
+
+  /* In-sentence action; a bare styled button keeps the banner one
+     paragraph instead of adding a second action row to the dialog. */
+  .notice-link {
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    color: var(--esphome-primary);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .notice-link:hover {
+    color: var(--esphome-primary-hover, var(--esphome-primary));
+  }
+
   .welcome-logo {
-    width: 64px;
-    height: 64px;
+    width: 88px;
+    height: 88px;
   }
 
   .welcome-screen,
@@ -128,7 +176,12 @@ export const onboardingWizardStyles = css`
   }
 
   .welcome-screen {
-    gap: var(--wa-space-xl);
+    gap: var(--wa-space-l);
+  }
+
+  .welcome-screen .intro {
+    font-size: var(--wa-font-size-m);
+    max-width: 36ch;
   }
 
   .tour-offer-icon {
@@ -143,12 +196,13 @@ export const onboardingWizardStyles = css`
     color: var(--wa-color-text-normal);
   }
 
-  /* Step dots show progress through the wizard without numbering, which
-     would be wrong when the step count varies by environment / use-case. */
   .steps {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
     display: flex;
     gap: var(--wa-space-2xs);
-    justify-content: center;
   }
 
   .step-dot {
@@ -163,6 +217,8 @@ export const onboardingWizardStyles = css`
   }
 
   .actions {
+    position: relative;
+    width: 100%;
     display: flex;
     flex-direction: row;
     justify-content: flex-end;
@@ -174,12 +230,19 @@ export const onboardingWizardStyles = css`
     flex: 1;
   }
 
-  /* On phones the dialog goes full-screen (fullscreenMobileDialog), so the
-     body fills the sheet instead of a fixed height — the switch and its
-     description then have room without scrolling. */
+  .actions .btn {
+    border: var(--wa-border-width-s) solid transparent;
+  }
+
+  .actions .btn--cancel {
+    border-color: var(--wa-color-surface-border);
+  }
+
   @media (max-width: 600px) {
-    .body {
+    .body,
+    .body:has(.existing-server) {
       height: 100%;
+      min-height: 0;
     }
   }
 `;
